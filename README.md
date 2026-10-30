@@ -1,6 +1,6 @@
 # Ai-earn
 
-Ai-earn is in early development. It currently contains an offline status command, an **experimental local authentication component**, and internal Phase 3 storage, opportunity-draft, task-plan, scheduling-queue, local task-review, order-estimate and invoice-draft experiments for disposable tests. There is no dashboard, opportunity tracker, customer data, automation or payment processing. It makes no income claims and is not production-ready. Phase 3 is in progress; see [phase status](docs/PHASE_STATUS.md).
+Ai-earn is in early development. It currently contains an offline status command, an **experimental local authentication component**, and internal Phase 3 storage, opportunity-draft, task-plan, scheduling-queue, local task-review, order-estimate, invoice-draft and unverified-payment-placeholder experiments for disposable tests. There is no dashboard, opportunity tracker, customer data, automation or payment processing. It makes no income claims and is not production-ready. Phase 3 is in progress; see [phase status](docs/PHASE_STATUS.md).
 
 **Windows:** the user reported the experimental offline authentication path passed its Windows tests at `72241cc`. Phase 2 passed with documented limitations for this offline increment only; it is not production-ready. Use only disposable test credentials, and do not store customer or financial data.
 

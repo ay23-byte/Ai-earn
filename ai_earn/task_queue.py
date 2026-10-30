@@ -11,7 +11,7 @@ import sqlite3
 from .auth import AccessDenied, AuthService
 from .opportunity_drafts import DraftError, _digest, _key, _record_id, _title
 from .state_authorization import _authorized_transaction
-from .state_storage import StateStorage, StateStorageError
+from .state_storage import StateStorage, StateStorageError, _check_queue_integrity
 
 
 _MAX_TIME = 4_102_444_800  # 2100-01-01 UTC; avoid unbounded timestamp arithmetic.
@@ -35,14 +35,15 @@ def _integer(value, minimum, maximum):
 
 
 def _version(conn):
-    if conn.execute("PRAGMA user_version").fetchone()[0] not in (7, 8):
-        raise StateStorageError("State schema version 7 or 8 is required for the queue.")
+    if conn.execute("PRAGMA user_version").fetchone()[0] not in (7, 8, 9):
+        raise StateStorageError("State schema version 7, 8 or 9 is required for the queue.")
 
 
 def _owned(conn, owner, record_id):
     row = conn.execute("SELECT * FROM task_queue WHERE id=? AND owner_id=?", (record_id, owner)).fetchone()
     if row is None:
         raise AccessDenied("Access denied.")
+    _check_queue_integrity(conn, owner=owner, record_id=record_id)
     return row
 
 
@@ -52,9 +53,17 @@ def _retry(conn, owner, key, digest, kind):
         return None
     if row["resource_type"] != kind or not hmac.compare_digest(row["request_hash"], digest):
         raise QueueError("Operation key was already used for a different request.")
-    table = "queue_leases" if kind == "queue_lease" else "task_queue"
-    if conn.execute(f"SELECT 1 FROM {table} WHERE id=? AND owner_id=?", (row["resource_id"], owner)).fetchone() is None:
-        raise StateStorageError("Stored operation result is unavailable.")
+    if kind == "queue_lease":
+        result = conn.execute("SELECT queue_id FROM queue_leases WHERE id=? AND owner_id=?", (row["resource_id"], owner)).fetchone()
+        if result is None:
+            raise StateStorageError("Stored operation result is unavailable.")
+        queue_id = result["queue_id"]
+    else:
+        queue_id = row["resource_id"]
+    try:
+        _owned(conn, owner, queue_id)
+    except AccessDenied as exc:
+        raise StateStorageError("Stored operation result is unavailable.") from exc
     return row["resource_id"]
 
 
@@ -121,6 +130,8 @@ class TaskQueue:
                                 "WHERE owner_id=? AND status='queued' AND available_at<=? "
                                 "AND (deadline_at=0 OR deadline_at>?) ORDER BY priority DESC, available_at, id LIMIT ?",
                                 (owner, now, now, limit)).fetchall()
+            for row in rows:
+                _check_queue_integrity(conn, owner=owner, record_id=row["id"])
             return [dict(row) for row in rows]
 
     def claim(self, token: str, record_id: str, *, operation_key: str, lease_seconds: int) -> str:

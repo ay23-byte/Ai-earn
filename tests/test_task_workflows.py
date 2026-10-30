@@ -269,6 +269,19 @@ class TaskWorkflowTests(unittest.TestCase):
         self.assertEqual(saved.get(self.alice, self.queued)["status"], "leased")
         self.assertFalse(saved.get_lease(self.alice, lease)["active"])
 
+    def test_v8_backup_refuses_inconsistent_queue_history(self):
+        lease = self.queue.claim(self.alice, self.queued, operation_key="claim", lease_seconds=30)
+        with closing(sqlite3.connect(self.state.path)) as conn, conn:
+            conn.execute("UPDATE queue_leases SET lease_until=lease_until+1 WHERE id=?", (lease,))
+            self.assertEqual(conn.execute("PRAGMA quick_check").fetchone()[0], "ok")
+            self.assertEqual(conn.execute("PRAGMA foreign_key_check").fetchall(), [])
+        copy = self.directory / "invalid-v8.sqlite3"
+        with self.assertRaises(StateStorageError):
+            self.state.backup_to(copy, confirmed=True)
+        self.assertFalse(copy.exists())
+        with self.assertRaises(StateStorageError):
+            self.queue.get_lease(self.alice, lease)
+
     def test_schema_rejects_illegal_states_and_output_combinations(self):
         ident = self.create()
         for status, digest, size in (("paid", None, None), ("completed", None, None), ("planned", b"a"*32, 10), ("pending_review", b"a"*31, 10)):
