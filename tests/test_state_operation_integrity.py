@@ -222,11 +222,119 @@ class OperationIntegrityTests(unittest.TestCase):
         self.assertEqual(restored_queue.claim(token, ids["queue"], operation_key="a-lease", lease_seconds=60), ids["lease"])
         self.assertFalse(restored_queue.get_lease(token, ids["lease"])["active"])
 
-    def test_removing_matching_audit_and_operation_can_escape_balance_check(self):
+    def test_removing_transition_audit_and_operation_can_escape_checks(self):
+        OpportunityDrafts(self.auth, self.state).archive(self.alice, self.ids["a"]["opp"], operation_key="archive")
         with self.state.transaction() as conn:
-            conn.execute("DELETE FROM state_operations WHERE operation_key='a-order'")
-            conn.execute("DELETE FROM state_audit WHERE event='order_draft_created' AND resource_id=?", (self.ids["a"]["order"],))
-        self.state.backup_to(self.directory / "missing-pair.sqlite3", confirmed=True)
+            conn.execute("DELETE FROM state_operations WHERE operation_key='archive'")
+            conn.execute("DELETE FROM state_audit WHERE event='draft_archived' AND resource_id=?", (self.ids["a"]["opp"],))
+        self.state.backup_to(self.directory / "missing-transition-pair.sqlite3", confirmed=True)
+
+    def test_missing_creation_audit_and_operation_pair_is_rejected(self):
+        events = {"opp": "draft_created", "plan": "task_planned", "order": "order_draft_created",
+                  "invoice": "invoice_draft_created", "queue": "queue_enqueued", "lease": "queue_leased",
+                  "workflow": "workflow_created", "observation": "payment_observation_created"}
+        for kind, event in events.items():
+            with self.subTest(kind=kind):
+                resource = self.ids["a"]["queue" if kind == "lease" else kind]
+                with self.state.transaction() as conn:
+                    operation = tuple(conn.execute("SELECT * FROM state_operations WHERE operation_key=?", ("a-"+kind,)).fetchone())
+                    audit = tuple(conn.execute("SELECT * FROM state_audit WHERE event=? AND resource_id=?", (event, resource)).fetchone())
+                    conn.execute("DELETE FROM state_operations WHERE operation_key=?", ("a-"+kind,))
+                    conn.execute("DELETE FROM state_audit WHERE id=?", (audit[0],))
+                target = self.directory / f"missing-create-{kind}.sqlite3"
+                try:
+                    with self.assertRaises(StateStorageError):
+                        self.state.backup_to(target, confirmed=True)
+                    self.assertFalse(target.exists())
+                finally:
+                    with self.state.transaction() as conn:
+                        conn.execute("INSERT INTO state_operations VALUES (?,?,?,?,?)", operation)
+                        conn.execute("INSERT INTO state_audit VALUES (?,?,?,?,?,?)", audit)
+
+    def test_duplicate_creation_event_and_operation_is_rejected(self):
+        with self.state.transaction() as conn:
+            audit = conn.execute("SELECT occurred_at, actor_id, event, resource_type, resource_id FROM state_audit WHERE event='order_draft_created' AND resource_id=?", (self.ids["a"]["order"],)).fetchone()
+            operation = conn.execute("SELECT owner_id, request_hash, resource_type, resource_id FROM state_operations WHERE operation_key='a-order'").fetchone()
+            conn.execute("INSERT INTO state_audit(occurred_at,actor_id,event,resource_type,resource_id) VALUES(?,?,?,?,?)", tuple(audit))
+            conn.execute("INSERT INTO state_operations VALUES (?,?,?,?,?)", (operation[0], "duplicate", operation[1], operation[2], operation[3]))
+        dest = self.directory / "duplicate-creation.sqlite3"
+        with self.assertRaises(StateStorageError):
+            self.state.backup_to(dest, confirmed=True)
+        self.assertFalse(dest.exists())
+
+    def test_creation_pair_corruption_in_copy_is_rejected(self):
+        def corrupt(source, destination):
+            _copy_database(source, destination)
+            destination.execute("DELETE FROM state_operations WHERE operation_key='a-order'")
+            destination.execute("DELETE FROM state_audit WHERE event='order_draft_created' AND resource_id=?", (self.ids["a"]["order"],))
+            destination.commit()
+        dest = self.directory / "bad-create-copy.sqlite3"
+        with patch("ai_earn.state_storage._copy_database", side_effect=corrupt):
+            with self.assertRaises(StateStorageError):
+                self.state.backup_to(dest, confirmed=True)
+        self.assertTrue(dest.exists())
+        with self.assertRaises(StateStorageError):
+            StateStorage(dest).backup_to(self.directory / "bad-create-restore.sqlite3", confirmed=True)
+        with self.state.transaction() as conn:
+            self.assertEqual(conn.execute("SELECT count(*) FROM state_operations WHERE operation_key='a-order'").fetchone()[0], 1)
+
+    def test_creation_pair_checks_apply_in_v3_through_v9(self):
+        for version in range(3, 10):
+            with self.subTest(version=version):
+                source = self.state if version == 9 else StateStorage(self.directory / f"v{version}.sqlite3")
+                ident = OpportunityDrafts(self.auth, source).create(self.alice, "Version test", operation_key="version-test")
+                with source.transaction() as conn:
+                    conn.execute("DELETE FROM state_operations WHERE operation_key='version-test'")
+                    conn.execute("DELETE FROM state_audit WHERE event='draft_created' AND resource_id=?", (ident,))
+                target = self.directory / f"no-creation-v{version}.sqlite3"
+                with self.assertRaises(StateStorageError):
+                    source.backup_to(target, confirmed=True)
+                self.assertFalse(target.exists())
+
+    def test_missing_creation_pair_blocks_migration_before_backup(self):
+        source = StateStorage(self.directory / "v8.sqlite3")
+        ident = OpportunityDrafts(self.auth, source).create(self.alice, "Synthetic", operation_key="missing-create")
+        with source.transaction() as conn:
+            conn.execute("DELETE FROM state_operations WHERE operation_key='missing-create'")
+            conn.execute("DELETE FROM state_audit WHERE event='draft_created' AND resource_id=?", (ident,))
+        dest = self.directory / "blocked-missing-create.sqlite3"
+        with self.assertRaises(StateStorageError):
+            source.migrate_to_v9(dest, confirmed=True)
+        self.assertFalse(dest.exists())
+        with source.transaction() as conn:
+            self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 8)
+            self.assertEqual(conn.execute("SELECT count(*) FROM opportunity_drafts WHERE id=?", (ident,)).fetchone()[0], 1)
+
+    def test_post_migration_missing_creation_audit_rolls_back(self):
+        from ai_earn.state_storage import _apply_v3
+        source = StateStorage(self.directory / "v2.sqlite3")
+        def corrupt(conn):
+            _apply_v3(conn)
+            conn.execute("INSERT INTO opportunity_drafts VALUES (?,?,?,?,?,?)", ("f"*32, "a"*32, "Synthetic", "draft", 1, 1))
+        dest = self.directory / "before-bad-upgrade.sqlite3"
+        with patch("ai_earn.state_storage._apply_v3", side_effect=corrupt):
+            with self.assertRaises(StateStorageError):
+                source.migrate_to_v3(dest, confirmed=True)
+        self.assertTrue(dest.exists())
+        for checked in (source, StateStorage(dest)):
+            with checked.transaction() as conn:
+                self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 2)
+                self.assertIsNone(conn.execute("SELECT name FROM sqlite_master WHERE name='opportunity_drafts'").fetchone())
+
+    def test_missing_second_lease_pair_is_rejected(self):
+        queue = TaskQueue(self.auth, self.state)
+        ident = queue.enqueue(self.alice, "Two attempts", operation_key="new-queue", backoff_seconds=0)
+        lease = queue.claim(self.alice, ident, operation_key="first-claim", lease_seconds=60)
+        queue.retry(self.alice, ident, lease, operation_key="retry")
+        queue.claim(self.alice, ident, operation_key="second-claim", lease_seconds=60)
+        with self.state.transaction() as conn:
+            event = conn.execute("SELECT id FROM state_audit WHERE event='queue_leased' AND resource_id=? ORDER BY id DESC LIMIT 1", (ident,)).fetchone()[0]
+            conn.execute("DELETE FROM state_audit WHERE id=?", (event,))
+            conn.execute("DELETE FROM state_operations WHERE operation_key='second-claim'")
+        dest = self.directory / "missing-second-lease.sqlite3"
+        with self.assertRaises(StateStorageError):
+            self.state.backup_to(dest, confirmed=True)
+        self.assertFalse(dest.exists())
 
     def test_reserved_audit_type_collision_rolls_back_upgrade(self):
         source = StateStorage(self.directory / "v6.sqlite3")
