@@ -95,10 +95,10 @@ class AuthService:
     def register(self, username: str, password: str) -> str:
         username = _username(username)
         secret = _password(password)
-        now = int(self.clock())
         recovery = secrets.token_urlsafe(32)
         result = "ok"
         with self.storage.transaction() as conn:
+            now = int(self.clock())
             if not _attempt(conn, "register", _subject(username), now):
                 result = "limited"
             elif conn.execute("SELECT 1 FROM accounts WHERE username=?", (username,)).fetchone():
@@ -128,10 +128,10 @@ class AuthService:
         except AuthError:
             secret = b"invalid credential"
             password_valid = False
-        now = int(self.clock())
         result = "invalid"
         token = None
         with self.storage.transaction() as conn:
+            now = int(self.clock())
             if not _attempt(conn, "login", _subject(username), now):
                 result = "limited"
             else:
@@ -157,8 +157,8 @@ class AuthService:
         digest = _token_hash(token)
         if digest is None:
             raise AccessDenied("Authentication required.")
-        now = int(self.clock())
         with self.storage.transaction() as conn:
+            now = int(self.clock())
             session = conn.execute(
                 "SELECT accounts.id, accounts.username FROM sessions JOIN accounts ON accounts.id=sessions.account_id WHERE sessions.token_hash=? AND sessions.revoked_at IS NULL AND sessions.expires_at>?",
                 (digest, now),
@@ -177,8 +177,8 @@ class AuthService:
         digest = _token_hash(token)
         if digest is None:
             raise AccessDenied("Authentication required.")
-        now = int(self.clock())
         with self.storage.transaction() as conn:
+            now = int(self.clock())
             session = conn.execute("SELECT account_id FROM sessions WHERE token_hash=? AND revoked_at IS NULL AND expires_at>?", (digest, now)).fetchone()
             if session:
                 conn.execute("UPDATE sessions SET revoked_at=? WHERE token_hash=?", (now, digest))
@@ -198,10 +198,10 @@ class AuthService:
         digest = _token_hash(token)
         if digest is None:
             raise AccessDenied("Authentication required.")
-        now = int(self.clock())
         result = "denied"
         replacement = None
         with self.storage.transaction() as conn:
+            now = int(self.clock())
             account = conn.execute(
                 "SELECT accounts.id, accounts.username FROM sessions JOIN accounts ON accounts.id=sessions.account_id WHERE sessions.token_hash=? AND sessions.revoked_at IS NULL AND sessions.expires_at>?",
                 (digest, now),
@@ -225,10 +225,10 @@ class AuthService:
         username = _username(username)
         secret = _password(new_password)
         digest = _token_hash(recovery_code)
-        now = int(self.clock())
         result = "invalid"
         new_recovery = None
         with self.storage.transaction() as conn:
+            now = int(self.clock())
             if not _attempt(conn, "recover", _subject(username), now):
                 result = "limited"
             else:
