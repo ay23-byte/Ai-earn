@@ -32,7 +32,9 @@ def run(action: str, environ: Mapping[str, str], stdin: TextIO, out: TextIO, err
         path = environ.get("AI_EARN_AUTH_DB", "")
         if not path:
             raise AuthError("Set AI_EARN_AUTH_DB to an absolute path in a private directory.")
-        service = AuthService(AuthStorage(Path(path)))
+        # Only registration may initialize storage. A missing login/recovery
+        # database must not be silently replaced by an empty one.
+        service = AuthService(AuthStorage(Path(path), create=(action == "register")))
         out.write("Username: ")
         out.flush()
         username = stdin.readline().rstrip("\r\n")

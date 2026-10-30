@@ -43,14 +43,14 @@ def _windows_auth_verified() -> bool:
 
 
 class AuthStorage:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, *, create: bool = True):
         if os.name != "posix" and not (os.name == "nt" and _windows_auth_verified()):
             raise StorageError("Authentication is disabled on this platform until filesystem protections are verified.")
         self.path = Path(path).expanduser()
         if not self.path.is_absolute():
             raise StorageError("Authentication database path must be absolute.")
         self._check_parent()
-        self._ensure_file(create=True)
+        self._ensure_file(create=create)
         try:
             with self.transaction() as connection:
                 version = connection.execute("PRAGMA user_version").fetchone()[0]
@@ -58,6 +58,8 @@ class AuthStorage:
                     "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
                 ).fetchall()
                 if version == 0 and not tables:
+                    if not create:
+                        raise StorageError("Authentication database is not initialized; no changes made.")
                     for statement in _SCHEMA:
                         connection.execute(statement)
                     connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
@@ -107,14 +109,16 @@ class AuthStorage:
             elif info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) & 0o077:
                 raise StorageError("Authentication database must be owned by and accessible only to the current user.")
         except OSError as exc:
-            raise StorageError("Authentication database could not be opened securely.") from exc
+            raise StorageError("Authentication database is missing or could not be opened securely.") from exc
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
         self._ensure_file()
         connection = None
         try:
-            connection = sqlite3.connect(self.path, isolation_level=None, timeout=5)
+            # SQLite's normal open mode would recreate a file removed after the
+            # path check. Use read/write-existing mode for every transaction.
+            connection = sqlite3.connect(self.path.as_uri() + "?mode=rw", uri=True, isolation_level=None, timeout=5)
             connection.row_factory = sqlite3.Row
             connection.execute("PRAGMA foreign_keys = ON")
             connection.execute("BEGIN IMMEDIATE")

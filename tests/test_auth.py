@@ -357,6 +357,37 @@ class AuthenticationTests(unittest.TestCase):
             with self.assertRaises(StorageError):
                 AuthStorage(self.path)
 
+    def test_open_existing_mode_rejects_missing_and_empty_database(self):
+        missing = Path(self.tmp.name) / "missing.sqlite3"
+        with self.assertRaises(StorageError):
+            AuthStorage(missing, create=False)
+        self.assertFalse(missing.exists())
+        empty = Path(self.tmp.name) / "empty.sqlite3"
+        empty.touch(mode=0o600)
+        with self.assertRaises(StorageError):
+            AuthStorage(empty, create=False)
+        self.assertEqual(empty.stat().st_size, 0)
+        self.service.register("alice", self.password)
+        existing = AuthService(AuthStorage(self.path, create=False), self.clock)
+        self.assertEqual(existing.profile(existing.login("alice", self.password))["username"], "alice")
+
+    def test_removed_file_between_verification_and_open_is_not_recreated(self):
+        ensure = self.store._ensure_file
+        def remove_after_check(*args, **kwargs):
+            ensure(*args, **kwargs)
+            self.path.unlink()
+        with patch.object(self.store, "_ensure_file", side_effect=remove_after_check):
+            with self.assertRaises(sqlite3.Error):
+                self.service.profile("a" * 43)
+        self.assertFalse(self.path.exists())
+
+    def test_database_uri_handles_special_characters(self):
+        path = Path(self.tmp.name) / "db # 100%.sqlite3"
+        service = AuthService(AuthStorage(path), self.clock)
+        service.register("alice", self.password)
+        existing = AuthService(AuthStorage(path, create=False), self.clock)
+        self.assertEqual(existing.profile(existing.login("alice", self.password))["username"], "alice")
+
     def test_missing_database_during_use_fails_closed(self):
         self.path.unlink()
         with self.assertRaises(StorageError):
