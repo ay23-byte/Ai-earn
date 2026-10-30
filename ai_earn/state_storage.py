@@ -560,6 +560,102 @@ def _check_creation_events(conn: sqlite3.Connection, version: int) -> None:
             raise StateStorageError("Queue lease audit history is inconsistent.")
 
 
+# These four services have exactly one irreversible transition, with no edits.
+# Preserve version-specific semantics if a future service adds transitions.
+_TERMINAL_TRANSITIONS = (
+    (3, "opportunity_drafts", "opportunity_draft", "draft_created", "draft_archived", "archived"),
+    (4, "task_plans", "task_plan", "task_planned", "task_cancelled", "cancelled"),
+    (5, "order_drafts", "order_draft", "order_draft_created", "order_draft_cancelled", "cancelled"),
+    (6, "invoice_drafts", "invoice_draft", "invoice_draft_created", "invoice_draft_cancelled", "cancelled"),
+)
+
+
+def _check_terminal_transition_events(conn: sqlite3.Connection, version: int) -> None:
+    """Check selected one-way status/audit consistency, not authenticity.
+
+    Audit IDs establish insertion order; wall clocks can repeat or move. This
+    cannot prove history if record and events are consistently altered together.
+    """
+    for minimum, table, kind, created, terminal, final_status in _TERMINAL_TRANSITIONS:
+        if version < minimum:
+            continue
+        inconsistent = conn.execute(
+            f"SELECT 1 FROM {table} AS r LEFT JOIN ("
+            "SELECT actor_id, resource_id, "
+            "SUM(CASE WHEN event=? THEN 1 ELSE 0 END) AS n, "
+            "MIN(CASE WHEN event=? THEN id END) AS terminal_id, "
+            "MIN(CASE WHEN event=? THEN id END) AS creation_id "
+            "FROM state_audit WHERE resource_type=? AND event IN (?,?) "
+            "GROUP BY actor_id, resource_id) AS a "
+            "ON a.actor_id=r.owner_id AND a.resource_id=r.id "
+            "WHERE COALESCE(a.n, 0) != CASE WHEN r.status=? THEN 1 ELSE 0 END "
+            "OR (r.status=? AND (a.creation_id IS NULL OR a.terminal_id<=a.creation_id)) LIMIT 1",
+            (terminal, terminal, created, kind, created, terminal, final_status, final_status),
+        ).fetchone()
+        if inconsistent is not None:
+            raise StateStorageError("State terminal transition audit is inconsistent.")
+
+
+# Versioned service-event transitions. These are consistency checks only; audit
+# events are not authenticated and identical cycles can be erased undetected.
+_MULTI_STEP_HISTORIES = (
+    (7, "task_queue", "task_queue", {
+        (None, "queue_enqueued"): "queued",
+        ("queued", "queue_leased"): "leased",
+        ("leased", "queue_retry"): "queued",
+        ("leased", "queue_recovered"): "queued",
+        ("leased", "queue_exhausted"): "exhausted",
+        ("queued", "queue_cancelled"): "cancelled",
+    }),
+    (8, "task_workflows", "task_workflow", {
+        (None, "workflow_created"): "planned",
+        ("planned", "workflow_started"): "in_progress",
+        ("planned", "workflow_cancelled"): "cancelled",
+        ("in_progress", "workflow_cancelled"): "cancelled",
+        ("pending_review", "workflow_cancelled"): "cancelled",
+        ("in_progress", "workflow_submitted"): "pending_review",
+        ("pending_review", "workflow_rejected"): "in_progress",
+        ("pending_review", "workflow_approved"): "completed",
+    }),
+    (9, "payment_observations", "payment_observation", {
+        (None, "payment_observation_created"): "unverified",
+        ("unverified", "payment_observation_flag"): "flagged",
+        ("flagged", "payment_observation_unflag"): "unverified",
+        ("unverified", "payment_observation_discard"): "discarded",
+        ("flagged", "payment_observation_discard"): "discarded",
+    }),
+)
+
+
+def _check_multistep_histories(conn: sqlite3.Connection, version: int) -> None:
+    """Replay recognized event sequences in insertion order, not wall time.
+
+    This checks every owner's records at snapshot/migration checkpoints. It
+    does not authenticate events, verify request hashes, or detect erased cycles.
+    The fixed table names and transition maps must change with future schemas.
+    """
+    for minimum, table, kind, transitions in _MULTI_STEP_HISTORIES:
+        if version < minimum:
+            continue
+        rows = conn.execute(
+            f"SELECT r.id, r.status, a.event FROM {table} AS r "
+            "LEFT JOIN state_audit AS a ON a.actor_id=r.owner_id AND a.resource_id=r.id "
+            "AND a.resource_type=? ORDER BY r.id, a.id", (kind,),
+        )
+        previous_id, expected_status, replayed = None, None, None
+        for ident, status, event in rows:
+            if ident != previous_id:
+                if previous_id is not None and replayed != expected_status:
+                    raise StateStorageError("State transition history is inconsistent.")
+                previous_id, expected_status, replayed = ident, status, None
+            step = (replayed, event)
+            if step not in transitions:
+                raise StateStorageError("State transition history is inconsistent.")
+            replayed = transitions[step]
+        if previous_id is not None and replayed != expected_status:
+            raise StateStorageError("State transition history is inconsistent.")
+
+
 def _check_proposed_amount_snapshots(conn: sqlite3.Connection, version: int) -> None:
     """Compare immutable draft snapshots; these are not financial evidence.
 
@@ -603,6 +699,9 @@ def _check_integrity(conn: sqlite3.Connection) -> None:
         _check_queue_integrity(conn)
     if version >= 3:
         _check_creation_events(conn, version)
+        _check_terminal_transition_events(conn, version)
+    if version >= 7:
+        _check_multistep_histories(conn, version)
 
 
 def _copy_database(source: sqlite3.Connection, destination: sqlite3.Connection) -> None:
