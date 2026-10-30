@@ -28,8 +28,8 @@ def _input(validator, value):
 
 
 def _check_version(conn: sqlite3.Connection) -> None:
-    if conn.execute("PRAGMA user_version").fetchone()[0] != 6:
-        raise StateStorageError("State schema version 6 is required for invoice drafts.")
+    if conn.execute("PRAGMA user_version").fetchone()[0] not in (6, 7):
+        raise StateStorageError("State schema version 6 or 7 is required for invoice drafts.")
 
 
 def _owned(conn: sqlite3.Connection, owner: str, record_id: str) -> sqlite3.Row:
