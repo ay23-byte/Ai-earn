@@ -1,4 +1,4 @@
-"""Disposable manual Windows terminal check; this does not enable Windows auth."""
+"""Disposable manual Windows terminal check using the configured development path."""
 
 from pathlib import Path
 import sys
@@ -71,10 +71,9 @@ def main(stdin=None, out=None, err=None) -> int:
             private_dir = Path(tmp) / "private"
             create_private_directory(private_dir)
             env = {"AI_EARN_ENV": "test", "AI_EARN_AUTH_DB": str(private_dir / "auth.sqlite3")}
-            # This override exists only in this short-lived test process. The
-            # application's default Windows gate remains unchanged.
-            with patch("ai_earn.auth_storage._windows_auth_verified", return_value=True), \
-                    patch("ai_earn.auth_cli._secret", side_effect=synthetic_secret):
+            # The gate and storage path are not patched; the wrapper only
+            # enforces the public synthetic password while calling real getpass.
+            with patch("ai_earn.auth_cli._secret", side_effect=synthetic_secret):
                 for index, (action, description) in enumerate((
                     ("register", "Register the disposable account; save its disposable recovery code."),
                     ("login", "Sign in, then press Enter to sign out."),

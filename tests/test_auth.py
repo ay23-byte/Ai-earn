@@ -353,7 +353,7 @@ class AuthenticationTests(unittest.TestCase):
         with self.assertRaises(StorageError):
             AuthStorage(other / "auth.sqlite3")
         self.assertFalse((other / "auth.sqlite3").exists())
-        with patch("ai_earn.auth_storage.os.name", "nt"):
+        with patch("ai_earn.auth_storage.os.name", "unsupported"):
             with self.assertRaises(StorageError):
                 AuthStorage(self.path)
 

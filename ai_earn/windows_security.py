@@ -1,8 +1,8 @@
 """Experimental Windows ACL checks for Phase 2 verification.
 
-This module is not a substitute for OS isolation and does not enable Windows
-account storage. It fails closed on unfamiliar ACEs, principals and reparse
-points. The caller must not use it for an untrusted ancestor directory.
+This module is not a substitute for OS isolation. It fails closed on
+unfamiliar ACEs, principals and reparse points. The caller must not use it
+for an untrusted ancestor directory.
 """
 
 from dataclasses import dataclass

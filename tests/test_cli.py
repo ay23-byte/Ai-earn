@@ -33,8 +33,8 @@ class CliTests(unittest.TestCase):
         self.assertTrue(response["ok"])
         self.assertEqual(response["data"]["environment"], "test")
         self.assertFalse(response["data"]["production_ready"])
-        self.assertEqual(response["data"]["capabilities"]["authentication"], os.name == "posix")
-        self.assertEqual(response["data"]["capabilities"]["persistent_storage"], os.name == "posix")
+        self.assertEqual(response["data"]["capabilities"]["authentication"], os.name in {"posix", "nt"})
+        self.assertEqual(response["data"]["capabilities"]["persistent_storage"], os.name in {"posix", "nt"})
         self.assertFalse(response["data"]["capabilities"]["network_listener"])
         self.assertFalse(response["data"]["capabilities"]["payments"])
         self.assertFalse(response["data"]["capabilities"]["earning_workflows"])
@@ -48,10 +48,25 @@ class CliTests(unittest.TestCase):
         self.assertFalse(response["data"]["capabilities"]["persistent_storage"])
         self.assertFalse(response["data"]["production_ready"])
 
-    def test_non_posix_status_does_not_claim_auth_available(self):
-        with patch("ai_earn.status.os.name", "nt"):
+    def test_unsupported_platform_status_does_not_claim_auth_available(self):
+        with patch("ai_earn.status.os.name", "unsupported"):
             code, response, _ = self.run_main(["status"], {})
         self.assertEqual(code, 0)
+        self.assertFalse(response["data"]["capabilities"]["authentication"])
+        self.assertFalse(response["data"]["capabilities"]["persistent_storage"])
+
+    def test_windows_status_reports_development_but_not_production(self):
+        with patch("ai_earn.status.os.name", "nt"):
+            _, development, _ = self.run_main(["status"], {})
+            _, production, _ = self.run_main(["status"], {"AI_EARN_ENV": "production"})
+        self.assertTrue(development["data"]["capabilities"]["authentication"])
+        self.assertTrue(development["data"]["capabilities"]["persistent_storage"])
+        self.assertFalse(production["data"]["capabilities"]["authentication"])
+        self.assertFalse(production["data"]["production_ready"])
+
+    def test_windows_status_respects_disabled_gate(self):
+        with patch("ai_earn.status.os.name", "nt"), patch("ai_earn.status._windows_auth_verified", return_value=False):
+            _, response, _ = self.run_main(["status"], {})
         self.assertFalse(response["data"]["capabilities"]["authentication"])
         self.assertFalse(response["data"]["capabilities"]["persistent_storage"])
 
