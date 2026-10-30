@@ -1,7 +1,7 @@
 """Disposable verification of a Windows candidate with its gate enabled.
 
-This utility never changes or monkeypatches the storage gate. It must be run
-only from an isolated, explicitly marked candidate copy, never with real data.
+This utility never changes or monkeypatches the storage gate. It uses a new
+private temporary directory and synthetic credentials, never real data.
 """
 import io
 from pathlib import Path

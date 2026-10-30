@@ -1,4 +1,4 @@
-"""Unit tests of the harness; real Windows input still needs manual evidence."""
+"""Unit tests of the harness; real Windows input is checked separately."""
 
 import io
 from pathlib import Path
@@ -68,6 +68,18 @@ class WindowsTerminalHarnessTests(unittest.TestCase):
         self.assertFalse(paths[0].exists())
         self.assertEqual(auth_storage._windows_auth_verified(), initial_gate)
         self.assertIn("TEST COMPLETE", out.getvalue())
+
+    def test_harness_does_not_override_storage_gate(self):
+        def create(directory):
+            directory.mkdir()
+        def fake_run(*args):
+            self.assertFalse(auth_storage._windows_auth_verified())
+            return 0
+        with patch.object(smoke, "_is_windows", return_value=True), \
+                patch.object(smoke, "create_private_directory", side_effect=create), \
+                patch.object(smoke.auth_cli, "run", side_effect=fake_run), \
+                patch.object(auth_storage, "_windows_auth_verified", return_value=False):
+            self.assertEqual(smoke.main(Terminal(), Terminal(), io.StringIO()), 0)
 
     def test_failed_action_stops_and_removes_temporary_files(self):
         paths = []

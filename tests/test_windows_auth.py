@@ -1,4 +1,4 @@
-"""Real Windows ACL integration; the test override never enables user-facing auth."""
+"""Real Windows ACL integration using the unpatched development path."""
 from contextlib import closing, contextmanager
 import io
 import os
@@ -18,8 +18,8 @@ from ai_earn.windows_security import WindowsSecurityError, create_private_direct
 
 
 class WindowsGateDefaultTests(unittest.TestCase):
-    def test_unpatched_gate_remains_disabled(self):
-        self.assertIs(auth_storage._windows_auth_verified(), False)
+    def test_windows_development_path_is_enabled(self):
+        self.assertIs(auth_storage._windows_auth_verified(), True)
 
 
 @unittest.skipUnless(os.name == "nt", "requires actual Windows Win32 APIs and a local ACL-capable drive")
@@ -30,10 +30,7 @@ class WindowsAuthenticationTests(unittest.TestCase):
         self.directory = Path(self.tmp.name) / "private"
         create_private_directory(self.directory)
         self.path = self.directory / "auth.sqlite3"
-        # Test-only monkeypatch: ordinary Windows CLI remains disabled.
-        self.gate = patch("ai_earn.auth_storage._windows_auth_verified", return_value=True)
-        self.gate.start()
-        self.addCleanup(self.gate.stop)
+        # Use the application's normal Windows path, with no gate override.
         self.storage = AuthStorage(self.path)
         self.service = AuthService(self.storage)
         self.password = "example-password-for-test"
@@ -179,23 +176,37 @@ class WindowsAuthenticationTests(unittest.TestCase):
         with self.assertRaises(WindowsSecurityError):
             verify_private_path(junction, directory=True)
 
-    def test_unpatched_windows_auth_remains_disabled(self):
-        self.gate.stop()
-        with self.assertRaises(StorageError):
-            AuthStorage(self.path)
+    def test_unpatched_windows_auth_uses_private_storage(self):
+        recovery = self.service.register("alice", self.password)
+        token = AuthService(AuthStorage(self.path)).login("alice", self.password)
+        self.assertEqual(self.service.profile(token)["username"], "alice")
+        self.assertTrue(recovery)
 
-    def test_unpatched_windows_cli_rejects_before_creating_database(self):
-        self.gate.stop()
-
+    def test_windows_cli_rejects_unsafe_acl_before_creating_database(self):
         class Terminal(io.StringIO):
             def isatty(self):
                 return True
 
-        path = self.directory / "unpatched.sqlite3"
+        subprocess.run(["icacls.exe", str(self.directory), "/grant", "*S-1-1-0:(OI)(CI)F"], check=True, capture_output=True)
+        path = self.directory / "unsafe.sqlite3"
         out, err = Terminal(), io.StringIO()
         with patch("ai_earn.auth_cli._secret") as secret:
             code = run("register", {"AI_EARN_AUTH_DB": str(path)}, Terminal(), out, err)
         self.assertEqual(code, 2)
-        self.assertIn("disabled on this platform", err.getvalue())
+        self.assertIn("not private", err.getvalue())
+        self.assertFalse(path.exists())
+        secret.assert_not_called()
+
+    def test_windows_production_cli_rejects_before_creating_database(self):
+        class Terminal(io.StringIO):
+            def isatty(self):
+                return True
+
+        path = self.directory / "production.sqlite3"
+        out, err = Terminal(), io.StringIO()
+        with patch("ai_earn.auth_cli._secret") as secret:
+            code = run("register", {"AI_EARN_AUTH_DB": str(path), "AI_EARN_ENV": "production"}, Terminal(), out, err)
+        self.assertEqual(code, 2)
+        self.assertIn("not enabled for production", err.getvalue())
         self.assertFalse(path.exists())
         secret.assert_not_called()
