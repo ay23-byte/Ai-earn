@@ -66,6 +66,215 @@ class TaskAssociationTests(unittest.TestCase):
     def create(self, key="associate"):
         return self.associations.create(self.alice, self.item, self.workflow, operation_key=key)
 
+    def stranded(self, *, pending=True):
+        q = self.queue.enqueue(self.alice, "Stranded", operation_key="stranded-q", max_attempts=1, backoff_seconds=0)
+        w = self.workflows.create(self.alice, "Stranded", operation_key="stranded-w")
+        ident = self.associations.create(self.alice, q, w, operation_key="stranded-link")
+        lease = self.associations.start_pair(self.alice, ident, operation_key="stranded-start", lease_seconds=5)
+        if pending:
+            self.associations.submit_pair(self.alice, ident, lease, "unverified output", operation_key="stranded-submit")
+        self.clock.now += 5
+        self.associations.recover_pair(self.alice, ident, lease, operation_key="stranded-recover")
+        return ident, q, w
+
+    def test_abandon_exhausted_pending_review_is_explicit_and_idempotent(self):
+        ident, q, w = self.stranded()
+        for confirmation in (False, 1, None):
+            with self.assertRaises(AssociationError):
+                self.associations.abandon_pair(self.alice, ident, confirmed=confirmation, operation_key="abandon")
+        self.assertEqual(self.workflows.get(self.alice, w)["status"], "pending_review")
+        self.assertEqual(self.associations.abandon_pair(self.alice, ident, confirmed=True, operation_key="abandon"), ident)
+        self.assertEqual(self.associations.abandon_pair(self.alice, ident, confirmed=True, operation_key="abandon"), ident)
+        self.assertEqual(self.queue.get(self.alice, q)["status"], "exhausted")
+        row = self.workflows.get(self.alice, w)
+        self.assertEqual(row["status"], "cancelled")
+        self.assertIsNone(row["output_hash"])
+        self.assertIsNone(row["output_size"])
+        backup = self.directory / "abandoned-backup"
+        self.state.backup_to(backup, confirmed=True)
+        restored = TaskAssociations(self.auth, StateStorage(backup))
+        self.assertEqual(restored.abandon_pair(self.alice, ident, confirmed=True, operation_key="abandon"), ident)
+        self.assertEqual(self.queue.get(self.alice, q)["status"], "exhausted")
+
+    def test_abandon_deadline_queued_and_independently_cancelled(self):
+        q = self.queue.enqueue(self.alice, "Deadline", operation_key="deadline-q", deadline_at=self.clock.now+5, backoff_seconds=0)
+        w = self.workflows.create(self.alice, "Deadline", operation_key="deadline-w")
+        ident = self.associations.create(self.alice, q, w, operation_key="deadline-link")
+        self.workflows.start(self.alice, w, operation_key="direct-start")
+        self.workflows.submit(self.alice, w, "output", operation_key="direct-submit")
+        with self.assertRaises(AssociationError):
+            self.associations.abandon_pair(self.alice, ident, confirmed=True, operation_key="abandon")
+        self.clock.now += 5
+        self.associations.abandon_pair(self.alice, ident, confirmed=True, operation_key="abandon")
+        self.assertEqual(self.queue.get(self.alice, q)["status"], "cancelled")
+        self.assertEqual(self.workflows.get(self.alice, w)["status"], "cancelled")
+        self.state.backup_to(self.directory / "deadline-abandoned-backup", confirmed=True)
+        other = self.create()
+        self.queue.cancel(self.alice, self.item, operation_key="direct-cancel")
+        self.associations.abandon_pair(self.alice, other, confirmed=True, operation_key="other-abandon")
+        self.assertEqual(self.queue.get(self.alice, self.item)["status"], "cancelled")
+        self.assertEqual(self.workflows.get(self.alice, self.workflow)["status"], "cancelled")
+        self.state.backup_to(self.directory / "cancelled-abandoned-backup", confirmed=True)
+
+    def test_abandon_denies_wrong_owner_active_lease_and_key_conflicts(self):
+        ident = self.create()
+        lease = self.associations.start_pair(self.alice, ident, operation_key="start", lease_seconds=5)
+        for token, record in ((self.bob, ident), (self.alice, "f"*32), ("", ident)):
+            with self.assertRaises(AccessDenied):
+                self.associations.abandon_pair(token, record, confirmed=True, operation_key="abandon")
+        for key in ("fresh", "start", "queue"):
+            with self.assertRaises(AssociationError):
+                self.associations.abandon_pair(self.alice, ident, confirmed=True, operation_key=key)
+        self.clock.now += 5
+        with self.assertRaises(AssociationError):
+            self.associations.abandon_pair(self.alice, ident, confirmed=True, operation_key="expired-lease")
+        self.assertFalse(self.queue.get_lease(self.alice, lease)["active"])
+        self.assertEqual(self.workflows.get(self.alice, self.workflow)["status"], "in_progress")
+
+    def test_abandon_rejects_completed_workflow(self):
+        ident, q, w = self.stranded()
+        self.workflows.review(self.alice, w, "unverified output", approved=True, confirmed=True, operation_key="direct-review")
+        with self.assertRaises(AssociationError):
+            self.associations.abandon_pair(self.alice, ident, confirmed=True, operation_key="abandon")
+        self.assertEqual((self.queue.get(self.alice, q)["status"], self.workflows.get(self.alice, w)["status"]), ("exhausted", "completed"))
+
+    def test_abandon_injected_failure_and_collision_roll_back(self):
+        ident, q, w = self.stranded()
+        with patch("ai_earn.task_associations._audit", side_effect=RuntimeError("injected")):
+            with self.assertRaises(RuntimeError):
+                self.associations.abandon_pair(self.alice, ident, confirmed=True, operation_key="abandon")
+        with patch("ai_earn.task_associations._pair_child_key", return_value="queue"):
+            with self.assertRaises(StateStorageError):
+                self.associations.abandon_pair(self.alice, ident, confirmed=True, operation_key="abandon")
+        self.assertEqual((self.queue.get(self.alice, q)["status"], self.workflows.get(self.alice, w)["status"]), ("exhausted", "pending_review"))
+        with self.state.transaction() as conn:
+            self.assertEqual(conn.execute("SELECT count(*) FROM state_operations WHERE operation_key='abandon'").fetchone()[0], 0)
+
+    def test_abandon_v11_competing_identical_requests(self):
+        self.state.migrate_to_v11(self.directory / "v10.sqlite3", confirmed=True)
+        ident, q, w = self.stranded(pending=False)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(lambda _: self.associations.abandon_pair(self.alice, ident, confirmed=True, operation_key="abandon"), range(2)))
+        self.assertEqual(results, [ident, ident])
+        self.assertEqual((self.queue.get(self.alice, q)["status"], self.workflows.get(self.alice, w)["status"]), ("exhausted", "cancelled"))
+        self.state.backup_to(self.directory / "v11-abandoned-backup", confirmed=True)
+
+    def test_abandon_deadline_backwards_clock_and_session_expiry_rollback(self):
+        q = self.queue.enqueue(self.alice, "Deadline", operation_key="deadline-q", deadline_at=self.clock.now+5)
+        w = self.workflows.create(self.alice, "Deadline", operation_key="deadline-w")
+        ident = self.associations.create(self.alice, q, w, operation_key="deadline-link")
+        self.clock.now += 5
+        import ai_earn.task_associations as module
+        original = module._workflow_audit
+        def reverse(*args):
+            original(*args)
+            self.clock.now -= 1
+        with patch.object(module, "_workflow_audit", side_effect=reverse):
+            with self.assertRaises(AssociationError):
+                self.associations.abandon_pair(self.alice, ident, confirmed=True, operation_key="abandon")
+        self.clock.now += 1
+        def expire(*args):
+            original(*args)
+            self.clock.now += SESSION_SECONDS
+        with patch.object(module, "_workflow_audit", side_effect=expire):
+            with self.assertRaises(AccessDenied):
+                self.associations.abandon_pair(self.alice, ident, confirmed=True, operation_key="abandon")
+        with self.state.transaction() as conn:
+            self.assertEqual(conn.execute("SELECT status FROM task_queue WHERE id=?", (q,)).fetchone()[0], "queued")
+            self.assertEqual(conn.execute("SELECT status FROM task_workflows WHERE id=?", (w,)).fetchone()[0], "planned")
+            self.assertEqual(conn.execute("SELECT count(*) FROM state_operations WHERE operation_key='abandon'").fetchone()[0], 0)
+
+    def test_abandon_competes_with_direct_cancel_without_partial_mutation(self):
+        q = self.queue.enqueue(self.alice, "Deadline", operation_key="race-q", deadline_at=self.clock.now+5)
+        w = self.workflows.create(self.alice, "Deadline", operation_key="race-w")
+        ident = self.associations.create(self.alice, q, w, operation_key="race-link")
+        self.clock.now += 5
+        def abandon():
+            try:
+                self.associations.abandon_pair(self.alice, ident, confirmed=True, operation_key="abandon")
+                return True
+            except AssociationError:
+                return False
+        def cancel():
+            try:
+                self.workflows.cancel(self.alice, w, operation_key="direct-cancel")
+                return True
+            except WorkflowError:
+                return False
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(abandon), pool.submit(cancel)]
+            outcome = [future.result(timeout=15) for future in futures]
+        self.assertEqual(sum(outcome), 1)
+        queue_status = self.queue.get(self.alice, q)["status"]
+        self.assertEqual(queue_status, "cancelled" if outcome[0] else "queued")
+        self.assertEqual(self.workflows.get(self.alice, w)["status"], "cancelled")
+        self.state.backup_to(self.directory / "abandon-race", confirmed=True)
+
+    def test_abandon_rejects_v11_completed_pair(self):
+        self.state.migrate_to_v11(self.directory / "v10.sqlite3", confirmed=True)
+        ident = self.create()
+        lease = self.associations.start_pair(self.alice, ident, operation_key="start", lease_seconds=5)
+        self.associations.submit_pair(self.alice, ident, lease, "output", operation_key="submit")
+        self.associations.complete_pair(self.alice, ident, lease, "output", confirmed=True, operation_key="complete")
+        with self.assertRaises(AssociationError):
+            self.associations.abandon_pair(self.alice, ident, confirmed=True, operation_key="abandon")
+        self.assertEqual(self.queue.get(self.alice, self.item)["status"], "completed")
+        self.state.backup_to(self.directory / "abandon-completed", confirmed=True)
+
+    def test_abandon_ambiguous_auth_exit_and_exact_retry(self):
+        ident, q, w = self.stranded()
+        original = self.auth.storage.transaction
+        @contextmanager
+        def fail_after_state_commit():
+            with original() as conn:
+                yield conn
+                raise RuntimeError("injected auth exit")
+        with patch.object(self.auth.storage, "transaction", fail_after_state_commit):
+            with self.assertRaises(RuntimeError):
+                self.associations.abandon_pair(self.alice, ident, confirmed=True, operation_key="abandon")
+        self.assertEqual(self.associations.abandon_pair(self.alice, ident, confirmed=True, operation_key="abandon"), ident)
+        self.assertEqual((self.queue.get(self.alice, q)["status"], self.workflows.get(self.alice, w)["status"]), ("exhausted", "cancelled"))
+
+    def test_abandon_controlled_process_crash_before_and_after_commit(self):
+        ident, q, w = self.stranded()
+        code = r"""
+from contextlib import contextmanager
+from pathlib import Path
+import json, os, sys
+import ai_earn.task_associations as module
+from ai_earn.auth import AuthService
+from ai_earn.auth_storage import AuthStorage
+from ai_earn.state_storage import StateStorage
+p = json.load(sys.stdin)
+auth = AuthService(AuthStorage(Path(p['auth']), create=False), lambda: 1800000005)
+service = module.TaskAssociations(auth, StateStorage(Path(p['state'])))
+if p['point'] == 'before':
+    original = module._workflow_audit
+    def crash(*args):
+        original(*args)
+        os._exit(73)
+    module._workflow_audit = crash
+else:
+    original = auth.storage.transaction
+    @contextmanager
+    def crash_after_state_commit():
+        with original() as conn:
+            yield conn
+            os._exit(74)
+    auth.storage.transaction = crash_after_state_commit
+service.abandon_pair(p['token'], p['association'], confirmed=True, operation_key='abandon')
+"""
+        def run(point):
+            data = dict(auth=str(self.auth.storage.path), state=str(self.state.path),
+                        token=self.alice, association=ident, point=point)
+            return subprocess.run([sys.executable, "-c", code], input=json.dumps(data), text=True, capture_output=True, timeout=25)
+        self.assertEqual(run("before").returncode, 73)
+        self.assertEqual((self.queue.get(self.alice, q)["status"], self.workflows.get(self.alice, w)["status"]), ("exhausted", "pending_review"))
+        self.assertEqual(run("after").returncode, 74)
+        self.assertEqual(self.associations.abandon_pair(self.alice, ident, confirmed=True, operation_key="abandon"), ident)
+        self.assertEqual((self.queue.get(self.alice, q)["status"], self.workflows.get(self.alice, w)["status"]), ("exhausted", "cancelled"))
+        self.state.backup_to(self.directory / "abandon-crash-backup", confirmed=True)
+
     def test_migration_preserves_previous_records_and_retries(self):
         with StateStorage(self.directory / "v9.sqlite3").transaction() as conn:
             self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 9)

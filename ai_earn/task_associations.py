@@ -336,6 +336,54 @@ class TaskAssociations:
                 raise AssociationError("Lease expired before commit.")
             return ident
 
+    def abandon_pair(self, token: str, record_id: str, *, confirmed: bool = False,
+                     operation_key: str) -> str:
+        """Explicitly abandon an unfinished, no-longer-schedulable local pair.
+
+        This discards any pending output hash/size; it does not undo external
+        work or confirm payment. Exhausted/cancelled queue history is retained.
+        """
+        if confirmed is not True:
+            raise AssociationError("Explicit abandonment confirmation is required.")
+        ident, key = _input(_record_id, record_id), _input(_key, operation_key)
+        digest = _digest("task_association_abandon_pair", ident)
+        with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
+            _version(conn)
+            association, queue, workflow = _owned_rows(conn, owner, ident)
+            existing = _retry(conn, owner, key, digest)
+            if existing is not None:
+                if existing != ident:
+                    raise StateStorageError("Stored operation result is inconsistent.")
+                return existing
+            if _has_paired_completion(conn, owner, association["queue_id"]):
+                raise AssociationError("Completed pairs cannot be abandoned.")
+            deadline_expired = (queue["status"] == "queued" and queue["deadline_at"] != 0
+                                and now >= queue["deadline_at"])
+            if (queue["status"] not in ("exhausted", "cancelled") and not deadline_expired
+                    or workflow["status"] not in ("planned", "in_progress", "pending_review")):
+                raise AssociationError("An unfinished, no-longer-schedulable pair is required.")
+            workflow_key = _pair_child_key()
+            queue_key = _pair_child_key() if deadline_expired else None
+            keys = [workflow_key] + ([queue_key] if queue_key is not None else [])
+            if (key in keys or len(set(keys)) != len(keys)
+                    or any(conn.execute("SELECT 1 FROM state_operations WHERE owner_id=? AND operation_key=?", (owner, child)).fetchone() is not None for child in keys)):
+                raise StateStorageError("Internal operation key collision.")
+            queue_id, workflow_id = association["queue_id"], association["workflow_id"]
+            if deadline_expired:
+                conn.execute("UPDATE task_queue SET status='cancelled', updated_at=? WHERE id=? AND owner_id=?",
+                             (now, queue_id, owner))
+                _queue_audit(conn, now, owner, "queue_cancelled", queue_id)
+                _queue_remember(conn, owner, queue_key, _queue_request("queue_cancel", [queue_id]), "task_queue", queue_id)
+            conn.execute("UPDATE task_workflows SET status='cancelled', output_hash=NULL, output_size=NULL, updated_at=? WHERE id=? AND owner_id=?",
+                         (now, workflow_id, owner))
+            _workflow_audit(conn, now, owner, "workflow_cancelled", workflow_id)
+            _workflow_remember(conn, owner, workflow_key, _workflow_request("workflow_cancel", [workflow_id]), workflow_id)
+            _audit(conn, now, owner, ident, "task_association_pair_abandoned")
+            _remember(conn, owner, key, digest, ident)
+            if deadline_expired and int(self._auth.clock()) < queue["deadline_at"]:
+                raise AssociationError("Deadline timing changed before commit.")
+            return ident
+
     def cancel_pair(self, token: str, record_id: str, *, operation_key: str) -> str:
         """Cancel a queued item and planned workflow together, not external work.
 
