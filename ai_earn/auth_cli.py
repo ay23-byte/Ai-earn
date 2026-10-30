@@ -1,0 +1,78 @@
+"""Interactive local auth. Secrets are never accepted as command arguments."""
+
+import getpass
+from pathlib import Path
+import sqlite3
+from typing import Mapping, TextIO
+import warnings
+
+from .auth import AuthError, AuthService
+from .auth_storage import AuthStorage, StorageError
+from .config import ConfigurationError, load_settings
+
+
+def _secret(prompt: str, err: TextIO) -> str:
+    # getpass can otherwise fall back to echoed input when a terminal is unavailable.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", getpass.GetPassWarning)
+        return getpass.getpass(prompt, stream=err)
+
+
+def run(action: str, environ: Mapping[str, str], stdin: TextIO, out: TextIO, err: TextIO) -> int:
+    if action not in {"register", "login", "recover"}:
+        out.write("Usage: python -m ai_earn auth {register|login|recover}\n")
+        return 2
+    if not stdin.isatty() or not out.isatty():
+        err.write("Authentication requires an interactive terminal; secrets are not accepted from pipes.\n")
+        return 2
+    try:
+        settings = load_settings(environ)
+        if settings.environment == "production":
+            raise AuthError("Authentication is not enabled for production use.")
+        path = environ.get("AI_EARN_AUTH_DB", "")
+        if not path:
+            raise AuthError("Set AI_EARN_AUTH_DB to an absolute path in a private directory.")
+        service = AuthService(AuthStorage(Path(path)))
+        out.write("Username: ")
+        out.flush()
+        username = stdin.readline().rstrip("\r\n")
+        if action == "register":
+            password = _secret("New password: ", err)
+            confirmation = _secret("Confirm password: ", err)
+            if password != confirmation:
+                raise AuthError("Passwords do not match.")
+            recovery = service.register(username, password)
+            out.write("Account created. Save this one-time recovery code privately; it cannot be shown again:\n")
+            out.write(recovery + "\n")
+        elif action == "recover":
+            recovery = _secret("Recovery code: ", err)
+            password = _secret("New password: ", err)
+            if password != _secret("Confirm password: ", err):
+                raise AuthError("Passwords do not match.")
+            new_recovery = service.recover(username, recovery, password)
+            out.write("Password changed and sessions revoked. Save the new one-time recovery code privately:\n")
+            out.write(new_recovery + "\n")
+        else:
+            password = _secret("Password: ", err)
+            token = service.login(username, password)
+            try:
+                profile = service.profile(token)
+                out.write(f"Signed in as {profile['username']}. Press Enter to log out.\n")
+                out.flush()
+                stdin.readline()
+            finally:
+                service.logout(token)
+            out.write("Signed out.\n")
+        return 0
+    except (AuthError, StorageError, ConfigurationError) as exc:
+        err.write(str(exc) + "\n")
+        return 2
+    except (EOFError, KeyboardInterrupt, getpass.GetPassWarning):
+        err.write("Authentication cancelled or hidden input unavailable.\n")
+        return 2
+    except (OSError, sqlite3.Error):
+        err.write("Authentication storage is unavailable; no success was reported.\n")
+        return 1
+    except Exception:
+        err.write("An unexpected authentication error occurred.\n")
+        return 1
