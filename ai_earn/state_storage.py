@@ -17,7 +17,7 @@ from .auth_storage import AuthStorage, StorageError, _windows_auth_verified
 
 APPLICATION_ID = 0x41494533  # AIE3, distinct from the auth-only database.
 SCHEMA_VERSION = 1  # New files still bootstrap as version 1; upgrades are explicit.
-LATEST_SCHEMA_VERSION = 8
+LATEST_SCHEMA_VERSION = 9
 
 
 class StateStorageError(Exception):
@@ -190,10 +190,28 @@ _V8_SCHEMA = {
 }
 
 
+_V9_INDEX = "CREATE UNIQUE INDEX invoice_drafts_id_owner_idx ON invoice_drafts(id, owner_id)"
+
+
+_V9_SCHEMA = {
+    "payment_observations": """CREATE TABLE payment_observations (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    invoice_id TEXT NOT NULL CHECK(length(invoice_id)=32 AND invoice_id NOT GLOB '*[^0-9a-f]*'),
+    proposed_amount_paise INTEGER NOT NULL CHECK(typeof(proposed_amount_paise)='integer' AND proposed_amount_paise BETWEEN 0 AND 1000000000000),
+    currency TEXT NOT NULL CHECK(currency='INR'),
+    status TEXT NOT NULL CHECK(status IN ('unverified', 'flagged', 'discarded')),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at),
+    FOREIGN KEY(invoice_id, owner_id) REFERENCES invoice_drafts(id, owner_id)
+)""",
+}
+
+
 def _validate_schema(conn: sqlite3.Connection) -> int:
     application_id = conn.execute("PRAGMA application_id").fetchone()[0]
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if application_id != APPLICATION_ID or version not in (1, 2, 3, 4, 5, 6, 7, 8):
+    if application_id != APPLICATION_ID or version not in (1, 2, 3, 4, 5, 6, 7, 8, 9):
         raise StateStorageError("Unsupported or uninitialized state database; no migration was performed.")
     expected_columns = {
         "state_meta": [("key", "TEXT", 0, 1), ("value", "TEXT", 1, 0)],
@@ -255,17 +273,30 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
             ("output_size", "INTEGER", 0, 0), ("created_at", "INTEGER", 1, 0),
             ("updated_at", "INTEGER", 1, 0),
         ]
+    if version >= 9:
+        expected_columns["payment_observations"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("invoice_id", "TEXT", 1, 0),
+            ("proposed_amount_paise", "INTEGER", 1, 0), ("currency", "TEXT", 1, 0),
+            ("status", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+            ("updated_at", "INTEGER", 1, 0),
+        ]
     objects = conn.execute(
         "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name"
     ).fetchall()
     expected_objects = [("table", name) for name in expected_columns]
     if version >= 6:
         expected_objects.append(("index", "order_drafts_id_owner_idx"))
+    if version >= 9:
+        expected_objects.append(("index", "invoice_drafts_id_owner_idx"))
     if [tuple(row) for row in objects] != sorted(expected_objects, key=lambda item: item[1]):
         raise StateStorageError("State database schema is incompatible.")
     if version >= 6:
         row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='order_drafts_id_owner_idx'").fetchone()
         if row is None or row[0] != _V6_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+    if version >= 9:
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='invoice_drafts_id_owner_idx'").fetchone()
+        if row is None or row[0] != _V9_INDEX:
             raise StateStorageError("State database schema constraints are incompatible.")
     for table, expected in expected_columns.items():
         columns = conn.execute(f"PRAGMA table_info({table})").fetchall()
@@ -286,6 +317,8 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         schemas.append(_V7_SCHEMA)
     if version >= 8:
         schemas.append(_V8_SCHEMA)
+    if version >= 9:
+        schemas.append(_V9_SCHEMA)
     for schema in schemas:
         for name, statement in schema.items():
             row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()
@@ -349,12 +382,50 @@ def _apply_v8(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA user_version = 8")
 
 
+def _apply_v9(conn: sqlite3.Connection) -> None:
+    conn.execute(_V9_INDEX)
+    for statement in _V9_SCHEMA.values():
+        conn.execute(statement)
+    conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (9, int(time.time())))
+    conn.execute("PRAGMA user_version = 9")
+
+
+def _check_queue_integrity(conn: sqlite3.Connection, *, owner: str | None = None, record_id: str | None = None) -> None:
+    """Reject inconsistent queue/lease metadata; never modify the source.
+
+    SQLite's foreign keys do not enforce attempt history or agreement between
+    the two lease expiry values. Scoped checks do not inspect unrelated owners.
+    """
+    bad = conn.execute("""
+        SELECT t.id FROM task_queue AS t
+        WHERE (? IS NULL OR t.owner_id=?) AND (? IS NULL OR t.id=?) AND (
+            t.attempts != (SELECT COUNT(*) FROM queue_leases l WHERE l.queue_id=t.id)
+            OR t.attempts != COALESCE((SELECT MAX(l.attempt) FROM queue_leases l WHERE l.queue_id=t.id), 0)
+            OR EXISTS (SELECT 1 FROM queue_leases l WHERE l.queue_id=t.id AND l.owner_id!=t.owner_id)
+            OR (t.status='queued' AND (t.attempts>=t.max_attempts
+                OR (t.deadline_at!=0 AND t.available_at>=t.deadline_at)))
+            OR (t.status='exhausted' AND t.attempts=0)
+            OR (t.status='leased' AND (t.lease_until<=t.updated_at
+                OR (t.deadline_at!=0 AND t.lease_until>t.deadline_at)))
+            OR (t.status='leased' AND NOT EXISTS (
+                SELECT 1 FROM queue_leases l WHERE l.id=t.current_lease_id
+                AND l.queue_id=t.id AND l.owner_id=t.owner_id
+                AND l.attempt=t.attempts AND l.lease_until=t.lease_until
+            ))
+        ) LIMIT 1
+    """, (owner, owner, record_id, record_id)).fetchone()
+    if bad is not None:
+        raise StateStorageError("Queue state and lease history are inconsistent.")
+
+
 def _check_integrity(conn: sqlite3.Connection) -> None:
     rows = conn.execute("PRAGMA quick_check").fetchall()
     if len(rows) != 1 or rows[0][0] != "ok":
         raise StateStorageError("State database integrity check failed.")
     if conn.execute("PRAGMA foreign_key_check").fetchone() is not None:
         raise StateStorageError("State database foreign key check failed.")
+    if conn.execute("PRAGMA user_version").fetchone()[0] >= 7:
+        _check_queue_integrity(conn)
 
 
 def _copy_database(source: sqlite3.Connection, destination: sqlite3.Connection) -> None:
@@ -490,6 +561,18 @@ class StateStorage:
             self.backup_to(backup, confirmed=True)
             _apply_v8(conn)
             if _validate_schema(conn) != 8:
+                raise StateStorageError("Migration produced an incompatible schema.")
+
+    def migrate_to_v9(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 8 only, after a checked backup while holding its write lock."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 8:
+                raise StateStorageError("Only version 8 can be upgraded to version 9.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v9(conn)
+            if _validate_schema(conn) != 9:
                 raise StateStorageError("Migration produced an incompatible schema.")
 
     def backup_to(self, destination: Path, *, confirmed: bool = False) -> None:

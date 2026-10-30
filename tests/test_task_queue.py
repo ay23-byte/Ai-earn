@@ -290,6 +290,85 @@ class TaskQueueTests(unittest.TestCase):
                 conn.execute("UPDATE task_queue SET status='leased',current_lease_id=?,lease_until=? WHERE id=?",
                              ("b"*32, self.clock.now + 5, ident))
 
+    def test_mismatched_current_lease_is_not_used_or_backed_up(self):
+        ident = self.add()
+        lease = self.queue.claim(self.alice, ident, operation_key="claim", lease_seconds=30)
+        with closing(sqlite3.connect(self.state.path)) as conn, conn:
+            conn.execute("UPDATE queue_leases SET lease_until=lease_until+1 WHERE id=?", (lease,))
+            self.assertEqual(conn.execute("PRAGMA quick_check").fetchone()[0], "ok")
+            self.assertEqual(conn.execute("PRAGMA foreign_key_check").fetchall(), [])
+        for fn in (lambda: self.queue.get(self.alice, ident),
+                   lambda: self.queue.get_lease(self.alice, lease),
+                   lambda: self.queue.retry(self.alice, ident, lease, operation_key="retry"),
+                   lambda: self.queue.claim(self.alice, ident, operation_key="claim", lease_seconds=30)):
+            with self.assertRaises(StateStorageError):
+                fn()
+        destination = self.directory / "inconsistent.sqlite3"
+        with self.assertRaises(StateStorageError):
+            self.state.backup_to(destination, confirmed=True)
+        self.assertFalse(destination.exists())
+
+    def test_missing_lease_history_is_not_returned_as_ready(self):
+        ident = self.add(backoff_seconds=0)
+        lease = self.queue.claim(self.alice, ident, operation_key="claim", lease_seconds=30)
+        self.queue.retry(self.alice, ident, lease, operation_key="retry")
+        with closing(sqlite3.connect(self.state.path)) as conn, conn:
+            conn.execute("DELETE FROM queue_leases WHERE id=?", (lease,))
+            self.assertEqual(conn.execute("PRAGMA quick_check").fetchone()[0], "ok")
+            self.assertEqual(conn.execute("PRAGMA foreign_key_check").fetchall(), [])
+        for fn in (lambda: self.queue.ready(self.alice),
+                   lambda: self.add(backoff_seconds=0),
+                   lambda: self.queue.claim(self.alice, ident, operation_key="new", lease_seconds=30)):
+            with self.assertRaises(StateStorageError):
+                fn()
+        self.assertEqual(self.queue.ready(self.bob), [])
+        destination = self.directory / "missing-history.sqlite3"
+        with self.assertRaises(StateStorageError):
+            self.state.backup_to(destination, confirmed=True)
+        self.assertFalse(destination.exists())
+
+    def test_attempt_mismatch_blocks_upgrade_before_backup_creation(self):
+        ident = self.add()
+        self.queue.claim(self.alice, ident, operation_key="claim", lease_seconds=30)
+        with closing(sqlite3.connect(self.state.path)) as conn, conn:
+            conn.execute("UPDATE task_queue SET attempts=0 WHERE id=?", (ident,))
+            self.assertEqual(conn.execute("PRAGMA quick_check").fetchone()[0], "ok")
+            self.assertEqual(conn.execute("PRAGMA foreign_key_check").fetchall(), [])
+        backup = self.directory / "v7-invalid.sqlite3"
+        with self.assertRaises(StateStorageError):
+            self.state.migrate_to_v8(backup, confirmed=True)
+        self.assertFalse(backup.exists())
+        with closing(sqlite3.connect(self.state.path)) as conn:
+            self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 7)
+
+    def test_lease_beyond_deadline_fails_even_when_both_expiries_match(self):
+        ident = self.add(deadline_at=self.clock.now + 10)
+        lease = self.queue.claim(self.alice, ident, operation_key="claim", lease_seconds=5)
+        with closing(sqlite3.connect(self.state.path)) as conn, conn:
+            conn.execute("UPDATE task_queue SET lease_until=? WHERE id=?", (self.clock.now + 11, ident))
+            conn.execute("UPDATE queue_leases SET lease_until=? WHERE id=?", (self.clock.now + 11, lease))
+            self.assertEqual(conn.execute("PRAGMA quick_check").fetchone()[0], "ok")
+            self.assertEqual(conn.execute("PRAGMA foreign_key_check").fetchall(), [])
+        with self.assertRaises(StateStorageError):
+            self.queue.get_lease(self.alice, lease)
+        with self.assertRaises(StateStorageError):
+            self.state.backup_to(self.directory / "deadline-invalid.sqlite3", confirmed=True)
+
+    def test_corrupted_backup_copy_is_rejected_without_changing_source(self):
+        ident = self.add()
+        lease = self.queue.claim(self.alice, ident, operation_key="claim", lease_seconds=30)
+        destination = self.directory / "bad-copy.sqlite3"
+        from ai_earn.state_storage import _copy_database
+        def corrupt_copy(source, target):
+            _copy_database(source, target)
+            target.execute("UPDATE queue_leases SET lease_until=lease_until+1 WHERE id=?", (lease,))
+            target.commit()
+        with patch("ai_earn.state_storage._copy_database", side_effect=corrupt_copy):
+            with self.assertRaises(StateStorageError):
+                self.state.backup_to(destination, confirmed=True)
+        self.assertTrue(destination.exists())  # Failed copies are retained for inspection, not trusted.
+        self.assertTrue(self.queue.get_lease(self.alice, lease)["active"])
+
     def test_migration_failure_confirmation_and_tampering(self):
         prior = StateStorage(self.directory / "v6.sqlite3")
         backup = self.directory / "pre.sqlite3"
