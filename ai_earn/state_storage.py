@@ -17,7 +17,7 @@ from .auth_storage import AuthStorage, StorageError, _windows_auth_verified
 
 APPLICATION_ID = 0x41494533  # AIE3, distinct from the auth-only database.
 SCHEMA_VERSION = 1  # New files still bootstrap as version 1; upgrades are explicit.
-LATEST_SCHEMA_VERSION = 6
+LATEST_SCHEMA_VERSION = 7
 
 
 class StateStorageError(Exception):
@@ -139,10 +139,44 @@ _V6_SCHEMA = {
 }
 
 
+_V7_SCHEMA = {
+    "task_queue": """CREATE TABLE task_queue (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 200 AND length(trim(title)) > 0),
+    status TEXT NOT NULL CHECK(status IN ('queued', 'leased', 'cancelled', 'exhausted')),
+    priority INTEGER NOT NULL CHECK(typeof(priority)='integer' AND priority BETWEEN 0 AND 9),
+    max_attempts INTEGER NOT NULL CHECK(typeof(max_attempts)='integer' AND max_attempts BETWEEN 1 AND 10),
+    attempts INTEGER NOT NULL CHECK(typeof(attempts)='integer' AND attempts BETWEEN 0 AND max_attempts),
+    backoff_seconds INTEGER NOT NULL CHECK(typeof(backoff_seconds)='integer' AND backoff_seconds BETWEEN 0 AND 86400),
+    available_at INTEGER NOT NULL CHECK(typeof(available_at)='integer' AND available_at BETWEEN 0 AND 4102444800),
+    deadline_at INTEGER NOT NULL CHECK(typeof(deadline_at)='integer' AND deadline_at BETWEEN 0 AND 4102444800),
+    current_lease_id TEXT CHECK(current_lease_id IS NULL OR (length(current_lease_id)=32 AND current_lease_id NOT GLOB '*[^0-9a-f]*')),
+    lease_until INTEGER CHECK(lease_until IS NULL OR (typeof(lease_until)='integer' AND lease_until BETWEEN 0 AND 4102444800)),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at BETWEEN 0 AND 4102444800),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at BETWEEN created_at AND 4102444800),
+    CHECK((status='leased' AND current_lease_id IS NOT NULL AND lease_until IS NOT NULL) OR
+          (status!='leased' AND current_lease_id IS NULL AND lease_until IS NULL)),
+    UNIQUE(id, owner_id),
+    FOREIGN KEY(current_lease_id, id, owner_id) REFERENCES queue_leases(id, queue_id, owner_id)
+)""",
+    "queue_leases": """CREATE TABLE queue_leases (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    queue_id TEXT NOT NULL CHECK(length(queue_id)=32 AND queue_id NOT GLOB '*[^0-9a-f]*'),
+    attempt INTEGER NOT NULL CHECK(typeof(attempt)='integer' AND attempt BETWEEN 1 AND 10),
+    lease_until INTEGER NOT NULL CHECK(typeof(lease_until)='integer' AND lease_until BETWEEN 0 AND 4102444800),
+    FOREIGN KEY(queue_id, owner_id) REFERENCES task_queue(id, owner_id),
+    UNIQUE(queue_id, attempt),
+    UNIQUE(id, queue_id, owner_id)
+)""",
+}
+
+
 def _validate_schema(conn: sqlite3.Connection) -> int:
     application_id = conn.execute("PRAGMA application_id").fetchone()[0]
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if application_id != APPLICATION_ID or version not in (1, 2, 3, 4, 5, 6):
+    if application_id != APPLICATION_ID or version not in (1, 2, 3, 4, 5, 6, 7):
         raise StateStorageError("Unsupported or uninitialized state database; no migration was performed.")
     expected_columns = {
         "state_meta": [("key", "TEXT", 0, 1), ("value", "TEXT", 1, 0)],
@@ -183,6 +217,20 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
             ("status", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
             ("updated_at", "INTEGER", 1, 0),
         ]
+    if version >= 7:
+        expected_columns["task_queue"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("title", "TEXT", 1, 0),
+            ("status", "TEXT", 1, 0), ("priority", "INTEGER", 1, 0),
+            ("max_attempts", "INTEGER", 1, 0), ("attempts", "INTEGER", 1, 0),
+            ("backoff_seconds", "INTEGER", 1, 0), ("available_at", "INTEGER", 1, 0),
+            ("deadline_at", "INTEGER", 1, 0), ("current_lease_id", "TEXT", 0, 0),
+            ("lease_until", "INTEGER", 0, 0), ("created_at", "INTEGER", 1, 0),
+            ("updated_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["queue_leases"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("queue_id", "TEXT", 1, 0),
+            ("attempt", "INTEGER", 1, 0), ("lease_until", "INTEGER", 1, 0),
+        ]
     objects = conn.execute(
         "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name"
     ).fetchall()
@@ -210,6 +258,8 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         schemas.append(_V5_SCHEMA)
     if version >= 6:
         schemas.append(_V6_SCHEMA)
+    if version >= 7:
+        schemas.append(_V7_SCHEMA)
     for schema in schemas:
         for name, statement in schema.items():
             row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()
@@ -257,6 +307,13 @@ def _apply_v6(conn: sqlite3.Connection) -> None:
         conn.execute(statement)
     conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (6, int(time.time())))
     conn.execute("PRAGMA user_version = 6")
+
+
+def _apply_v7(conn: sqlite3.Connection) -> None:
+    for statement in _V7_SCHEMA.values():
+        conn.execute(statement)
+    conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (7, int(time.time())))
+    conn.execute("PRAGMA user_version = 7")
 
 
 def _check_integrity(conn: sqlite3.Connection) -> None:
@@ -376,6 +433,18 @@ class StateStorage:
             self.backup_to(backup, confirmed=True)
             _apply_v6(conn)
             if _validate_schema(conn) != 6:
+                raise StateStorageError("Migration produced an incompatible schema.")
+
+    def migrate_to_v7(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 6 only, after a checked backup while holding its write lock."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 6:
+                raise StateStorageError("Only version 6 can be upgraded to version 7.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v7(conn)
+            if _validate_schema(conn) != 7:
                 raise StateStorageError("Migration produced an incompatible schema.")
 
     def backup_to(self, destination: Path, *, confirmed: bool = False) -> None:
