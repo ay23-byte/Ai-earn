@@ -55,8 +55,8 @@ def _digest(action: str, value: str) -> bytes:
 
 
 def _check_version(conn: sqlite3.Connection) -> None:
-    if conn.execute("PRAGMA user_version").fetchone()[0] not in (3, 4, 5):
-        raise StateStorageError("State schema version 3, 4 or 5 is required for drafts.")
+    if conn.execute("PRAGMA user_version").fetchone()[0] not in (3, 4, 5, 6):
+        raise StateStorageError("State schema version 3, 4, 5 or 6 is required for drafts.")
 
 
 def _owned(conn: sqlite3.Connection, owner: str, record_id: str) -> sqlite3.Row:

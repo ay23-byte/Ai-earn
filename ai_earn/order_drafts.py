@@ -37,8 +37,8 @@ def _amount(value: int) -> int:
 
 
 def _check_version(conn: sqlite3.Connection) -> None:
-    if conn.execute("PRAGMA user_version").fetchone()[0] != 5:
-        raise StateStorageError("State schema version 5 is required for order drafts.")
+    if conn.execute("PRAGMA user_version").fetchone()[0] not in (5, 6):
+        raise StateStorageError("State schema version 5 or 6 is required for order drafts.")
 
 
 def _owned(conn: sqlite3.Connection, owner: str, record_id: str) -> sqlite3.Row:
