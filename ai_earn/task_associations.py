@@ -1,7 +1,8 @@
 """Owned queue/workflow associations, not execution or authority.
 
-Associations are immutable local metadata. The queue and workflow can still
-change independently; a link does not prove work, review, delivery or payment.
+Associations are immutable local metadata. Opt-in paired operations use a
+single state transaction, but the parents can still change independently; a
+link does not prove work, human review, delivery or payment.
 This internal service requires a trusted fixed auth/state pair and disposable data.
 """
 import hmac
@@ -11,8 +12,18 @@ from .auth import AccessDenied, AuthService
 from .opportunity_drafts import DraftError, _digest, _key, _record_id
 from .state_authorization import _authorized_transaction
 from .state_storage import StateStorage, StateStorageError
-from .task_queue import _owned as _owned_queue
-from .task_workflows import _owned as _owned_workflow
+from .task_queue import (
+    QueueError, _claim_in_transaction, _reschedule_in_transaction, _integer as _queue_integer,
+    _owned as _owned_queue, _audit as _queue_audit,
+    _remember as _queue_remember, _request as _queue_request, _retry as _queue_retry,
+)
+from .task_workflows import (
+    WorkflowError, _owned as _owned_workflow, _audit as _workflow_audit,
+    _remember as _workflow_remember, _request as _workflow_request,
+    _retry as _workflow_retry, _output as _workflow_output,
+    _submit_in_transaction as _workflow_submit_in_transaction,
+    _review_in_transaction as _workflow_review_in_transaction,
+)
 
 
 _RESOURCE = "task_association"
@@ -64,9 +75,9 @@ def _retry(conn, owner, key, digest):
     return row["resource_id"]
 
 
-def _audit(conn, now, owner, ident):
+def _audit(conn, now, owner, ident, event="task_association_created"):
     conn.execute("INSERT INTO state_audit(occurred_at, actor_id, event, resource_type, resource_id) VALUES(?,?,?,?,?)",
-                 (now, owner, "task_association_created", _RESOURCE, ident))
+                 (now, owner, event, _RESOURCE, ident))
 
 
 def _remember(conn, owner, key, digest, ident):
@@ -74,8 +85,14 @@ def _remember(conn, owner, key, digest, ident):
                  (owner, key, digest, _RESOURCE, ident))
 
 
+def _pair_child_key():
+    # These are internal idempotency records, not credentials. Check the shared
+    # owner keyspace before use: caller-provided keys are not reserved.
+    return "internal_pair_" + secrets.token_hex(32)
+
+
 class TaskAssociations:
-    """One-to-one historical references, with no worker or lifecycle coordination."""
+    """Historical references and opt-in paired mutations; no worker fence."""
 
     def __init__(self, auth: AuthService, state: StateStorage):
         self._auth = auth
@@ -101,6 +118,206 @@ class TaskAssociations:
             ident = secrets.token_hex(16)
             conn.execute("INSERT INTO task_associations VALUES (?,?,?,?,?)", (ident, owner, queue_id, workflow_id, now))
             _audit(conn, now, owner, ident)
+            _remember(conn, owner, key, digest, ident)
+            return ident
+
+    def start_pair(self, token: str, record_id: str, *, operation_key: str, lease_seconds: int) -> str:
+        """Atomically lease a queued item and start its planned local workflow.
+
+        A returned lease ID may be stale, including on an exact retry. It does
+        not authorize or fence execution or external effects; parent methods
+        remain independently callable and can bypass this opt-in operation.
+        """
+        ident = _input(_record_id, record_id)
+        key = _input(_key, operation_key)
+        try:
+            duration = _queue_integer(lease_seconds, 1, 3600)
+        except QueueError as exc:
+            raise AssociationError("Invalid association input.") from exc
+        digest = _queue_request("association_start_pair", [ident, duration])
+        with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
+            _version(conn)
+            association, queue, workflow = _owned_rows(conn, owner, ident)
+            try:
+                existing = _queue_retry(conn, owner, key, digest, "queue_lease")
+            except QueueError as exc:
+                raise AssociationError("Operation key was already used for a different request.") from exc
+            if existing is not None:
+                lease = conn.execute("SELECT queue_id FROM queue_leases WHERE id=? AND owner_id=?", (existing, owner)).fetchone()
+                if lease is None or lease["queue_id"] != association["queue_id"]:
+                    raise StateStorageError("Stored operation result is inconsistent.")
+                return existing
+            if workflow["status"] != "planned":
+                raise AssociationError("A queued item and planned workflow are required.")
+            workflow_key = _pair_child_key()
+            if (workflow_key == key or conn.execute(
+                    "SELECT 1 FROM state_operations WHERE owner_id=? AND operation_key=?", (owner, workflow_key)
+                    ).fetchone() is not None):
+                raise StateStorageError("Internal operation key collision.")
+            try:
+                lease_id, until = _claim_in_transaction(conn, owner, now, queue, duration, key, digest)
+            except QueueError as exc:
+                raise AssociationError("Task is not ready for a lease.") from exc
+            workflow_id = association["workflow_id"]
+            conn.execute("UPDATE task_workflows SET status='in_progress', output_hash=NULL, output_size=NULL, updated_at=? WHERE id=? AND owner_id=?",
+                         (now, workflow_id, owner))
+            _workflow_audit(conn, now, owner, "workflow_started", workflow_id)
+            _workflow_remember(conn, owner, workflow_key, _workflow_request("workflow_start", [workflow_id]), workflow_id)
+            if int(self._auth.clock()) >= until:
+                raise AssociationError("Lease expired before commit.")
+            return lease_id
+
+    def retry_pair(self, token: str, record_id: str, lease_id: str, *, operation_key: str) -> str:
+        """Release a current lease for a failed in-progress local attempt."""
+        return self._reschedule_pair(token, record_id, lease_id, operation_key, expired=False)
+
+    def recover_pair(self, token: str, record_id: str, lease_id: str, *, operation_key: str) -> str:
+        """Recover an expired linked lease without changing workflow output."""
+        return self._reschedule_pair(token, record_id, lease_id, operation_key, expired=True)
+
+    def _reschedule_pair(self, token, record_id, lease_id, operation_key, *, expired):
+        ident, lease_id, key = _input(_record_id, record_id), _input(_record_id, lease_id), _input(_key, operation_key)
+        digest = _queue_request("association_recover_pair" if expired else "association_retry_pair", [ident, lease_id])
+        with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
+            _version(conn)
+            association, queue, workflow = _owned_rows(conn, owner, ident)
+            try:
+                existing = _queue_retry(conn, owner, key, digest, "task_queue")
+            except QueueError as exc:
+                raise AssociationError("Operation key was already used for a different request.") from exc
+            if existing is not None:
+                if existing != association["queue_id"]:
+                    raise StateStorageError("Stored operation result is inconsistent.")
+                return existing
+            allowed = ("in_progress", "pending_review") if expired else ("in_progress",)
+            if workflow["status"] not in allowed:
+                raise AssociationError("Local workflow state does not permit rescheduling.")
+            try:
+                result = _reschedule_in_transaction(conn, owner, now, queue, lease_id, key, digest, expired=expired)
+            except QueueError as exc:
+                raise AssociationError("Lease is stale or transition is not allowed.") from exc
+            if (int(self._auth.clock()) >= queue["lease_until"]) != expired:
+                raise AssociationError("Lease timing changed before commit.")
+            return result
+
+    def resume_pair(self, token: str, record_id: str, *, operation_key: str, lease_seconds: int) -> str:
+        """Claim a ready linked queue item without changing its active workflow.
+
+        Exact retries may return an inactive lease. This opt-in operation cannot
+        prevent independent parent calls or fence work outside the local database.
+        """
+        ident, key = _input(_record_id, record_id), _input(_key, operation_key)
+        try:
+            duration = _queue_integer(lease_seconds, 1, 3600)
+        except QueueError as exc:
+            raise AssociationError("Invalid association input.") from exc
+        digest = _queue_request("association_resume_pair", [ident, duration])
+        with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
+            _version(conn)
+            association, queue, workflow = _owned_rows(conn, owner, ident)
+            try:
+                existing = _queue_retry(conn, owner, key, digest, "queue_lease")
+            except QueueError as exc:
+                raise AssociationError("Operation key was already used for a different request.") from exc
+            if existing is not None:
+                lease = conn.execute("SELECT queue_id FROM queue_leases WHERE id=? AND owner_id=?", (existing, owner)).fetchone()
+                if lease is None or lease["queue_id"] != association["queue_id"]:
+                    raise StateStorageError("Stored operation result is inconsistent.")
+                return existing
+            if workflow["status"] not in ("in_progress", "pending_review"):
+                raise AssociationError("Local workflow state does not permit resumption.")
+            try:
+                lease_id, until = _claim_in_transaction(conn, owner, now, queue, duration, key, digest)
+            except QueueError as exc:
+                raise AssociationError("Task is not ready for a lease.") from exc
+            if int(self._auth.clock()) >= until:
+                raise AssociationError("Lease expired before commit.")
+            return lease_id
+
+    def submit_pair(self, token: str, record_id: str, lease_id: str, output: str, *, operation_key: str) -> str:
+        """Submit output for local review while the linked lease is current.
+
+        An exact retry acknowledges an earlier mutation, not an active lease or
+        permission to do work. Independent workflow APIs can bypass this check.
+        """
+        return self._review_operation(token, record_id, lease_id, output, operation_key, action="submit")
+
+    def review_pair(self, token: str, record_id: str, lease_id: str, output: str, *,
+                    approved: bool, confirmed: bool = False, operation_key: str) -> str:
+        """Record an explicit local decision; this does not prove human review."""
+        if confirmed is not True or type(approved) is not bool:
+            raise AssociationError("Explicit review confirmation and a boolean decision are required.")
+        return self._review_operation(token, record_id, lease_id, output, operation_key, action="review", approved=approved)
+
+    def _review_operation(self, token, record_id, lease_id, output, operation_key, *, action, approved=None):
+        ident, lease_id, key = _input(_record_id, record_id), _input(_record_id, lease_id), _input(_key, operation_key)
+        try:
+            output_hash, size = _workflow_output(output)
+        except WorkflowError as exc:
+            raise AssociationError("Invalid association input.") from exc
+        values = [ident, lease_id, output_hash.hex(), size]
+        if action == "review":
+            values.append(approved)
+        digest = _workflow_request("association_" + action + "_pair", values)
+        with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
+            _version(conn)
+            association, queue, workflow = _owned_rows(conn, owner, ident)
+            try:
+                existing = _workflow_retry(conn, owner, key, digest)
+            except WorkflowError as exc:
+                raise AssociationError("Operation key was already used for a different request.") from exc
+            if existing is not None:
+                if existing != association["workflow_id"]:
+                    raise StateStorageError("Stored operation result is inconsistent.")
+                return existing
+            if (queue["status"] != "leased" or queue["current_lease_id"] != lease_id
+                    or now >= queue["lease_until"]):
+                raise AssociationError("A current unexpired lease is required.")
+            try:
+                if action == "submit":
+                    result = _workflow_submit_in_transaction(conn, owner, now, workflow, output_hash, size, key, digest)
+                else:
+                    result = _workflow_review_in_transaction(conn, owner, now, workflow, output_hash, size, approved, key, digest)
+            except WorkflowError as exc:
+                raise AssociationError("Local workflow transition is not allowed.") from exc
+            if int(self._auth.clock()) >= queue["lease_until"]:
+                raise AssociationError("Lease expired before commit.")
+            return result
+
+    def cancel_pair(self, token: str, record_id: str, *, operation_key: str) -> str:
+        """Cancel a queued item and planned workflow together, not external work.
+
+        Only this operation is coordinated. Existing parent services can still
+        mutate independently; no worker, external effect or review is fenced.
+        """
+        ident = _input(_record_id, record_id)
+        key = _input(_key, operation_key)
+        digest = _digest("task_association_cancel_pair", ident)
+        with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
+            _version(conn)
+            association, queue, workflow = _owned_rows(conn, owner, ident)
+            existing = _retry(conn, owner, key, digest)
+            if existing is not None:
+                if existing != ident:
+                    raise StateStorageError("Stored operation result is inconsistent.")
+                return existing
+            if queue["status"] != "queued" or workflow["status"] != "planned":
+                raise AssociationError("A queued item and planned workflow are required.")
+            queue_key, workflow_key = _pair_child_key(), _pair_child_key()
+            if (queue_key == workflow_key or key in (queue_key, workflow_key)
+                    or conn.execute("SELECT 1 FROM state_operations WHERE owner_id=? AND operation_key IN (?,?) LIMIT 1",
+                                    (owner, queue_key, workflow_key)).fetchone() is not None):
+                raise StateStorageError("Internal operation key collision.")
+            queue_id, workflow_id = association["queue_id"], association["workflow_id"]
+            conn.execute("UPDATE task_queue SET status='cancelled', updated_at=? WHERE id=? AND owner_id=?",
+                         (now, queue_id, owner))
+            _queue_audit(conn, now, owner, "queue_cancelled", queue_id)
+            _queue_remember(conn, owner, queue_key, _queue_request("queue_cancel", [queue_id]), "task_queue", queue_id)
+            conn.execute("UPDATE task_workflows SET status='cancelled', output_hash=NULL, output_size=NULL, updated_at=? WHERE id=? AND owner_id=?",
+                         (now, workflow_id, owner))
+            _workflow_audit(conn, now, owner, "workflow_cancelled", workflow_id)
+            _workflow_remember(conn, owner, workflow_key, _workflow_request("workflow_cancel", [workflow_id]), workflow_id)
+            _audit(conn, now, owner, ident, "task_association_pair_cancelled")
             _remember(conn, owner, key, digest, ident)
             return ident
 

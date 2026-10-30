@@ -81,6 +81,46 @@ def _request(action, values):
     return _digest(action, json.dumps(values, ensure_ascii=True, separators=(",", ":")))
 
 
+def _claim_in_transaction(conn, owner, now, task, duration, key, digest):
+    """Apply queue claim rules inside an already authorized state transaction.
+
+    The caller must perform retry handling and recheck lease time before commit.
+    """
+    if task["status"] != "queued" or task["available_at"] > now or (task["deadline_at"] and task["deadline_at"] <= now):
+        raise QueueError("Task is not ready for a lease.")
+    if now + duration > _MAX_TIME:
+        raise QueueError("Invalid queue timing.")
+    until = min(now + duration, task["deadline_at"]) if task["deadline_at"] else now + duration
+    ident = task["id"]
+    lease_id = secrets.token_hex(16)
+    conn.execute("INSERT INTO queue_leases VALUES(?,?,?,?,?)", (lease_id, owner, ident, task["attempts"] + 1, until))
+    conn.execute("UPDATE task_queue SET status='leased', attempts=attempts+1, current_lease_id=?, lease_until=?, updated_at=? WHERE id=? AND owner_id=?",
+                 (lease_id, until, now, ident, owner))
+    _audit(conn, now, owner, "queue_leased", ident)
+    _remember(conn, owner, key, digest, "queue_lease", lease_id)
+    return lease_id, until
+
+
+def _reschedule_in_transaction(conn, owner, now, task, lease_id, key, digest, *, expired):
+    """Apply queue retry/recovery rules in an authorized state transaction.
+
+    Callers handle exact retries and recheck the lease time before commit.
+    """
+    if task["status"] != "leased" or task["current_lease_id"] != lease_id or (now >= task["lease_until"]) != expired:
+        raise QueueError("Lease is stale or transition is not allowed.")
+    available = now + task["backoff_seconds"]
+    if available > _MAX_TIME:
+        raise QueueError("Invalid queue timing.")
+    terminal = task["attempts"] >= task["max_attempts"] or (task["deadline_at"] and available >= task["deadline_at"])
+    status = "exhausted" if terminal else "queued"
+    ident = task["id"]
+    conn.execute("UPDATE task_queue SET status=?, available_at=?, current_lease_id=NULL, lease_until=NULL, updated_at=? WHERE id=? AND owner_id=?",
+                 (status, available, now, ident, owner))
+    _audit(conn, now, owner, "queue_exhausted" if terminal else ("queue_recovered" if expired else "queue_retry"), ident)
+    _remember(conn, owner, key, digest, "task_queue", ident)
+    return ident
+
+
 class TaskQueue:
     """Owner-scoped records and leases only, with no execution or completion."""
 
@@ -145,17 +185,7 @@ class TaskQueue:
             existing = _retry(conn, owner, key, digest, "queue_lease")
             if existing is not None:
                 return existing
-            if task["status"] != "queued" or task["available_at"] > now or (task["deadline_at"] and task["deadline_at"] <= now):
-                raise QueueError("Task is not ready for a lease.")
-            if now + duration > _MAX_TIME:
-                raise QueueError("Invalid queue timing.")
-            until = min(now + duration, task["deadline_at"]) if task["deadline_at"] else now + duration
-            lease_id = secrets.token_hex(16)
-            conn.execute("INSERT INTO queue_leases VALUES(?,?,?,?,?)", (lease_id, owner, ident, task["attempts"] + 1, until))
-            conn.execute("UPDATE task_queue SET status='leased', attempts=attempts+1, current_lease_id=?, lease_until=?, updated_at=? WHERE id=? AND owner_id=?",
-                         (lease_id, until, now, ident, owner))
-            _audit(conn, now, owner, "queue_leased", ident)
-            _remember(conn, owner, key, digest, "queue_lease", lease_id)
+            lease_id, until = _claim_in_transaction(conn, owner, now, task, duration, key, digest)
             if int(self._auth.clock()) >= until:
                 raise QueueError("Lease expired before commit.")
             return lease_id
@@ -190,18 +220,10 @@ class TaskQueue:
             existing = _retry(conn, owner, key, digest, "task_queue")
             if existing is not None:
                 return existing
-            if task["status"] != "leased" or task["current_lease_id"] != lease_id or (now >= task["lease_until"]) != expired:
-                raise QueueError("Lease is stale or transition is not allowed.")
-            available = now + task["backoff_seconds"]
-            if available > _MAX_TIME:
-                raise QueueError("Invalid queue timing.")
-            terminal = task["attempts"] >= task["max_attempts"] or (task["deadline_at"] and available >= task["deadline_at"])
-            status = "exhausted" if terminal else "queued"
-            conn.execute("UPDATE task_queue SET status=?, available_at=?, current_lease_id=NULL, lease_until=NULL, updated_at=? WHERE id=? AND owner_id=?",
-                         (status, available, now, ident, owner))
-            _audit(conn, now, owner, "queue_exhausted" if terminal else ("queue_recovered" if expired else "queue_retry"), ident)
-            _remember(conn, owner, key, digest, "task_queue", ident)
-            return ident
+            result = _reschedule_in_transaction(conn, owner, now, task, lease_id, key, digest, expired=expired)
+            if (int(self._auth.clock()) >= task["lease_until"]) != expired:
+                raise QueueError("Lease timing changed before commit.")
+            return result
 
     def cancel(self, token: str, record_id: str, *, operation_key: str) -> str:
         ident = _input(_record_id, record_id)

@@ -124,6 +124,35 @@ class TaskQueueTests(unittest.TestCase):
         self.clock.now += 3
         self.assertNotEqual(reopened.claim(self.alice, ident, operation_key="next", lease_seconds=5), lease)
 
+    def test_reschedule_refuses_clock_crossing_lease_boundary_before_commit(self):
+        import ai_earn.task_queue as module
+        ident = self.add(backoff_seconds=0)
+        lease = self.queue.claim(self.alice, ident, operation_key="claim", lease_seconds=5)
+        original = module._reschedule_in_transaction
+        def advance(*args, **kwargs):
+            result = original(*args, **kwargs)
+            self.clock.now += 5
+            return result
+        with patch.object(module, "_reschedule_in_transaction", side_effect=advance):
+            with self.assertRaises(QueueError):
+                self.queue.retry(self.alice, ident, lease, operation_key="retry")
+        with self.state.transaction() as conn:
+            self.assertEqual(conn.execute("SELECT status FROM task_queue WHERE id=?", (ident,)).fetchone()[0], "leased")
+            self.assertEqual(conn.execute("SELECT count(*) FROM state_operations WHERE operation_key='retry'").fetchone()[0], 0)
+        def reverse(*args, **kwargs):
+            result = original(*args, **kwargs)
+            self.clock.now -= 1
+            return result
+        with patch.object(module, "_reschedule_in_transaction", side_effect=reverse):
+            with self.assertRaises(QueueError):
+                self.queue.recover(self.alice, ident, lease, operation_key="recover")
+        with self.state.transaction() as conn:
+            self.assertEqual(conn.execute("SELECT status FROM task_queue WHERE id=?", (ident,)).fetchone()[0], "leased")
+            self.assertEqual(conn.execute("SELECT count(*) FROM state_operations WHERE operation_key='recover'").fetchone()[0], 0)
+        self.clock.now += 1
+        self.assertEqual(self.queue.recover(self.alice, ident, lease, operation_key="recover"), ident)
+        self.assertEqual(self.queue.recover(self.alice, ident, lease, operation_key="recover"), ident)
+
     def test_deadline_caps_lease_and_recovery_exhausts(self):
         ident = self.add(deadline_at=self.clock.now + 5)
         lease = self.queue.claim(self.alice, ident, operation_key="claim", lease_seconds=60)
