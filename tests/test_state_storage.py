@@ -1,5 +1,6 @@
 """Phase 3 storage tests use disposable databases only."""
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing, contextmanager
 import os
 from pathlib import Path
 import sqlite3
@@ -9,6 +10,13 @@ from unittest.mock import patch
 
 from ai_earn.auth_storage import AuthStorage
 from ai_earn.state_storage import StateStorage, StateStorageError
+
+
+@contextmanager
+def _test_connection(path):
+    """Commit/rollback and close disposable test connections on all platforms."""
+    with closing(sqlite3.connect(path)) as conn, conn:
+        yield conn
 
 
 @unittest.skipUnless(os.name in {"posix", "nt"}, "requires a supported private filesystem")
@@ -27,6 +35,55 @@ class StateStorageTests(unittest.TestCase):
     def create(self):
         return StateStorage(self.path, create=True, confirmed=True)
 
+    def test_test_connection_commits_rolls_back_and_closes(self):
+        with _test_connection(self.path) as conn:
+            conn.execute("CREATE TABLE sample (value TEXT)")
+            conn.execute("INSERT INTO sample VALUES ('committed')")
+        with self.assertRaises(sqlite3.ProgrammingError):
+            conn.execute("SELECT 1")
+        with self.assertRaisesRegex(RuntimeError, "rollback"):
+            with _test_connection(self.path) as conn:
+                conn.execute("INSERT INTO sample VALUES ('rolled back')")
+                raise RuntimeError("rollback")
+        with self.assertRaises(sqlite3.ProgrammingError):
+            conn.execute("SELECT 1")
+        with _test_connection(self.path) as conn:
+            self.assertEqual(conn.execute("SELECT value FROM sample").fetchall(), [("committed",)])
+
+    def test_storage_connections_close_on_success_and_failure(self):
+        original_connect = sqlite3.connect
+        opened = []
+
+        def track_connect(*args, **kwargs):
+            conn = original_connect(*args, **kwargs)
+            opened.append(conn)
+            return conn
+
+        with patch("ai_earn.state_storage.sqlite3.connect", side_effect=track_connect):
+            store = self.create()
+            StateStorage(self.path)
+            with store.transaction() as conn:
+                conn.execute("SELECT 1")
+            with self.assertRaisesRegex(RuntimeError, "rollback"):
+                with store.transaction():
+                    raise RuntimeError("rollback")
+            store.backup_to(self.directory / "backup.sqlite3", confirmed=True)
+            with patch("ai_earn.state_storage._copy_database", side_effect=sqlite3.OperationalError("failure")):
+                with self.assertRaises(StateStorageError):
+                    store.backup_to(self.directory / "partial.sqlite3", confirmed=True)
+            with _test_connection(self.path) as conn:
+                conn.execute("PRAGMA user_version = 2")
+            with self.assertRaises(StateStorageError):
+                StateStorage(self.path)
+            with self.assertRaises(StateStorageError):
+                with store.transaction():
+                    pass
+
+        self.assertGreater(len(opened), 0)
+        for conn in opened:
+            with self.assertRaises(sqlite3.ProgrammingError):
+                conn.execute("SELECT 1")
+
     def test_create_requires_explicit_confirmation(self):
         with self.assertRaises(StateStorageError):
             StateStorage(self.path, create=True)
@@ -42,7 +99,7 @@ class StateStorageTests(unittest.TestCase):
         self.assertTrue(self.path.exists())
         with self.assertRaises(StateStorageError):
             StateStorage(self.path)
-        with sqlite3.connect(self.path) as conn:
+        with _test_connection(self.path) as conn:
             self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 0)
             self.assertEqual(conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall(), [])
 
@@ -88,14 +145,14 @@ class StateStorageTests(unittest.TestCase):
 
     def test_unknown_version_and_foreign_database_are_not_modified(self):
         self.create()
-        with sqlite3.connect(self.path) as conn:
+        with _test_connection(self.path) as conn:
             conn.execute("PRAGMA user_version = 999")
         with self.assertRaises(StateStorageError):
             StateStorage(self.path)
-        with sqlite3.connect(self.path) as conn:
+        with _test_connection(self.path) as conn:
             self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 999)
         other = self.directory / "foreign.sqlite3"
-        with sqlite3.connect(other) as conn:
+        with _test_connection(other) as conn:
             conn.execute("CREATE TABLE important(value TEXT)")
             conn.execute("INSERT INTO important VALUES ('preserve')")
             conn.execute("PRAGMA user_version = 1")
@@ -103,16 +160,16 @@ class StateStorageTests(unittest.TestCase):
             os.chmod(other, 0o600)
         with self.assertRaises(StateStorageError):
             StateStorage(other)
-        with sqlite3.connect(other) as conn:
+        with _test_connection(other) as conn:
             self.assertEqual(conn.execute("SELECT value FROM important").fetchone()[0], "preserve")
 
     def test_incomplete_history_and_missing_schema_are_refused(self):
         self.create()
-        with sqlite3.connect(self.path) as conn:
+        with _test_connection(self.path) as conn:
             conn.execute("DELETE FROM state_migrations")
         with self.assertRaises(StateStorageError):
             StateStorage(self.path)
-        with sqlite3.connect(self.path) as conn:
+        with _test_connection(self.path) as conn:
             conn.execute("INSERT INTO state_migrations VALUES (1, 0)")
             conn.execute("DROP TABLE state_meta")
         with self.assertRaises(StateStorageError):
@@ -120,7 +177,7 @@ class StateStorageTests(unittest.TestCase):
 
     def test_changed_version_is_refused_before_transaction(self):
         store = self.create()
-        with sqlite3.connect(self.path) as conn:
+        with _test_connection(self.path) as conn:
             conn.execute("PRAGMA user_version = 2")
         with self.assertRaises(StateStorageError):
             with store.transaction():
