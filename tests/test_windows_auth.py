@@ -2,6 +2,7 @@
 from contextlib import closing
 import io
 import os
+import re
 from pathlib import Path
 import sqlite3
 import subprocess
@@ -81,6 +82,32 @@ class WindowsAuthenticationTests(unittest.TestCase):
             self.assertEqual(run("login", env, Terminal("alice\n\n"), out, err), 0)
         self.assertIn("Signed out", out.getvalue())
         self.assertNotIn(self.password, out.getvalue() + err.getvalue())
+
+    def test_recovery_code_replacement_requires_confirmation_and_live_session(self):
+        original = self.service.register("alice", self.password)
+        session = self.service.login("alice", self.password)
+        with self.assertRaises(AuthError):
+            self.service.replace_recovery_code(session)
+        replacement = self.service.replace_recovery_code(session, confirmed=True)
+        with self.assertRaises(AuthError):
+            self.service.recover("alice", original, "new-example-password")
+        self.assertTrue(self.service.recover("alice", replacement, "new-example-password"))
+        with self.assertRaises(AccessDenied):
+            self.service.replace_recovery_code(session, confirmed=True)
+
+    def test_cli_recovery_replacement(self):
+        class Terminal(io.StringIO):
+            def isatty(self):
+                return True
+        old = self.service.register("alice", self.password)
+        out, err = Terminal(), io.StringIO()
+        with patch("ai_earn.auth_cli._secret", return_value=self.password):
+            self.assertEqual(run("login", {"AI_EARN_AUTH_DB": str(self.path)}, Terminal("alice\nr\nYES\n"), out, err), 0)
+        codes = re.findall(r"(?m)^([A-Za-z0-9_-]{43})$", out.getvalue())
+        self.assertEqual(len(codes), 1)
+        with self.assertRaises(AuthError):
+            self.service.recover("alice", old, "new-example-password")
+        self.assertTrue(self.service.recover("alice", codes[0], "new-example-password"))
 
     def test_sidecar_inherits_private_acl_and_backup_restores(self):
         self.service.register("alice", self.password)
