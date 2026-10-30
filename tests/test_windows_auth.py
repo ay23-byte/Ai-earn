@@ -197,6 +197,43 @@ class WindowsAuthenticationTests(unittest.TestCase):
         self.assertFalse(path.exists())
         secret.assert_not_called()
 
+    def test_windows_login_and_recovery_do_not_create_or_initialize_database(self):
+        class Terminal(io.StringIO):
+            def isatty(self):
+                return True
+
+        missing = self.directory / "missing.sqlite3"
+        empty = self.directory / "empty.sqlite3"
+        empty.touch()
+        for action in ("login", "recover"):
+            for path in (missing, empty):
+                with self.subTest(action=action, path=path.name):
+                    out, err = Terminal(), io.StringIO()
+                    with patch("ai_earn.auth_cli._secret") as secret:
+                        code = run(action, {"AI_EARN_AUTH_DB": str(path)}, Terminal(), out, err)
+                    self.assertEqual(code, 2)
+                    self.assertIn("database", err.getvalue().lower())
+                    secret.assert_not_called()
+                    self.assertFalse(missing.exists())
+                    self.assertEqual(empty.stat().st_size, 0)
+
+    def test_windows_file_removed_after_check_is_not_recreated(self):
+        ensure = self.storage._ensure_file
+        def remove_after_check(*args, **kwargs):
+            ensure(*args, **kwargs)
+            self.path.unlink()
+        with patch.object(self.storage, "_ensure_file", side_effect=remove_after_check):
+            with self.assertRaises(sqlite3.Error):
+                self.service.profile("a" * 43)
+        self.assertFalse(self.path.exists())
+
+    def test_windows_database_uri_handles_special_characters(self):
+        path = self.directory / "db # 100%.sqlite3"
+        service = AuthService(AuthStorage(path))
+        service.register("alice", self.password)
+        existing = AuthService(AuthStorage(path, create=False))
+        self.assertEqual(existing.profile(existing.login("alice", self.password))["username"], "alice")
+
     def test_windows_production_cli_rejects_before_creating_database(self):
         class Terminal(io.StringIO):
             def isatty(self):

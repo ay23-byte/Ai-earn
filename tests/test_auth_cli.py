@@ -126,6 +126,28 @@ class AuthCliTests(unittest.TestCase):
                 replacement = service.replace_recovery_code(token, confirmed=True)
                 self.assertTrue(service.recover("alice", replacement, "another long password"))
 
+    def test_login_and_recovery_never_create_a_missing_database(self):
+        path = Path(self.env["AI_EARN_AUTH_DB"])
+        for action in ("login", "recover"):
+            with self.subTest(action=action):
+                out, err = Terminal(), io.StringIO()
+                with patch("ai_earn.auth_cli._secret") as secret:
+                    self.assertEqual(run(action, self.env, Terminal(), out, err), 2)
+                self.assertFalse(path.exists())
+                self.assertIn("database", err.getvalue().lower())
+                secret.assert_not_called()
+
+    def test_login_and_recovery_do_not_initialize_existing_empty_file(self):
+        path = Path(self.env["AI_EARN_AUTH_DB"])
+        path.touch(mode=0o600)
+        for action in ("login", "recover"):
+            with self.subTest(action=action):
+                out, err = Terminal(), io.StringIO()
+                with patch("ai_earn.auth_cli._secret") as secret:
+                    self.assertEqual(run(action, self.env, Terminal(), out, err), 2)
+                self.assertEqual(path.stat().st_size, 0)
+                secret.assert_not_called()
+
     def test_mismatched_password_produces_no_account(self):
         out, err = Terminal(), io.StringIO()
         with patch("ai_earn.auth_cli._secret", side_effect=["test password long enough", "different password"]):

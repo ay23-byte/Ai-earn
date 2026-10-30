@@ -4,7 +4,7 @@
 
 No network listener, browser, public endpoint, upload facility, customer data or financial integration exists. The auth component is a local prototype, not a server or OS security boundary. Anyone who can control the process or read/write its database can attack credentials, alter records, or bypass account authorization. Do not use it for sensitive customer or financial data. HTTP cookies, CSRF, security headers and upload controls are not applicable to this offline CLI; they are mandatory design and test work before adding a web interface. No claim of a completed security audit is made.
 
-On POSIX, an explicitly configured absolute database path must be inside a current-user-owned parent directory with no group/other mode permissions. The database must be an owner-owned regular file with no group/other mode permissions; final-component symlinks are rejected. New files use mode 0600. These checks are not protection from privileged users, a compromised OS account, malicious same-user processes, unsafe ancestor directories or all ACL/filesystem configurations. The CLI rejects production mode. Experimental Windows development authentication is enabled in this working branch based on user-reported ACL, terminal and candidate tests, but the latest unpatched checkout has not yet been tested on Windows. Use only disposable test data until verification and phase review finish; other non-POSIX platforms remain disabled. Windows checks reject reparse-point ancestors but do not verify that all ancestors are trusted or prevent all path-swap races. Use only a trusted personal device and trusted ancestor directories; the checks are not an OS isolation boundary.
+On POSIX, an explicitly configured absolute database path must be inside a current-user-owned parent directory with no group/other mode permissions. The database must be an owner-owned regular file with no group/other mode permissions; final-component symlinks are rejected. New files use mode 0600. These checks are not protection from privileged users, a compromised OS account, malicious same-user processes, unsafe ancestor directories or all ACL/filesystem configurations. The CLI rejects production mode. Experimental Windows development authentication is enabled in this working branch based on user-reported ACL, terminal and candidate tests, and the user reported the unpatched Windows checkout passed its tests. A subsequent missing-database fix is not yet tested on Windows. Use only disposable test data until verification and phase review finish; other non-POSIX platforms remain disabled. Windows checks reject reparse-point ancestors but do not verify that all ancestors are trusted or prevent all path-swap races. Use only a trusted personal device and trusted ancestor directories; the checks are not an OS isolation boundary.
 
 ## Authentication behavior
 
@@ -16,7 +16,7 @@ On POSIX, an explicitly configured absolute database path must be inside a curre
 
 ## Backup and restore
 
-No schema migration is implemented; only an empty database can be initialized to auth schema version 1. Existing unknown versions or nonempty unversioned databases are rejected. Never overwrite, delete or migrate an existing database to make startup work. Keep its original and investigate first.
+No schema migration is implemented; only an empty database can be initialized to auth schema version 1. CLI login and recovery require an existing initialized database and do not intentionally recreate a missing one; transactions open in SQLite read/write-existing mode. Registration and the default `AuthStorage` constructor can still initialize a missing or empty database, so do not register at a missing path that previously held data: stop and investigate or restore a backup. Existing unknown versions or nonempty unversioned databases are rejected. Never overwrite, delete or migrate an existing database to make startup work. Keep its original and investigate first.
 
 Before attempting any future upgrade, stop all application access. Use SQLite's `Connection.backup` API to copy the live database into a **new**, separately protected file; do not simply copy a potentially active database and do not overwrite an existing backup. The automated suite exercises backup and login against a separate temporary copy, but no disaster-recovery rehearsal with real user data has been performed. Protect backups as sensitive credentials, keep copies separately, verify them, and follow applicable retention requirements. Python backup sketch (POSIX only; set both environment variables to absolute paths in existing owner-only directories, with the destination not already present):
 
@@ -33,7 +33,7 @@ if not source.is_absolute() or not source.is_file():
 with closing(sqlite3.connect(source.as_uri() + "?mode=ro", uri=True)) as check:
     if check.execute("PRAGMA user_version").fetchone()[0] != SCHEMA_VERSION:
         raise RuntimeError("Unsupported source schema")
-AuthStorage(source)  # Checks source ownership and permissions.
+AuthStorage(source, create=False)  # Requires an initialized source and checks ownership and permissions.
 if not destination.is_absolute():
     raise RuntimeError("Backup destination must be absolute")
 parent = destination.parent.lstat()
@@ -61,7 +61,7 @@ if not path.is_absolute() or not path.is_file():
 with closing(sqlite3.connect(path.as_uri() + '?mode=ro', uri=True)) as check:
     if check.execute('PRAGMA user_version').fetchone()[0] != SCHEMA_VERSION:
         raise RuntimeError('Unsupported restore schema')
-store = AuthStorage(path)
+store = AuthStorage(path, create=False)
 with store.transaction() as conn:
     now = int(time.time())
     conn.execute('UPDATE sessions SET revoked_at=? WHERE revoked_at IS NULL', (now,))
@@ -77,4 +77,4 @@ Stop using the component, restrict access to the database and backups, preserve 
 
 ## Windows ACL follow-up: experimental, verification pending
 
-`ai_earn/windows_security.py` contains an experimental Win32 owner/DACL verifier and a function to create a new protected test directory without modifying an existing directory. It attempts to allow only the current user and SYSTEM, rejects reparse points and unexpected ACLs, and requires a fixed local drive with persistent ACLs. The user reported that the real Windows-specific tests passed on their laptop; the sandbox has not independently executed those APIs on Windows. The user also reported completing the disposable terminal flow and confirmed that password and recovery-code input were hidden; a reviewed phase decision remains outstanding. The current working branch enables the experimental offline path without a gate override, while retaining per-operation ACL checks. The latest changed checkout and its new normal-path tests have not been run on Windows; see [WINDOWS_TESTING.md](WINDOWS_TESTING.md). Linux ACL-policy tests are not Win32 verification. A Windows regression and explicit phase decision remain required; do not use real or sensitive data while verification is pending.
+`ai_earn/windows_security.py` contains an experimental Win32 owner/DACL verifier and a function to create a new protected test directory without modifying an existing directory. It attempts to allow only the current user and SYSTEM, rejects reparse points and unexpected ACLs, and requires a fixed local drive with persistent ACLs. The user reported that the real Windows-specific tests passed on their laptop; the sandbox has not independently executed those APIs on Windows. The user also reported completing the disposable terminal flow and confirmed that password and recovery-code input were hidden; a reviewed phase decision remains outstanding. The current working branch enables the experimental offline path without a gate override, while retaining per-operation ACL checks. The user reported the unpatched normal-path tests and disposable smoke passed on Windows, but the subsequent missing-database fix and its new tests have not been run there; see [WINDOWS_TESTING.md](WINDOWS_TESTING.md). Linux ACL-policy tests are not Win32 verification. A Windows regression and explicit phase decision remain required; do not use real or sensitive data while verification is pending.
