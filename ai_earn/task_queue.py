@@ -35,8 +35,8 @@ def _integer(value, minimum, maximum):
 
 
 def _version(conn):
-    if conn.execute("PRAGMA user_version").fetchone()[0] != 7:
-        raise StateStorageError("State schema version 7 is required for the queue.")
+    if conn.execute("PRAGMA user_version").fetchone()[0] not in (7, 8):
+        raise StateStorageError("State schema version 7 or 8 is required for the queue.")
 
 
 def _owned(conn, owner, record_id):

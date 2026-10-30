@@ -17,7 +17,7 @@ from .auth_storage import AuthStorage, StorageError, _windows_auth_verified
 
 APPLICATION_ID = 0x41494533  # AIE3, distinct from the auth-only database.
 SCHEMA_VERSION = 1  # New files still bootstrap as version 1; upgrades are explicit.
-LATEST_SCHEMA_VERSION = 7
+LATEST_SCHEMA_VERSION = 8
 
 
 class StateStorageError(Exception):
@@ -173,10 +173,27 @@ _V7_SCHEMA = {
 }
 
 
+_V8_SCHEMA = {
+    "task_workflows": """CREATE TABLE task_workflows (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 200 AND length(trim(title)) > 0),
+    status TEXT NOT NULL CHECK(status IN ('planned', 'in_progress', 'pending_review', 'completed', 'cancelled')),
+    output_hash BLOB,
+    output_size INTEGER,
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at),
+    CHECK((status IN ('pending_review', 'completed') AND typeof(output_hash)='blob' AND length(output_hash)=32
+           AND typeof(output_size)='integer' AND output_size BETWEEN 1 AND 4096) OR
+          (status NOT IN ('pending_review', 'completed') AND output_hash IS NULL AND output_size IS NULL))
+)""",
+}
+
+
 def _validate_schema(conn: sqlite3.Connection) -> int:
     application_id = conn.execute("PRAGMA application_id").fetchone()[0]
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if application_id != APPLICATION_ID or version not in (1, 2, 3, 4, 5, 6, 7):
+    if application_id != APPLICATION_ID or version not in (1, 2, 3, 4, 5, 6, 7, 8):
         raise StateStorageError("Unsupported or uninitialized state database; no migration was performed.")
     expected_columns = {
         "state_meta": [("key", "TEXT", 0, 1), ("value", "TEXT", 1, 0)],
@@ -231,6 +248,13 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
             ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("queue_id", "TEXT", 1, 0),
             ("attempt", "INTEGER", 1, 0), ("lease_until", "INTEGER", 1, 0),
         ]
+    if version >= 8:
+        expected_columns["task_workflows"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("title", "TEXT", 1, 0),
+            ("status", "TEXT", 1, 0), ("output_hash", "BLOB", 0, 0),
+            ("output_size", "INTEGER", 0, 0), ("created_at", "INTEGER", 1, 0),
+            ("updated_at", "INTEGER", 1, 0),
+        ]
     objects = conn.execute(
         "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name"
     ).fetchall()
@@ -260,6 +284,8 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         schemas.append(_V6_SCHEMA)
     if version >= 7:
         schemas.append(_V7_SCHEMA)
+    if version >= 8:
+        schemas.append(_V8_SCHEMA)
     for schema in schemas:
         for name, statement in schema.items():
             row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()
@@ -314,6 +340,13 @@ def _apply_v7(conn: sqlite3.Connection) -> None:
         conn.execute(statement)
     conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (7, int(time.time())))
     conn.execute("PRAGMA user_version = 7")
+
+
+def _apply_v8(conn: sqlite3.Connection) -> None:
+    for statement in _V8_SCHEMA.values():
+        conn.execute(statement)
+    conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (8, int(time.time())))
+    conn.execute("PRAGMA user_version = 8")
 
 
 def _check_integrity(conn: sqlite3.Connection) -> None:
@@ -445,6 +478,18 @@ class StateStorage:
             self.backup_to(backup, confirmed=True)
             _apply_v7(conn)
             if _validate_schema(conn) != 7:
+                raise StateStorageError("Migration produced an incompatible schema.")
+
+    def migrate_to_v8(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 7 only, after a checked backup while holding its write lock."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 7:
+                raise StateStorageError("Only version 7 can be upgraded to version 8.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v8(conn)
+            if _validate_schema(conn) != 8:
                 raise StateStorageError("Migration produced an incompatible schema.")
 
     def backup_to(self, destination: Path, *, confirmed: bool = False) -> None:
