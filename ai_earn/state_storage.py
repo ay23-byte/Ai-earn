@@ -2,7 +2,7 @@
 
 This database is distinct from the authentication database. Callers must not
 use raw storage as a substitute for session-bound authorization. This module
-contains only versioned infrastructure metadata, not customer or payment data.
+contains experimental opportunity drafts, but no customer or payment data.
 """
 
 from contextlib import closing, contextmanager
@@ -16,7 +16,8 @@ from .auth_storage import AuthStorage, StorageError, _windows_auth_verified
 
 
 APPLICATION_ID = 0x41494533  # AIE3, distinct from the auth-only database.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 1  # New files still bootstrap as version 1; upgrades are explicit.
+LATEST_SCHEMA_VERSION = 3
 
 
 class StateStorageError(Exception):
@@ -62,26 +63,101 @@ class _PrivateFiles(AuthStorage):
             raise StateStorageError("State file could not be created safely; existing files are never overwritten.") from exc
 
 
-def _validate_schema(conn: sqlite3.Connection) -> None:
+_V2_SCHEMA = {
+    "state_audit": """CREATE TABLE state_audit (
+    id INTEGER PRIMARY KEY,
+    occurred_at INTEGER NOT NULL CHECK(typeof(occurred_at)='integer' AND occurred_at >= 0),
+    actor_id TEXT NOT NULL CHECK(length(actor_id) BETWEEN 1 AND 128),
+    event TEXT NOT NULL CHECK(length(event) BETWEEN 1 AND 64),
+    resource_type TEXT NOT NULL CHECK(length(resource_type) BETWEEN 1 AND 64),
+    resource_id TEXT NOT NULL CHECK(length(resource_id) BETWEEN 1 AND 128)
+)""",
+    "state_operations": """CREATE TABLE state_operations (
+    owner_id TEXT NOT NULL CHECK(length(owner_id) BETWEEN 1 AND 128),
+    operation_key TEXT NOT NULL CHECK(length(operation_key) BETWEEN 1 AND 128),
+    request_hash BLOB NOT NULL CHECK(typeof(request_hash)='blob' AND length(request_hash)=32),
+    resource_type TEXT NOT NULL CHECK(length(resource_type) BETWEEN 1 AND 64),
+    resource_id TEXT NOT NULL CHECK(length(resource_id) BETWEEN 1 AND 128),
+    PRIMARY KEY(owner_id, operation_key)
+)""",
+}
+
+
+_V3_SCHEMA = {
+    "opportunity_drafts": """CREATE TABLE opportunity_drafts (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 200 AND length(trim(title)) > 0),
+    status TEXT NOT NULL CHECK(status IN ('draft', 'archived')),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at)
+)""",
+}
+
+
+def _validate_schema(conn: sqlite3.Connection) -> int:
     application_id = conn.execute("PRAGMA application_id").fetchone()[0]
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if application_id != APPLICATION_ID or version != SCHEMA_VERSION:
+    if application_id != APPLICATION_ID or version not in (1, 2, 3):
         raise StateStorageError("Unsupported or uninitialized state database; no migration was performed.")
+    expected_columns = {
+        "state_meta": [("key", "TEXT", 0, 1), ("value", "TEXT", 1, 0)],
+        "state_migrations": [("version", "INTEGER", 0, 1), ("applied_at", "INTEGER", 1, 0)],
+    }
+    if version >= 2:
+        expected_columns.update({
+            "state_audit": [("id", "INTEGER", 0, 1), ("occurred_at", "INTEGER", 1, 0),
+                            ("actor_id", "TEXT", 1, 0), ("event", "TEXT", 1, 0),
+                            ("resource_type", "TEXT", 1, 0), ("resource_id", "TEXT", 1, 0)],
+            "state_operations": [("owner_id", "TEXT", 1, 1), ("operation_key", "TEXT", 1, 2),
+                                 ("request_hash", "BLOB", 1, 0), ("resource_type", "TEXT", 1, 0),
+                                 ("resource_id", "TEXT", 1, 0)],
+        })
+    if version >= 3:
+        expected_columns["opportunity_drafts"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("title", "TEXT", 1, 0),
+            ("status", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+            ("updated_at", "INTEGER", 1, 0),
+        ]
     objects = conn.execute(
         "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name"
     ).fetchall()
-    if [tuple(row) for row in objects] != [("table", "state_meta"), ("table", "state_migrations")]:
+    if [tuple(row) for row in objects] != [("table", name) for name in sorted(expected_columns)]:
         raise StateStorageError("State database schema is incompatible.")
-    for table, expected in (
-        ("state_meta", [("key", "TEXT", 0, 1), ("value", "TEXT", 1, 0)]),
-        ("state_migrations", [("version", "INTEGER", 0, 1), ("applied_at", "INTEGER", 1, 0)]),
-    ):
+    for table, expected in expected_columns.items():
         columns = conn.execute(f"PRAGMA table_info({table})").fetchall()
         if [(row[1], row[2], row[3], row[5]) for row in columns] != expected:
             raise StateStorageError("State database schema is incompatible.")
+    schemas = []
+    if version >= 2:
+        schemas.append(_V2_SCHEMA)
+    if version >= 3:
+        schemas.append(_V3_SCHEMA)
+    for schema in schemas:
+        for name, statement in schema.items():
+            row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()
+            if row is None or row[0] != statement:
+                raise StateStorageError("State database schema constraints are incompatible.")
     versions = conn.execute("SELECT version FROM state_migrations ORDER BY version").fetchall()
-    if [row[0] for row in versions] != [SCHEMA_VERSION]:
+    if [row[0] for row in versions] != list(range(1, version + 1)):
         raise StateStorageError("State migration history is incomplete or unsupported.")
+    return version
+
+
+def _apply_v2(conn: sqlite3.Connection) -> None:
+    # Infrastructure only; these tables do not provide authenticated actions,
+    # complete business audit, or idempotency semantics by themselves.
+    for statement in _V2_SCHEMA.values():
+        conn.execute(statement)
+    conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (2, int(time.time())))
+    conn.execute("PRAGMA user_version = 2")
+
+
+def _apply_v3(conn: sqlite3.Connection) -> None:
+    for statement in _V3_SCHEMA.values():
+        conn.execute(statement)
+    conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (3, int(time.time())))
+    conn.execute("PRAGMA user_version = 3")
 
 
 def _check_integrity(conn: sqlite3.Connection) -> None:
@@ -135,6 +211,35 @@ class StateStorage:
                 yield conn
         except (StorageError, sqlite3.Error, OSError) as exc:
             raise StateStorageError("State transaction could not be completed.") from exc
+
+    def migrate_to_v2(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Explicitly upgrade version 1 after a verified non-overwriting backup.
+
+        A write lock is held from validation through backup and commit, so no
+        other writer can advance the source between its snapshot and upgrade.
+        Backup uses a separate read-only connection before any writes start.
+        """
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 1:
+                raise StateStorageError("Only version 1 can be upgraded to version 2.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v2(conn)
+            if _validate_schema(conn) != 2:
+                raise StateStorageError("Migration produced an incompatible schema.")
+
+    def migrate_to_v3(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 2 only, after a checked backup while holding its write lock."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 2:
+                raise StateStorageError("Only version 2 can be upgraded to version 3.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v3(conn)
+            if _validate_schema(conn) != 3:
+                raise StateStorageError("Migration produced an incompatible schema.")
 
     def backup_to(self, destination: Path, *, confirmed: bool = False) -> None:
         """Create a verified SQLite copy at a new private path, never overwrite.
