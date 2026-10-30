@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+.env.*
+!.env.example
+# Local state and SQLite sidecars; keep all sensitive data outside the repository.
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
