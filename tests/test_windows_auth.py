@@ -10,10 +10,16 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from ai_earn import auth_storage
 from ai_earn.auth import AccessDenied, AuthError, AuthService, RateLimitError, SESSION_SECONDS
 from ai_earn.auth_cli import run
 from ai_earn.auth_storage import AuthStorage, StorageError
 from ai_earn.windows_security import WindowsSecurityError, create_private_directory, verify_private_path
+
+
+class WindowsGateDefaultTests(unittest.TestCase):
+    def test_unpatched_gate_remains_disabled(self):
+        self.assertIs(auth_storage._windows_auth_verified(), False)
 
 
 @unittest.skipUnless(os.name == "nt", "requires actual Windows Win32 APIs and a local ACL-capable drive")
@@ -25,9 +31,9 @@ class WindowsAuthenticationTests(unittest.TestCase):
         create_private_directory(self.directory)
         self.path = self.directory / "auth.sqlite3"
         # Test-only monkeypatch: ordinary Windows CLI remains disabled.
-        gate = patch("ai_earn.auth_storage._windows_auth_verified", return_value=True)
-        gate.start()
-        self.addCleanup(gate.stop)
+        self.gate = patch("ai_earn.auth_storage._windows_auth_verified", return_value=True)
+        self.gate.start()
+        self.addCleanup(self.gate.stop)
         self.storage = AuthStorage(self.path)
         self.service = AuthService(self.storage)
         self.password = "example-password-for-test"
@@ -174,6 +180,22 @@ class WindowsAuthenticationTests(unittest.TestCase):
             verify_private_path(junction, directory=True)
 
     def test_unpatched_windows_auth_remains_disabled(self):
-        with patch("ai_earn.auth_storage._windows_auth_verified", return_value=False):
-            with self.assertRaises(StorageError):
-                AuthStorage(self.path)
+        self.gate.stop()
+        with self.assertRaises(StorageError):
+            AuthStorage(self.path)
+
+    def test_unpatched_windows_cli_rejects_before_creating_database(self):
+        self.gate.stop()
+
+        class Terminal(io.StringIO):
+            def isatty(self):
+                return True
+
+        path = self.directory / "unpatched.sqlite3"
+        out, err = Terminal(), io.StringIO()
+        with patch("ai_earn.auth_cli._secret") as secret:
+            code = run("register", {"AI_EARN_AUTH_DB": str(path)}, Terminal(), out, err)
+        self.assertEqual(code, 2)
+        self.assertIn("disabled on this platform", err.getvalue())
+        self.assertFalse(path.exists())
+        secret.assert_not_called()
