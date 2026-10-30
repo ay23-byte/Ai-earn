@@ -71,3 +71,15 @@ The explicit checked-backup-first v8-to-v9 migration adds `payment_observations`
 ### Mutation crash/restart evidence
 
 Disposable v9 tests terminate a child with `os._exit` at controlled points before state commit and after state commit but before the read-only auth transaction exits. They check rollback or a retry using the same owner, operation key and exact request for queue claims, local reviews and unverified payment placeholders, plus one WAL recovery/backup case. Separate-process tests also coordinate same-key and different-key queue claims. These tests do not make the separate databases atomically commit together, prove power-loss behavior or validate real-data recovery.
+
+### Checked retry-result references
+
+Checked state backup/restore and pre-migration snapshots inspect recognized operation-result references for the schema version and require a matching owned row. The check applies to the source and copy and may refuse databases that were previously accepted; it does not migrate or repair them. Unknown resource types and absent operation records are not checked, and a reference to the wrong record with the same owner can still pass. Checked snapshots also compare recognized audit and operation counts per owner and resource, mapping queue lease results to the audited queue record. Migrations validate the post-upgrade transaction before commit, rolling back incompatible data while retaining the checked pre-migration backup. These checks add scans and grouping during backups and migrations, not every read, and are not tamper evidence or proof of correct requests, complete history, audit, or recovery. Deleting a corresponding audit/operation pair or swapping same-owner results can evade them; unknown types remain unchecked.
+
+### Owner-relative audit pages
+
+`StateAudit.list_owner_events` returns live-session owner-filtered events with a 1-based owner-relative sequence instead of global IDs. It is additive: legacy `list_events` still exposes global IDs and is internal only. Sequences are positions, not durable record IDs; deletion or restoration can shift them, and large offsets may be expensive. Neither reader is a public API or a timing/metadata side-channel defense. The audit remains incomplete and is not tamper-evident.
+
+### Proposed-amount snapshot consistency
+
+For checked backups/restores and migration validation, invoice snapshots in v6+ must match the amount and currency of their owned order drafts; v9 unverified placeholders must match their owned invoice. This assumes the existing services' immutable proposed amounts, but not cascading cancellation. Editable parent amounts would need a version-aware redesign, because snapshots are historical. Equal values are not proof of authenticity or financial activity; ordinary reads do not run these checks.

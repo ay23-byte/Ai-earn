@@ -418,13 +418,104 @@ def _check_queue_integrity(conn: sqlite3.Connection, *, owner: str | None = None
         raise StateStorageError("Queue state and lease history are inconsistent.")
 
 
+# Fixed, versioned internal mappings only: do not interpolate caller input.
+_OPERATION_RESULTS = (
+    (3, "opportunity_draft", "opportunity_drafts"),
+    (4, "task_plan", "task_plans"),
+    (5, "order_draft", "order_drafts"),
+    (6, "invoice_draft", "invoice_drafts"),
+    (7, "task_queue", "task_queue"),
+    (7, "queue_lease", "queue_leases"),
+    (8, "task_workflow", "task_workflows"),
+    (9, "payment_observation", "payment_observations"),
+)
+
+
+def _check_operation_results(conn: sqlite3.Connection, version: int) -> None:
+    """Check known retry results belong to their operation owner, not authenticity.
+
+    Unknown resource types remain outside this check. A valid reference does
+    not prove the result matches the original request or that rows are complete.
+    """
+    for minimum, kind, table in _OPERATION_RESULTS:
+        if version < minimum:
+            continue
+        missing = conn.execute(
+            f"SELECT 1 FROM state_operations AS o WHERE o.resource_type=? "
+            f"AND NOT EXISTS (SELECT 1 FROM {table} AS r "
+            "WHERE r.id=o.resource_id AND r.owner_id=o.owner_id) LIMIT 1", (kind,)
+        ).fetchone()
+        if missing is not None:
+            raise StateStorageError("State operation result is missing or has a different owner.")
+
+
+def _check_audit_operation_balance(conn: sqlite3.Connection, version: int) -> None:
+    """Compare recognized mutations per owner/result, without asserting authenticity.
+
+    A queue claim remembers a lease ID but audits its parent queue ID. Matching
+    counts do not prove entries are correct or that entire pairs were retained.
+    """
+    for minimum, kind, _table in _OPERATION_RESULTS:
+        if version < minimum or kind == "queue_lease":
+            continue
+        lease_rows = ""
+        if kind == "task_queue":
+            lease_rows = (
+                " UNION ALL SELECT o.owner_id, l.queue_id, 1 FROM state_operations o "
+                "JOIN queue_leases l ON l.id=o.resource_id AND l.owner_id=o.owner_id "
+                "WHERE o.resource_type='queue_lease'"
+            )
+        mismatch = conn.execute(
+            "SELECT 1 FROM ("
+            "SELECT owner_id AS owner, resource_id AS ident, 1 AS delta FROM state_operations WHERE resource_type=? "
+            "UNION ALL SELECT actor_id, resource_id, -1 FROM state_audit WHERE resource_type=?"
+            + lease_rows + ") GROUP BY owner, ident HAVING SUM(delta) != 0 LIMIT 1",
+            (kind, kind),
+        ).fetchone()
+        if mismatch is not None:
+            raise StateStorageError("State audit and operation counts are inconsistent.")
+
+
+def _check_proposed_amount_snapshots(conn: sqlite3.Connection, version: int) -> None:
+    """Compare immutable draft snapshots; these are not financial evidence.
+
+    Current services cannot edit draft amounts. If that changes, snapshot
+    semantics and this version-aware check must be redesigned together.
+    Parent status is intentionally independent and does not cascade.
+    """
+    if version >= 6:
+        bad_invoice = conn.execute("""
+            SELECT 1 FROM invoice_drafts i JOIN order_drafts o
+            ON o.id=i.order_id AND o.owner_id=i.owner_id
+            WHERE i.proposed_amount_paise != o.proposed_amount_paise OR i.currency != o.currency
+            LIMIT 1
+        """).fetchone()
+        if bad_invoice is not None:
+            raise StateStorageError("Invoice draft amount snapshot is inconsistent.")
+    if version >= 9:
+        bad_observation = conn.execute("""
+            SELECT 1 FROM payment_observations p JOIN invoice_drafts i
+            ON i.id=p.invoice_id AND i.owner_id=p.owner_id
+            WHERE p.proposed_amount_paise != i.proposed_amount_paise OR p.currency != i.currency
+            LIMIT 1
+        """).fetchone()
+        if bad_observation is not None:
+            raise StateStorageError("Unverified placeholder amount snapshot is inconsistent.")
+
+
 def _check_integrity(conn: sqlite3.Connection) -> None:
     rows = conn.execute("PRAGMA quick_check").fetchall()
     if len(rows) != 1 or rows[0][0] != "ok":
         raise StateStorageError("State database integrity check failed.")
     if conn.execute("PRAGMA foreign_key_check").fetchone() is not None:
         raise StateStorageError("State database foreign key check failed.")
-    if conn.execute("PRAGMA user_version").fetchone()[0] >= 7:
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    if version >= 3:
+        _check_operation_results(conn, version)
+        _check_audit_operation_balance(conn, version)
+    if version >= 6:
+        _check_proposed_amount_snapshots(conn, version)
+    if version >= 7:
         _check_queue_integrity(conn)
 
 
@@ -490,6 +581,8 @@ class StateStorage:
             _apply_v2(conn)
             if _validate_schema(conn) != 2:
                 raise StateStorageError("Migration produced an incompatible schema.")
+            # Validate the new version before committing its DDL and history.
+            _check_integrity(conn)
 
     def migrate_to_v3(self, backup: Path, *, confirmed: bool = False) -> None:
         """Upgrade version 2 only, after a checked backup while holding its write lock."""
@@ -502,6 +595,8 @@ class StateStorage:
             _apply_v3(conn)
             if _validate_schema(conn) != 3:
                 raise StateStorageError("Migration produced an incompatible schema.")
+            # Validate the new version before committing its DDL and history.
+            _check_integrity(conn)
 
     def migrate_to_v4(self, backup: Path, *, confirmed: bool = False) -> None:
         """Upgrade version 3 only, after a checked backup while holding its write lock."""
@@ -514,6 +609,8 @@ class StateStorage:
             _apply_v4(conn)
             if _validate_schema(conn) != 4:
                 raise StateStorageError("Migration produced an incompatible schema.")
+            # Validate the new version before committing its DDL and history.
+            _check_integrity(conn)
 
     def migrate_to_v5(self, backup: Path, *, confirmed: bool = False) -> None:
         """Upgrade version 4 only, after a checked backup while holding its write lock."""
@@ -526,6 +623,8 @@ class StateStorage:
             _apply_v5(conn)
             if _validate_schema(conn) != 5:
                 raise StateStorageError("Migration produced an incompatible schema.")
+            # Validate the new version before committing its DDL and history.
+            _check_integrity(conn)
 
     def migrate_to_v6(self, backup: Path, *, confirmed: bool = False) -> None:
         """Upgrade version 5 only, after a checked backup while holding its write lock."""
@@ -538,6 +637,8 @@ class StateStorage:
             _apply_v6(conn)
             if _validate_schema(conn) != 6:
                 raise StateStorageError("Migration produced an incompatible schema.")
+            # Validate the new version before committing its DDL and history.
+            _check_integrity(conn)
 
     def migrate_to_v7(self, backup: Path, *, confirmed: bool = False) -> None:
         """Upgrade version 6 only, after a checked backup while holding its write lock."""
@@ -550,6 +651,8 @@ class StateStorage:
             _apply_v7(conn)
             if _validate_schema(conn) != 7:
                 raise StateStorageError("Migration produced an incompatible schema.")
+            # Validate the new version before committing its DDL and history.
+            _check_integrity(conn)
 
     def migrate_to_v8(self, backup: Path, *, confirmed: bool = False) -> None:
         """Upgrade version 7 only, after a checked backup while holding its write lock."""
@@ -562,6 +665,8 @@ class StateStorage:
             _apply_v8(conn)
             if _validate_schema(conn) != 8:
                 raise StateStorageError("Migration produced an incompatible schema.")
+            # Validate the new version before committing its DDL and history.
+            _check_integrity(conn)
 
     def migrate_to_v9(self, backup: Path, *, confirmed: bool = False) -> None:
         """Upgrade version 8 only, after a checked backup while holding its write lock."""
@@ -574,6 +679,8 @@ class StateStorage:
             _apply_v9(conn)
             if _validate_schema(conn) != 9:
                 raise StateStorageError("Migration produced an incompatible schema.")
+            # Validate the new version before committing its DDL and history.
+            _check_integrity(conn)
 
     def backup_to(self, destination: Path, *, confirmed: bool = False) -> None:
         """Create a verified SQLite copy at a new private path, never overwrite.
