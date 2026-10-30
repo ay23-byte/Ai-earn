@@ -79,6 +79,35 @@ def _remember(conn, owner, key, digest, ident):
                  (owner, key, digest, _RESOURCE, ident))
 
 
+def _submit_in_transaction(conn, owner, now, row, output_hash, size, key, digest):
+    """Apply the ordinary workflow submission in an authorized transaction."""
+    if row["status"] != "in_progress":
+        raise WorkflowError("Transition is not allowed.")
+    ident = row["id"]
+    conn.execute("UPDATE task_workflows SET status='pending_review', output_hash=?, output_size=?, updated_at=? WHERE id=? AND owner_id=?",
+                 (output_hash, size, now, ident, owner))
+    _audit(conn, now, owner, "workflow_submitted", ident)
+    _remember(conn, owner, key, digest, ident)
+    return ident
+
+
+def _review_in_transaction(conn, owner, now, row, output_hash, size, approved, key, digest):
+    """Apply a local review transition in an authorized transaction.
+
+    Caller must validate the decision/confirmation and check any lease policy.
+    """
+    if row["status"] != "pending_review" or row["output_size"] != size or not hmac.compare_digest(row["output_hash"], output_hash):
+        raise WorkflowError("Review does not match the submitted output.")
+    ident = row["id"]
+    status = "completed" if approved else "in_progress"
+    stored_hash, stored_size = (output_hash, size) if approved else (None, None)
+    conn.execute("UPDATE task_workflows SET status=?, output_hash=?, output_size=?, updated_at=? WHERE id=? AND owner_id=?",
+                 (status, stored_hash, stored_size, now, ident, owner))
+    _audit(conn, now, owner, "workflow_approved" if approved else "workflow_rejected", ident)
+    _remember(conn, owner, key, digest, ident)
+    return ident
+
+
 class TaskWorkflows:
     """Local reviewed task state, independent of the scheduling queue."""
 
@@ -147,13 +176,7 @@ class TaskWorkflows:
             existing = _retry(conn, owner, key, digest)
             if existing is not None:
                 return existing
-            if row["status"] != "in_progress":
-                raise WorkflowError("Transition is not allowed.")
-            conn.execute("UPDATE task_workflows SET status='pending_review', output_hash=?, output_size=?, updated_at=? WHERE id=? AND owner_id=?",
-                         (output_hash, size, now, ident, owner))
-            _audit(conn, now, owner, "workflow_submitted", ident)
-            _remember(conn, owner, key, digest, ident)
-            return ident
+            return _submit_in_transaction(conn, owner, now, row, output_hash, size, key, digest)
 
     def review(self, token: str, record_id: str, output: str, *, approved: bool,
                confirmed: bool = False, operation_key: str) -> str:
@@ -168,12 +191,4 @@ class TaskWorkflows:
             existing = _retry(conn, owner, key, digest)
             if existing is not None:
                 return existing
-            if row["status"] != "pending_review" or row["output_size"] != size or not hmac.compare_digest(row["output_hash"], output_hash):
-                raise WorkflowError("Review does not match the submitted output.")
-            status = "completed" if approved else "in_progress"
-            stored_hash, stored_size = (output_hash, size) if approved else (None, None)
-            conn.execute("UPDATE task_workflows SET status=?, output_hash=?, output_size=?, updated_at=? WHERE id=? AND owner_id=?",
-                         (status, stored_hash, stored_size, now, ident, owner))
-            _audit(conn, now, owner, "workflow_approved" if approved else "workflow_rejected", ident)
-            _remember(conn, owner, key, digest, ident)
-            return ident
+            return _review_in_transaction(conn, owner, now, row, output_hash, size, approved, key, digest)
