@@ -11,7 +11,7 @@ import sqlite3
 from .auth import AccessDenied, AuthService
 from .opportunity_drafts import DraftError, _digest, _key, _record_id, _title
 from .state_authorization import _authorized_transaction
-from .state_storage import StateStorage, StateStorageError, _check_queue_integrity
+from .state_storage import StateStorage, StateStorageError, _check_queue_integrity, _has_paired_completion
 
 
 _MAX_TIME = 4_102_444_800  # 2100-01-01 UTC; avoid unbounded timestamp arithmetic.
@@ -35,8 +35,8 @@ def _integer(value, minimum, maximum):
 
 
 def _version(conn):
-    if conn.execute("PRAGMA user_version").fetchone()[0] not in (7, 8, 9, 10):
-        raise StateStorageError("State schema version 7, 8, 9 or 10 is required for the queue.")
+    if conn.execute("PRAGMA user_version").fetchone()[0] not in (7, 8, 9, 10, 11):
+        raise StateStorageError("State schema version 7, 8, 9, 10 or 11 is required for the queue.")
 
 
 def _owned(conn, owner, record_id):
@@ -106,6 +106,8 @@ def _reschedule_in_transaction(conn, owner, now, task, lease_id, key, digest, *,
 
     Callers handle exact retries and recheck the lease time before commit.
     """
+    if _has_paired_completion(conn, owner, task["id"]):
+        raise QueueError("Completed queue items cannot be rescheduled.")
     if task["status"] != "leased" or task["current_lease_id"] != lease_id or (now >= task["lease_until"]) != expired:
         raise QueueError("Lease is stale or transition is not allowed.")
     available = now + task["backoff_seconds"]
@@ -159,6 +161,12 @@ class TaskQueue:
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, _now):
             _version(conn)
             row = dict(_owned(conn, owner, ident))
+            if _has_paired_completion(conn, owner, ident):
+                completed = conn.execute("SELECT created_at FROM paired_completions WHERE owner_id=? AND queue_id=?", (owner, ident)).fetchone()
+                row["status"] = "completed"
+                row["current_lease_id"] = None
+                row["lease_until"] = None
+                row["completed_at"] = completed["created_at"]
             del row["owner_id"]
             return row
 
@@ -199,7 +207,9 @@ class TaskQueue:
                 raise AccessDenied("Access denied.")
             task = _owned(conn, owner, row["queue_id"])
             result = dict(row)
-            result["active"] = task["status"] == "leased" and task["current_lease_id"] == lease_id and now < row["lease_until"]
+            completed = _has_paired_completion(conn, owner, task["id"])
+            result["active"] = (task["status"] == "leased" and task["current_lease_id"] == lease_id
+                                and now < row["lease_until"] and not completed)
             return result
 
     def retry(self, token: str, record_id: str, lease_id: str, *, operation_key: str) -> str:

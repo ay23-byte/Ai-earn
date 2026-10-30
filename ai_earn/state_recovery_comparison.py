@@ -1,8 +1,9 @@
-"""Internal operation-history comparison for disposable state copies.
+"""Internal owner-scoped comparison for disposable state copies.
 
 This is not reconciliation, tamper evidence, a public API or an OS boundary.
 Trusted code must select a fixed auth database and two trusted state files.
 """
+from contextlib import contextmanager
 import hmac
 import os
 
@@ -40,8 +41,48 @@ def _compare_operations(current, candidate, owner):
     return result
 
 
+# Fixed schema-versioned table names: never interpolate caller-provided SQL.
+# All these recognized tables have a lowercase-hex ID and an owner_id column.
+_RECORD_TABLES = (
+    (3, "opportunity_drafts"), (4, "task_plans"), (5, "order_drafts"),
+    (6, "invoice_drafts"), (7, "task_queue"), (7, "queue_leases"),
+    (8, "task_workflows"), (9, "payment_observations"), (10, "task_associations"), (11, "paired_completions"),
+)
+
+
+def _ordered_records(conn, owner, table):
+    return iter(conn.execute(
+        f"SELECT * FROM {table} WHERE owner_id=? ORDER BY id COLLATE BINARY", (owner,),
+    ))
+
+
+def _compare_records(current, candidate, owner, version):
+    # Streaming comparison keeps two rows in Python memory per table. SQLite
+    # may still allocate temporary resources for sorting and integrity checks.
+    results = {}
+    for minimum, table in _RECORD_TABLES:
+        if version < minimum:
+            continue
+        left = _ordered_records(current, owner, table)
+        right = _ordered_records(candidate, owner, table)
+        a, b = next(left, None), next(right, None)
+        counts = {"matching": 0, "current_only": 0, "candidate_only": 0, "conflicts": 0}
+        while a is not None or b is not None:
+            if b is None or (a is not None and a["id"] < b["id"]):
+                counts["current_only"] += 1
+                a = next(left, None)
+            elif a is None or b["id"] < a["id"]:
+                counts["candidate_only"] += 1
+                b = next(right, None)
+            else:
+                counts["matching" if tuple(a) == tuple(b) else "conflicts"] += 1
+                a, b = next(left, None), next(right, None)
+        results[table] = counts
+    return results
+
+
 class StateRecoveryComparison:
-    """Compare a session owner's operation keys across two trusted copies.
+    """Compare a session owner's records or operation keys across copies.
 
     No state is merged or repaired. Matching counts don't establish that
     records, audit contents, history or external effects are equal or valid.
@@ -53,7 +94,8 @@ class StateRecoveryComparison:
         self._current = current
         self._candidate = candidate
 
-    def compare(self, token: str) -> dict[str, int]:
+    @contextmanager
+    def _validated_copies(self, token: str):
         if _token_hash(token) is None:
             raise AccessDenied("Authentication required.")
         try:
@@ -83,4 +125,14 @@ class StateRecoveryComparison:
                 # Validate both full copies, not just the requesting owner's rows.
                 _check_integrity(current)
                 _check_integrity(candidate)
-                return {"schema_version": version, **_compare_operations(current, candidate, owner)}
+                yield current, candidate, owner, version
+
+    def compare(self, token: str) -> dict[str, int]:
+        """Compare operation history counts; not record or audit equality."""
+        with self._validated_copies(token) as (current, candidate, owner, version):
+            return {"schema_version": version, **_compare_operations(current, candidate, owner)}
+
+    def compare_records(self, token: str) -> dict:
+        """Compare recognized owned rows, not audit, freshness or authenticity."""
+        with self._validated_copies(token) as (current, candidate, owner, version):
+            return {"schema_version": version, "tables": _compare_records(current, candidate, owner, version)}

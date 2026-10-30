@@ -11,7 +11,7 @@ import secrets
 from .auth import AccessDenied, AuthService
 from .opportunity_drafts import DraftError, _digest, _key, _record_id
 from .state_authorization import _authorized_transaction
-from .state_storage import StateStorage, StateStorageError
+from .state_storage import StateStorage, StateStorageError, _has_paired_completion
 from .task_queue import (
     QueueError, _claim_in_transaction, _reschedule_in_transaction, _integer as _queue_integer,
     _owned as _owned_queue, _audit as _queue_audit,
@@ -41,8 +41,8 @@ def _input(validator, value):
 
 
 def _version(conn):
-    if conn.execute("PRAGMA user_version").fetchone()[0] != 10:
-        raise StateStorageError("State schema version 10 is required for associations.")
+    if conn.execute("PRAGMA user_version").fetchone()[0] not in (10, 11):
+        raise StateStorageError("State schema version 10 or 11 is required for associations.")
 
 
 def _owned_rows(conn, owner, ident):
@@ -83,6 +83,11 @@ def _audit(conn, now, owner, ident, event="task_association_created"):
 def _remember(conn, owner, key, digest, ident):
     conn.execute("INSERT INTO state_operations(owner_id, operation_key, request_hash, resource_type, resource_id) VALUES(?,?,?,?,?)",
                  (owner, key, digest, _RESOURCE, ident))
+
+
+def _completion_audit(conn, now, owner, ident):
+    conn.execute("INSERT INTO state_audit(occurred_at,actor_id,event,resource_type,resource_id) VALUES (?,?,?,?,?)",
+                 (now, owner, "paired_completion_created", "paired_completion", ident))
 
 
 def _pair_child_key():
@@ -284,6 +289,53 @@ class TaskAssociations:
                 raise AssociationError("Lease expired before commit.")
             return result
 
+    def complete_pair(self, token: str, record_id: str, lease_id: str, output: str, *,
+                      confirmed: bool = False, operation_key: str) -> str:
+        """Approve submitted output and close the linked queue locally (v11).
+
+        This records a local decision, not human identity, correct work, an
+        external-effect fence or payment. Exact retries acknowledge history.
+        """
+        if confirmed is not True:
+            raise AssociationError("Explicit review confirmation is required.")
+        ident, lease_id, key = _input(_record_id, record_id), _input(_record_id, lease_id), _input(_key, operation_key)
+        try:
+            output_hash, size = _workflow_output(output)
+        except WorkflowError as exc:
+            raise AssociationError("Invalid association input.") from exc
+        digest = _workflow_request("association_complete_pair", [ident, lease_id, output_hash.hex(), size])
+        with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
+            if conn.execute("PRAGMA user_version").fetchone()[0] != 11:
+                raise StateStorageError("State schema version 11 is required for paired completion.")
+            association, queue, workflow = _owned_rows(conn, owner, ident)
+            existing = conn.execute("SELECT request_hash,resource_type,resource_id FROM state_operations WHERE owner_id=? AND operation_key=?", (owner, key)).fetchone()
+            if existing is not None:
+                if existing["resource_type"] != "paired_completion" or not hmac.compare_digest(existing["request_hash"], digest):
+                    raise AssociationError("Operation key was already used for a different request.")
+                if existing["resource_id"] != ident or not _has_paired_completion(conn, owner, association["queue_id"]):
+                    raise StateStorageError("Stored operation result is inconsistent.")
+                return ident
+            if _has_paired_completion(conn, owner, association["queue_id"]):
+                raise AssociationError("A local completion already exists.")
+            if (queue["status"] != "leased" or queue["current_lease_id"] != lease_id
+                    or now >= queue["lease_until"]):
+                raise AssociationError("A current unexpired lease is required.")
+            workflow_key = _pair_child_key()
+            if (workflow_key == key or conn.execute("SELECT 1 FROM state_operations WHERE owner_id=? AND operation_key=?", (owner, workflow_key)).fetchone() is not None):
+                raise StateStorageError("Internal operation key collision.")
+            workflow_id = association["workflow_id"]
+            workflow_digest = _workflow_request("workflow_review", [workflow_id, output_hash.hex(), size, True])
+            try:
+                _workflow_review_in_transaction(conn, owner, now, workflow, output_hash, size, True, workflow_key, workflow_digest)
+            except WorkflowError as exc:
+                raise AssociationError("Local workflow transition is not allowed.") from exc
+            conn.execute("INSERT INTO paired_completions VALUES (?,?,?,?,?,?)", (ident, owner, association["queue_id"], workflow_id, lease_id, now))
+            _completion_audit(conn, now, owner, ident)
+            conn.execute("INSERT INTO state_operations VALUES (?,?,?,?,?)", (owner, key, digest, "paired_completion", ident))
+            if int(self._auth.clock()) >= queue["lease_until"]:
+                raise AssociationError("Lease expired before commit.")
+            return ident
+
     def cancel_pair(self, token: str, record_id: str, *, operation_key: str) -> str:
         """Cancel a queued item and planned workflow together, not external work.
 
@@ -340,13 +392,14 @@ class TaskAssociations:
             association, queue, workflow = _owned_rows(conn, owner, ident)
             deadline_passed = bool(queue["deadline_at"] and queue["deadline_at"] <= now)
             ready = queue["status"] == "queued" and queue["available_at"] <= now and not deadline_passed
-            active = queue["status"] == "leased" and now < queue["lease_until"]
+            complete = _has_paired_completion(conn, owner, association["queue_id"])
+            active = queue["status"] == "leased" and now < queue["lease_until"] and not complete
             return {
                 "association_id": association["id"],
                 "queue_id": association["queue_id"],
                 "workflow_id": association["workflow_id"],
                 "observed_at": now,
-                "queue_status": queue["status"],
+                "queue_status": "completed" if complete else queue["status"],
                 "workflow_status": workflow["status"],
                 "queue_ready_at_observation": ready,
                 "lease_active_at_observation": active,

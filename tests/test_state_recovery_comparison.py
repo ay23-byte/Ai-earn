@@ -101,6 +101,190 @@ class StateRecoveryComparisonTests(unittest.TestCase):
         self.assertNotEqual(self.orders.get(self.alice, self.order)["title"],
                             OrderDrafts(self.auth, self.candidate).get(self.alice, self.order)["title"])
 
+    def test_record_comparison_detects_changed_content_without_exposure_or_writes(self):
+        with self.candidate.transaction() as conn:
+            conn.execute("UPDATE order_drafts SET title='Altered' WHERE id=?", (self.order,))
+        before = self._counts()
+        result = self.service.compare_records(self.alice)
+        self.assertEqual(result["schema_version"], 10)
+        self.assertEqual(result["tables"]["order_drafts"], {"matching": 0, "current_only": 0, "candidate_only": 0, "conflicts": 1})
+        self.assertEqual(self.service.compare(self.alice)["matching"], 1)
+        for secret in (self.order, "Synthetic", "Altered", self.alice):
+            self.assertNotIn(secret, str(result))
+        self.assertEqual(before, self._counts())
+        self.assertEqual(self.service.compare_records(self.bob)["tables"]["order_drafts"]["matching"], 1)
+        self.assertEqual(self.service.compare_records(self.bob)["tables"]["order_drafts"]["conflicts"], 0)
+
+    def test_record_comparison_counts_owner_specific_records_and_reverse(self):
+        self.orders.create(self.alice, "Only current", 10, operation_key="only-current")
+        OrderDrafts(self.auth, self.candidate).create(self.alice, "Only candidate", 10, operation_key="only-candidate")
+        self.orders.create(self.bob, "Not Alice", 10, operation_key="bob-current")
+        result = self.service.compare_records(self.alice)["tables"]["order_drafts"]
+        self.assertEqual(result, {"matching": 1, "current_only": 1, "candidate_only": 1, "conflicts": 0})
+        self.assertEqual(StateRecoveryComparison(self.auth, self.candidate, self.current).compare_records(self.alice)["tables"]["order_drafts"], result)
+        self.assertEqual(self.service.compare_records(self.bob)["tables"]["order_drafts"]["current_only"], 1)
+
+    def test_record_comparison_includes_all_supported_versioned_tables(self):
+        expected = {"opportunity_drafts", "task_plans", "order_drafts", "invoice_drafts", "task_queue", "queue_leases", "task_workflows", "payment_observations", "task_associations"}
+        tables = self.service.compare_records(self.alice)["tables"]
+        self.assertEqual(set(tables), expected)
+        for table in expected - {"order_drafts"}:
+            self.assertEqual(tables[table], {"matching": 0, "current_only": 0, "candidate_only": 0, "conflicts": 0})
+        for version in range(2, 10):
+            with self.subTest(version=version):
+                old = StateStorage(self.directory / f"v{version}.sqlite3")
+                dest = self.directory / f"comparison-v{version}.sqlite3"
+                old.backup_to(dest, confirmed=True)
+                result = StateRecoveryComparison(self.auth, old, StateStorage(dest)).compare_records(self.alice)
+                self.assertEqual(result["schema_version"], version)
+                minima = {"opportunity_drafts": 3, "task_plans": 4, "order_drafts": 5, "invoice_drafts": 6, "task_queue": 7, "queue_leases": 7, "task_workflows": 8, "payment_observations": 9, "task_associations": 10}
+                self.assertEqual(set(result["tables"]), {name for name, minimum in minima.items() if version >= minimum})
+
+    def test_record_comparison_populated_queue_workflow_and_association(self):
+        from ai_earn.task_queue import TaskQueue
+        from ai_earn.task_workflows import TaskWorkflows
+        from ai_earn.task_associations import TaskAssociations
+        queue = TaskQueue(self.auth, self.current)
+        flow = TaskWorkflows(self.auth, self.current)
+        item = queue.enqueue(self.alice, "Queued", operation_key="enqueue")
+        workflow = flow.create(self.alice, "Flow", operation_key="flow")
+        assoc = TaskAssociations(self.auth, self.current)
+        ident = assoc.create(self.alice, item, workflow, operation_key="link")
+        assoc.start_pair(self.alice, ident, operation_key="start", lease_seconds=60)
+        tables = self.service.compare_records(self.alice)["tables"]
+        for table in ("task_queue", "queue_leases", "task_workflows", "task_associations"):
+            self.assertEqual(tables[table]["current_only"], 1)
+            self.assertEqual(tables[table]["matching"], 0)
+
+    def test_record_comparison_reports_changes_across_all_populated_types(self):
+        from ai_earn.invoice_drafts import InvoiceDrafts
+        from ai_earn.opportunity_drafts import OpportunityDrafts
+        from ai_earn.payment_observations import PaymentObservations
+        from ai_earn.task_associations import TaskAssociations
+        from ai_earn.task_plans import TaskPlans
+        from ai_earn.task_queue import TaskQueue
+        from ai_earn.task_workflows import TaskWorkflows
+        opps = OpportunityDrafts(self.auth, self.current)
+        plans = TaskPlans(self.auth, self.current)
+        invoices = InvoiceDrafts(self.auth, self.current)
+        observations = PaymentObservations(self.auth, self.current)
+        queue = TaskQueue(self.auth, self.current)
+        flows = TaskWorkflows(self.auth, self.current)
+        associations = TaskAssociations(self.auth, self.current)
+        opportunity = opps.create(self.alice, "opp", operation_key="opp")
+        plan = plans.create(self.alice, "plan", operation_key="plan")
+        invoice = invoices.create(self.alice, self.order, operation_key="invoice")
+        observation = observations.create(self.alice, invoice, operation_key="observation")
+        item = queue.enqueue(self.alice, "queue", operation_key="queue", backoff_seconds=0)
+        workflow = flows.create(self.alice, "workflow", operation_key="workflow")
+        association = associations.create(self.alice, item, workflow, operation_key="association")
+        first_lease = associations.start_pair(self.alice, association, operation_key="start", lease_seconds=60)
+        snapshot = self.directory / "all-records.sqlite3"
+        self.current.backup_to(snapshot, confirmed=True)
+        comparison = StateRecoveryComparison(self.auth, self.current, StateStorage(snapshot))
+        self.assertTrue(all(row["conflicts"] == row["current_only"] == row["candidate_only"] == 0 for row in comparison.compare_records(self.alice)["tables"].values()))
+        opps.archive(self.alice, opportunity, operation_key="archive")
+        plans.cancel(self.alice, plan, operation_key="cancel-plan")
+        observations.flag(self.alice, observation, operation_key="flag")
+        invoices.cancel(self.alice, invoice, operation_key="cancel-invoice")
+        self.orders.cancel(self.alice, self.order, operation_key="cancel-order")
+        associations.submit_pair(self.alice, association, first_lease, "result", operation_key="submit")
+        self.clock.now += 60
+        associations.recover_pair(self.alice, association, first_lease, operation_key="recover")
+        associations.resume_pair(self.alice, association, operation_key="resume", lease_seconds=60)
+        second_q = queue.enqueue(self.alice, "another", operation_key="queue2")
+        second_w = flows.create(self.alice, "another", operation_key="flow2")
+        associations.create(self.alice, second_q, second_w, operation_key="link2")
+        rows = comparison.compare_records(self.alice)["tables"]
+        for table in ("opportunity_drafts", "task_plans", "order_drafts", "invoice_drafts", "payment_observations"):
+            self.assertEqual(rows[table]["conflicts"], 1, table)
+        self.assertEqual(rows["task_queue"]["conflicts"], 1)
+        self.assertEqual(rows["task_queue"]["current_only"], 1)
+        self.assertEqual(rows["task_workflows"]["conflicts"], 1)
+        self.assertEqual(rows["task_workflows"]["current_only"], 1)
+        self.assertEqual(rows["queue_leases"]["matching"], 1)
+        self.assertEqual(rows["queue_leases"]["current_only"], 1)
+        self.assertEqual(rows["task_associations"]["matching"], 1)
+        self.assertEqual(rows["task_associations"]["current_only"], 1)
+        self.assertTrue(all(row["candidate_only"] == row["conflicts"] == 0 for row in comparison.compare_records(self.bob)["tables"].values()))
+
+    def test_record_comparison_refuses_missing_copy_without_recreating_it(self):
+        self.candidate_path.unlink()
+        with self.assertRaises(StateStorageError):
+            self.service.compare_records(self.alice)
+        self.assertFalse(self.candidate_path.exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX hard-link test")
+    def test_record_comparison_refuses_hardlinked_copies(self):
+        alias = self.directory / "record-alias.sqlite3"
+        os.link(self.current.path, alias)
+        with self.assertRaises(StateStorageError):
+            StateRecoveryComparison(self.auth, self.current, StateStorage(alias)).compare_records(self.alice)
+
+    def test_record_comparison_does_not_prove_operation_or_audit_equality(self):
+        from ai_earn.invoice_drafts import InvoiceDrafts
+        from ai_earn.payment_observations import PaymentObservations
+        invoice = InvoiceDrafts(self.auth, self.current).create(self.alice, self.order, operation_key="invoice")
+        obs = PaymentObservations(self.auth, self.current)
+        ident = obs.create(self.alice, invoice, operation_key="placeholder")
+        copy_path = self.directory / "matching-records.sqlite3"
+        self.current.backup_to(copy_path, confirmed=True)
+        obs.flag(self.alice, ident, operation_key="flag")
+        obs.unflag(self.alice, ident, operation_key="unflag")
+        comparison = StateRecoveryComparison(self.auth, self.current, StateStorage(copy_path))
+        # Constant test clock makes updated_at equal despite the two operations.
+        result = comparison.compare_records(self.alice)
+        self.assertTrue(all(t["current_only"] == t["candidate_only"] == t["conflicts"] == 0 for t in result["tables"].values()))
+        self.assertEqual(comparison.compare(self.alice)["current_only"], 2)
+
+    def test_record_comparison_enforces_auth_schema_and_corruption(self):
+        for token in ("", "x"*43, self.bob):
+            if token == self.bob:
+                self.auth.logout(self.bob)
+            with self.assertRaises(AccessDenied):
+                self.service.compare_records(token)
+        with self.assertRaises(StateStorageError):
+            StateRecoveryComparison(self.auth, self.current, self.current).compare_records(self.alice)
+        with self.assertRaises(StateStorageError):
+            StateRecoveryComparison(self.auth, self.current, StateStorage(self.directory / "v9.sqlite3")).compare_records(self.alice)
+        with self.candidate.transaction() as conn:
+            conn.execute("DELETE FROM state_operations WHERE operation_key='create' AND owner_id=(SELECT owner_id FROM order_drafts WHERE id=?)", (self.order,))
+        with self.assertRaises(StateStorageError):
+            self.service.compare_records(self.alice)
+
+    def test_record_comparison_blocks_competing_writer_and_rechecks_session(self):
+        from ai_earn.state_recovery_comparison import _check_integrity
+        entered, release, started, done = (threading.Event() for _ in range(4))
+        def hold(conn):
+            _check_integrity(conn)
+            if not entered.is_set():
+                entered.set()
+                if not release.wait(10):
+                    raise RuntimeError("barrier timeout")
+        def write():
+            started.set()
+            self.orders.cancel(self.alice, self.order, operation_key="later")
+            done.set()
+        with patch("ai_earn.state_recovery_comparison._check_integrity", side_effect=hold):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                comparison = pool.submit(self.service.compare_records, self.alice)
+                try:
+                    self.assertTrue(entered.wait(10))
+                    writer = pool.submit(write)
+                    self.assertTrue(started.wait(10))
+                    self.assertFalse(done.wait(0.1))
+                finally:
+                    release.set()
+                self.assertEqual(comparison.result(timeout=15)["tables"]["order_drafts"]["matching"], 1)
+                writer.result(timeout=15)
+        self.assertEqual(self.service.compare_records(self.alice)["tables"]["order_drafts"]["conflicts"], 1)
+        def expire(conn):
+            _check_integrity(conn)
+            self.clock.now += SESSION_SECONDS
+        with patch("ai_earn.state_recovery_comparison._check_integrity", side_effect=expire):
+            with self.assertRaises(AccessDenied):
+                self.service.compare_records(self.alice)
+
     def test_expired_revoked_and_invalid_sessions_are_denied(self):
         self.auth.logout(self.bob)
         for token in ("", "x"*43, self.bob):
