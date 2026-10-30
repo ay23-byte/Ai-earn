@@ -1,5 +1,7 @@
 """Disposable consistency checks for proposed amounts, never real payments."""
+from contextlib import closing
 import os
+import sqlite3
 from pathlib import Path
 import tempfile
 import unittest
@@ -67,7 +69,105 @@ class SnapshotIntegrityTests(unittest.TestCase):
         with self.assertRaises(StateStorageError):
             self.state.backup_to(backup, confirmed=True)
         self.assertFalse(backup.exists())
-        self.assertEqual(self.observations.get(self.token, self.observation)["proposed_amount_paise"], 12551)
+        with self.state.transaction() as conn:
+            self.assertEqual(conn.execute("SELECT proposed_amount_paise FROM payment_observations WHERE id=?", (self.observation,)).fetchone()[0], 12551)
+
+    def test_invoice_mismatch_is_refused_by_scoped_services_and_retries(self):
+        self._change_amount(self.state, "invoice_drafts", self.invoice, 12551)
+        operations = (
+            lambda: self.invoices.get(self.token, self.invoice),
+            lambda: self.invoices.create(self.token, self.order, operation_key="invoice"),
+            lambda: self.invoices.cancel(self.token, self.invoice, operation_key="new-cancel"),
+            lambda: self.observations.create(self.token, self.invoice, operation_key="new-observation"),
+            lambda: self.observations.create(self.token, self.invoice, operation_key="observation"),
+            lambda: self.observations.get(self.token, self.observation),
+            lambda: self.observations.flag(self.token, self.observation, operation_key="new-flag"),
+        )
+        with self.state.transaction() as conn:
+            before = (conn.execute("SELECT count(*) FROM state_audit").fetchone()[0],
+                      conn.execute("SELECT count(*) FROM state_operations").fetchone()[0])
+        for operation in operations:
+            with self.subTest(operation=operation):
+                with self.assertRaises(StateStorageError):
+                    operation()
+        with self.state.transaction() as conn:
+            self.assertEqual(before, (conn.execute("SELECT count(*) FROM state_audit").fetchone()[0],
+                                      conn.execute("SELECT count(*) FROM state_operations").fetchone()[0]))
+            self.assertEqual(conn.execute("SELECT status FROM invoice_drafts WHERE id=?", (self.invoice,)).fetchone()[0], "draft")
+            self.assertEqual(conn.execute("SELECT status FROM payment_observations WHERE id=?", (self.observation,)).fetchone()[0], "unverified")
+
+    def test_placeholder_mismatch_is_refused_by_scoped_services_and_retries(self):
+        self._change_amount(self.state, "payment_observations", self.observation, 12551)
+        for operation in (lambda: self.observations.get(self.token, self.observation),
+                          lambda: self.observations.create(self.token, self.invoice, operation_key="observation"),
+                          lambda: self.observations.flag(self.token, self.observation, operation_key="flag"),
+                          lambda: self.observations.discard(self.token, self.observation, operation_key="discard")):
+            with self.assertRaises(StateStorageError):
+                operation()
+        # An unrelated new placeholder from a consistent invoice is not blocked.
+        other = self.observations.create(self.token, self.invoice, operation_key="other")
+        self.assertEqual(self.observations.get(self.token, other)["proposed_amount_paise"], 12550)
+        self.assertEqual(self.invoices.get(self.token, self.invoice)["proposed_amount_paise"], 12550)
+
+    def test_other_owner_cannot_distinguish_corrupt_invoice_or_placeholder(self):
+        from ai_earn.auth import AccessDenied
+        self.auth.register("bobby", "disposable test password")
+        bob = self.auth.login("bobby", "disposable test password")
+        self._change_amount(self.state, "invoice_drafts", self.invoice, 12551)
+        for operation in (lambda: self.invoices.get(bob, self.invoice),
+                          lambda: self.invoices.cancel(bob, self.invoice, operation_key="x"),
+                          lambda: self.observations.create(bob, self.invoice, operation_key="x"),
+                          lambda: self.observations.get(bob, self.observation),
+                          lambda: self.observations.flag(bob, self.observation, operation_key="x")):
+            with self.assertRaises(AccessDenied):
+                operation()
+        order = self.orders.create(bob, "Other", 42, operation_key="order")
+        invoice = self.invoices.create(bob, order, operation_key="invoice")
+        obs = self.observations.create(bob, invoice, operation_key="observation")
+        self.assertEqual(self.observations.get(bob, obs)["proposed_amount_paise"], 42)
+
+    def test_missing_owned_parents_fail_closed_on_scoped_operations(self):
+        # Direct corruption only: application connections enforce foreign keys.
+        with closing(sqlite3.connect(self.state.path)) as conn, conn:
+            conn.execute("PRAGMA foreign_keys=OFF")
+            conn.execute("DELETE FROM order_drafts WHERE id=?", (self.order,))
+        for operation in (lambda: self.invoices.get(self.token, self.invoice),
+                          lambda: self.invoices.create(self.token, self.order, operation_key="invoice"),
+                          lambda: self.observations.create(self.token, self.invoice, operation_key="new"),
+                          lambda: self.observations.get(self.token, self.observation),
+                          lambda: self.observations.create(self.token, self.invoice, operation_key="observation")):
+            with self.assertRaises(StateStorageError):
+                operation()
+
+    def test_missing_invoice_parent_and_result_fail_closed(self):
+        with closing(sqlite3.connect(self.state.path)) as conn, conn:
+            conn.execute("PRAGMA foreign_keys=OFF")
+            conn.execute("DELETE FROM invoice_drafts WHERE id=?", (self.invoice,))
+        for operation in (lambda: self.invoices.create(self.token, self.order, operation_key="invoice"),
+                          lambda: self.observations.get(self.token, self.observation),
+                          lambda: self.observations.flag(self.token, self.observation, operation_key="flag"),
+                          lambda: self.observations.create(self.token, self.invoice, operation_key="observation")):
+            with self.assertRaises(StateStorageError):
+                operation()
+
+    def test_matching_snapshots_preserve_exact_retries_after_cancellation(self):
+        self.observations.flag(self.token, self.observation, operation_key="flag")
+        self.invoices.cancel(self.token, self.invoice, operation_key="invoice-cancel")
+        self.orders.cancel(self.token, self.order, operation_key="order-cancel")
+        self.assertEqual(self.invoices.create(self.token, self.order, operation_key="invoice"), self.invoice)
+        self.assertEqual(self.invoices.cancel(self.token, self.invoice, operation_key="invoice-cancel"), self.invoice)
+        self.assertEqual(self.observations.create(self.token, self.invoice, operation_key="observation"), self.observation)
+        self.assertEqual(self.observations.flag(self.token, self.observation, operation_key="flag"), self.observation)
+        self.observations.discard(self.token, self.observation, operation_key="discard")
+        self.assertEqual(self.observations.get(self.token, self.observation)["status"], "discarded")
+
+    def test_invoice_checks_apply_to_each_supported_version(self):
+        for version in (6, 7, 8, 9):
+            with self.subTest(version=version):
+                source = self.state if version == 9 else StateStorage(self.directory / f"v{version}.sqlite3")
+                self._change_amount(source, "invoice_drafts", self.invoice, 12551)
+                with self.assertRaises(StateStorageError):
+                    InvoiceDrafts(self.auth, source).get(self.token, self.invoice)
 
     def test_copied_snapshot_mismatch_is_refused_and_left_for_inspection(self):
         for table, ident in (("invoice_drafts", self.invoice), ("payment_observations", self.observation)):

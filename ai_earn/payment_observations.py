@@ -9,6 +9,7 @@ import secrets
 import sqlite3
 
 from .auth import AccessDenied, AuthService
+from .invoice_drafts import _owned as _owned_invoice
 from .opportunity_drafts import DraftError, _digest, _key, _record_id
 from .state_authorization import _authorized_transaction
 from .state_storage import StateStorage, StateStorageError
@@ -38,6 +39,13 @@ def _owned(conn, owner, ident):
                        "FROM payment_observations WHERE id=? AND owner_id=?", (ident, owner)).fetchone()
     if row is None:
         raise AccessDenied("Access denied.")
+    try:
+        invoice = _owned_invoice(conn, owner, row["invoice_id"])
+    except AccessDenied as exc:
+        raise StateStorageError("Placeholder parent is unavailable.") from exc
+    if (row["proposed_amount_paise"] != invoice["proposed_amount_paise"]
+            or row["currency"] != invoice["currency"]):
+        raise StateStorageError("Unverified placeholder amount snapshot is inconsistent.")
     return row
 
 
@@ -47,8 +55,10 @@ def _retry(conn, owner, key, digest):
         return None
     if row["resource_type"] != _RESOURCE or not hmac.compare_digest(row["request_hash"], digest):
         raise ObservationError("Operation key was already used for a different request.")
-    if conn.execute("SELECT 1 FROM payment_observations WHERE id=? AND owner_id=?", (row["resource_id"], owner)).fetchone() is None:
-        raise StateStorageError("Stored operation result is unavailable.")
+    try:
+        _owned(conn, owner, row["resource_id"])
+    except AccessDenied as exc:
+        raise StateStorageError("Stored operation result is unavailable.") from exc
     return row["resource_id"]
 
 
@@ -77,14 +87,12 @@ class PaymentObservations:
             existing = _retry(conn, owner, key, digest)
             if existing is not None:
                 return existing
-            invoice = conn.execute(
-                "SELECT i.proposed_amount_paise, i.currency, i.status, o.status AS order_status "
-                "FROM invoice_drafts i JOIN order_drafts o ON o.id=i.order_id AND o.owner_id=i.owner_id "
-                "WHERE i.id=? AND i.owner_id=?", (invoice_id, owner),
-            ).fetchone()
-            if invoice is None:
-                raise AccessDenied("Access denied.")
-            if invoice["status"] != "draft" or invoice["order_status"] != "draft":
+            invoice = _owned_invoice(conn, owner, invoice_id)
+            order = conn.execute("SELECT status FROM order_drafts WHERE id=? AND owner_id=?",
+                                 (invoice["order_id"], owner)).fetchone()
+            if order is None:
+                raise StateStorageError("Invoice draft parent is unavailable.")
+            if invoice["status"] != "draft" or order["status"] != "draft":
                 raise ObservationError("Active invoice and order drafts are required.")
             ident = secrets.token_hex(16)
             conn.execute("INSERT INTO payment_observations VALUES (?,?,?,?,?,'unverified',?,?)",

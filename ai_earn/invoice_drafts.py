@@ -39,6 +39,13 @@ def _owned(conn: sqlite3.Connection, owner: str, record_id: str) -> sqlite3.Row:
     ).fetchone()
     if row is None:
         raise AccessDenied("Access denied.")
+    parent = conn.execute(
+        "SELECT proposed_amount_paise, currency FROM order_drafts WHERE id=? AND owner_id=?",
+        (row["order_id"], owner),
+    ).fetchone()
+    if (parent is None or row["proposed_amount_paise"] != parent["proposed_amount_paise"]
+            or row["currency"] != parent["currency"]):
+        raise StateStorageError("Invoice draft amount snapshot is inconsistent or unavailable.")
     return row
 
 
@@ -51,8 +58,10 @@ def _retry(conn: sqlite3.Connection, owner: str, key: str, digest: bytes) -> str
         return None
     if row["resource_type"] != _RESOURCE or not hmac.compare_digest(row["request_hash"], digest):
         raise InvoiceDraftError("Operation key was already used for a different request.")
-    if conn.execute("SELECT 1 FROM invoice_drafts WHERE id=? AND owner_id=?", (row["resource_id"], owner)).fetchone() is None:
-        raise StateStorageError("Stored operation result is unavailable.")
+    try:
+        _owned(conn, owner, row["resource_id"])
+    except AccessDenied as exc:
+        raise StateStorageError("Stored operation result is unavailable.") from exc
     return row["resource_id"]
 
 
