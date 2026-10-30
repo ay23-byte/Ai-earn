@@ -47,8 +47,8 @@ def _request(action, values):
 
 
 def _version(conn):
-    if conn.execute("PRAGMA user_version").fetchone()[0] not in (8, 9):
-        raise StateStorageError("State schema version 8 or 9 is required for task workflows.")
+    if conn.execute("PRAGMA user_version").fetchone()[0] not in (8, 9, 10):
+        raise StateStorageError("State schema version 8, 9 or 10 is required for task workflows.")
 
 
 def _owned(conn, owner, ident):

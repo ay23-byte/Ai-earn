@@ -17,7 +17,7 @@ from .auth_storage import AuthStorage, StorageError, _windows_auth_verified
 
 APPLICATION_ID = 0x41494533  # AIE3, distinct from the auth-only database.
 SCHEMA_VERSION = 1  # New files still bootstrap as version 1; upgrades are explicit.
-LATEST_SCHEMA_VERSION = 9
+LATEST_SCHEMA_VERSION = 10
 
 
 class StateStorageError(Exception):
@@ -208,10 +208,28 @@ _V9_SCHEMA = {
 }
 
 
+_V10_INDEX = "CREATE UNIQUE INDEX task_workflows_id_owner_idx ON task_workflows(id, owner_id)"
+
+
+_V10_SCHEMA = {
+    "task_associations": """CREATE TABLE task_associations (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    queue_id TEXT NOT NULL CHECK(length(queue_id)=32 AND queue_id NOT GLOB '*[^0-9a-f]*'),
+    workflow_id TEXT NOT NULL CHECK(length(workflow_id)=32 AND workflow_id NOT GLOB '*[^0-9a-f]*'),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    UNIQUE(queue_id, owner_id),
+    UNIQUE(workflow_id, owner_id),
+    FOREIGN KEY(queue_id, owner_id) REFERENCES task_queue(id, owner_id),
+    FOREIGN KEY(workflow_id, owner_id) REFERENCES task_workflows(id, owner_id)
+)""",
+}
+
+
 def _validate_schema(conn: sqlite3.Connection) -> int:
     application_id = conn.execute("PRAGMA application_id").fetchone()[0]
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if application_id != APPLICATION_ID or version not in (1, 2, 3, 4, 5, 6, 7, 8, 9):
+    if application_id != APPLICATION_ID or version not in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10):
         raise StateStorageError("Unsupported or uninitialized state database; no migration was performed.")
     expected_columns = {
         "state_meta": [("key", "TEXT", 0, 1), ("value", "TEXT", 1, 0)],
@@ -280,6 +298,11 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
             ("status", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
             ("updated_at", "INTEGER", 1, 0),
         ]
+    if version >= 10:
+        expected_columns["task_associations"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("queue_id", "TEXT", 1, 0),
+            ("workflow_id", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+        ]
     objects = conn.execute(
         "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name"
     ).fetchall()
@@ -288,6 +311,8 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         expected_objects.append(("index", "order_drafts_id_owner_idx"))
     if version >= 9:
         expected_objects.append(("index", "invoice_drafts_id_owner_idx"))
+    if version >= 10:
+        expected_objects.append(("index", "task_workflows_id_owner_idx"))
     if [tuple(row) for row in objects] != sorted(expected_objects, key=lambda item: item[1]):
         raise StateStorageError("State database schema is incompatible.")
     if version >= 6:
@@ -297,6 +322,10 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
     if version >= 9:
         row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='invoice_drafts_id_owner_idx'").fetchone()
         if row is None or row[0] != _V9_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+    if version >= 10:
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='task_workflows_id_owner_idx'").fetchone()
+        if row is None or row[0] != _V10_INDEX:
             raise StateStorageError("State database schema constraints are incompatible.")
     for table, expected in expected_columns.items():
         columns = conn.execute(f"PRAGMA table_info({table})").fetchall()
@@ -319,6 +348,8 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         schemas.append(_V8_SCHEMA)
     if version >= 9:
         schemas.append(_V9_SCHEMA)
+    if version >= 10:
+        schemas.append(_V10_SCHEMA)
     for schema in schemas:
         for name, statement in schema.items():
             row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()
@@ -390,6 +421,14 @@ def _apply_v9(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA user_version = 9")
 
 
+def _apply_v10(conn: sqlite3.Connection) -> None:
+    conn.execute(_V10_INDEX)
+    for statement in _V10_SCHEMA.values():
+        conn.execute(statement)
+    conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (10, int(time.time())))
+    conn.execute("PRAGMA user_version = 10")
+
+
 def _check_queue_integrity(conn: sqlite3.Connection, *, owner: str | None = None, record_id: str | None = None) -> None:
     """Reject inconsistent queue/lease metadata; never modify the source.
 
@@ -428,6 +467,7 @@ _OPERATION_RESULTS = (
     (7, "queue_lease", "queue_leases"),
     (8, "task_workflow", "task_workflows"),
     (9, "payment_observation", "payment_observations"),
+    (10, "task_association", "task_associations"),
 )
 
 
@@ -476,6 +516,50 @@ def _check_audit_operation_balance(conn: sqlite3.Connection, version: int) -> No
             raise StateStorageError("State audit and operation counts are inconsistent.")
 
 
+# Each supported service writes exactly one creation event for each record.
+# Queue leases are checked separately: their audit identifies the parent queue.
+_CREATION_EVENTS = (
+    (3, "opportunity_drafts", "opportunity_draft", "draft_created"),
+    (4, "task_plans", "task_plan", "task_planned"),
+    (5, "order_drafts", "order_draft", "order_draft_created"),
+    (6, "invoice_drafts", "invoice_draft", "invoice_draft_created"),
+    (7, "task_queue", "task_queue", "queue_enqueued"),
+    (8, "task_workflows", "task_workflow", "workflow_created"),
+    (9, "payment_observations", "payment_observation", "payment_observation_created"),
+    (10, "task_associations", "task_association", "task_association_created"),
+)
+
+
+def _check_creation_events(conn: sqlite3.Connection, version: int) -> None:
+    """Check selected audit history consistency, not authenticity or completeness."""
+    for minimum, table, kind, event in _CREATION_EVENTS:
+        if version < minimum:
+            continue
+        missing_or_duplicate = conn.execute(
+            f"SELECT 1 FROM {table} AS r LEFT JOIN "
+            "(SELECT actor_id, resource_id, COUNT(*) AS n FROM state_audit "
+            "WHERE resource_type=? AND event=? GROUP BY actor_id, resource_id) AS a "
+            "ON a.actor_id=r.owner_id AND a.resource_id=r.id "
+            "WHERE COALESCE(a.n, 0) != 1 LIMIT 1", (kind, event),
+        ).fetchone()
+        if missing_or_duplicate is not None:
+            raise StateStorageError("State record creation audit is inconsistent.")
+    if version >= 7:
+        inconsistent_leases = conn.execute("""
+            SELECT 1 FROM task_queue AS q
+            LEFT JOIN (SELECT owner_id, queue_id, COUNT(*) AS n FROM queue_leases
+                       GROUP BY owner_id, queue_id) AS l
+                ON l.owner_id=q.owner_id AND l.queue_id=q.id
+            LEFT JOIN (SELECT actor_id, resource_id, COUNT(*) AS n FROM state_audit
+                       WHERE resource_type='task_queue' AND event='queue_leased'
+                       GROUP BY actor_id, resource_id) AS a
+                ON a.actor_id=q.owner_id AND a.resource_id=q.id
+            WHERE COALESCE(l.n, 0) != COALESCE(a.n, 0) LIMIT 1
+        """).fetchone()
+        if inconsistent_leases is not None:
+            raise StateStorageError("Queue lease audit history is inconsistent.")
+
+
 def _check_proposed_amount_snapshots(conn: sqlite3.Connection, version: int) -> None:
     """Compare immutable draft snapshots; these are not financial evidence.
 
@@ -517,6 +601,8 @@ def _check_integrity(conn: sqlite3.Connection) -> None:
         _check_proposed_amount_snapshots(conn, version)
     if version >= 7:
         _check_queue_integrity(conn)
+    if version >= 3:
+        _check_creation_events(conn, version)
 
 
 def _copy_database(source: sqlite3.Connection, destination: sqlite3.Connection) -> None:
@@ -680,6 +766,19 @@ class StateStorage:
             if _validate_schema(conn) != 9:
                 raise StateStorageError("Migration produced an incompatible schema.")
             # Validate the new version before committing its DDL and history.
+            _check_integrity(conn)
+
+    def migrate_to_v10(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 9 only after a checked non-overwriting backup."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 9:
+                raise StateStorageError("Only version 9 can be upgraded to version 10.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v10(conn)
+            if _validate_schema(conn) != 10:
+                raise StateStorageError("Migration produced an incompatible schema.")
             _check_integrity(conn)
 
     def backup_to(self, destination: Path, *, confirmed: bool = False) -> None:

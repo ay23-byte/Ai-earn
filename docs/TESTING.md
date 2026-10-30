@@ -28,6 +28,8 @@ The Phase 0 results above are historical and describe the initial commit, not th
 
 ## Phase 3 initial state-storage checks
 
+Earlier Windows-pending statements below describe their checkpoints; see the later user-reported Windows run and new creation-event results for current evidence.
+
 On Linux, `python3 -m unittest discover` ran **114 tests: 97 passed and 17 Windows-only skipped**. The 22 new `tests/test_state_storage.py` tests cover disposable new-file confirmation, existing files and sidecars, missing/empty/foreign/auth databases, schema and migration-history refusal, rollback and restart, concurrent transactions, unsafe POSIX paths, backup/restore to new files, failed copies, corruption, deletion races and special URI paths. `python3 -m compileall -q ai_earn tests tools`, `git diff --check`, local Markdown links and whitespace checks including new files passed. These are not a security audit, real-data recovery, or verification of Phase 3 business requirements. The user later reported the corrected state-storage tests passing on Windows; see the follow-up below. To rerun, use `.\.venv\Scripts\python.exe -m unittest tests.test_state_storage -v` and then `.\.venv\Scripts\python.exe -m unittest discover -v`; only disposable temporary databases are used. Do not paste secrets into results.
 
 ### Phase 3 explicit migration increment
@@ -88,7 +90,7 @@ At the earlier checkpoint on Linux, `python3 -m unittest tests.test_state_operat
 
 ### Audit/retry count balance and migration validation
 
-Linux `python3 -m unittest tests.test_state_operation_integrity -v` passed **13 tests**. The storage, migration, payment, queue and crash-recovery regression group passed **109 tests**. Full discovery ran **312 tests: 295 passed and 17 Windows-only skipped**. Compilation and `git diff --check` passed. The initial test-first run had 24 expected failures before implementation. Disposable tests remove individual audit or retry entries for eight recognized result types, corrupt a copied backup, cover valid transitions and restore, and test v2–v9 migration collision rollback. A queue-lease retry result is balanced against its parent queue audit. Explicit negative tests demonstrate that deleting a matched pair or swapping same-owner results can escape detection. Matching counts do not establish authenticity, correctness or completeness; unknown types remain outside the check. No real-data recovery or Windows verification is claimed.
+Linux `python3 -m unittest tests.test_state_operation_integrity -v` passed **13 tests**. The storage, migration, payment, queue and crash-recovery regression group passed **109 tests**. Full discovery ran **312 tests: 295 passed and 17 Windows-only skipped**. Compilation and `git diff --check` passed. The initial test-first run had 24 expected failures before implementation. Disposable tests remove individual audit or retry entries for eight recognized result types, corrupt a copied backup, cover valid transitions and restore, and test v2–v9 migration collision rollback. A queue-lease retry result is balanced against its parent queue audit. At that checkpoint, negative tests demonstrated that deleting a matched pair or swapping same-owner results could escape detection; later checks now catch selected creation-pair deletions but not transition-pair deletions. Matching counts do not establish authenticity, correctness or completeness; unknown types remain outside the check. No real-data recovery or Windows verification is claimed.
 
 ### Owner-relative audit pagination
 
@@ -101,6 +103,26 @@ On Linux, `python3 -m unittest tests.test_state_snapshot_integrity -v` passed **
 ### Scoped snapshot checks on service use
 
 On Linux, `python3 -m unittest tests.test_state_snapshot_integrity -v` passed **15 tests**; snapshot, invoice, payment-placeholder and crash/recovery suites passed **66 tests**. Full discovery ran **331 tests: 314 passed and 17 Windows-only skipped**. Compilation and `git diff --check` passed. The first test-first run had 12 failures and one cascading error before the scoped checks were implemented. Tests use disposable databases and cover v6–v9, mismatches, missing parents, cross-owner denial, unchanged audit/retry counts, unrelated records and exact retries after cancellation. Invoice and placeholder services check only the requested record chain; the order service and unrelated records are not scanned. Matching or jointly altered values do not prove financial authenticity, and Windows verification remains pending.
+
+### User-reported Windows run through scoped snapshot checks
+
+The user reported the requested eight-suite focused run from `F:\AI-EARN\Ai-earn`: **138 passed** in 56.220 seconds. Full discovery ran **331 tests: 286 passed and 45 skipped** in 79.137 seconds, with no failures; Windows-specific auth tests in the supplied output ran and passed. Reported test names include the scoped snapshot follow-up. Exact commit and Python version were not supplied. This is user-reported disposable-data evidence, not real-data recovery or independent security review; the later creation-event checks have not been tested on Windows.
+
+### Creation-event completeness checks
+
+On Linux, `python3 -m unittest tests.test_state_operation_integrity -v` passed **20 tests**, and the related integrity/snapshot/migration/queue/workflow/crash group passed **109 tests**. Full discovery ran **338 tests: 321 passed and 17 Windows-only skipped**. Compilation and `git diff --check` passed. An initial test-first run had 18 expected failures. Disposable tests cover missing creation event/retry pairs, duplicate creation events, all recognized record types and queue leases, v3–v9, copied-file corruption, migration failure/rollback and legitimate transitions. Deleting a matched transition audit/operation pair can still evade detection; checks are not tamper evidence. Windows testing of this increment and real-data recovery remain pending.
+
+### Cross-version disposable recovery rehearsal
+
+Linux `python3 -m unittest tests.test_phase3_recovery_rehearsal tests.test_state_operation_integrity tests.test_state_snapshot_integrity tests.test_state_migration tests.test_state_crash_recovery` passed **60 tests**. Full discovery ran **339 tests: 322 passed and 17 Windows-only skipped**. Compilation and `git diff --check` passed. The new rehearsal migrates disposable state through v1–v9, with two owners, an active lease, WAL, a local review, draft invoices and an unverified placeholder. It tests checked backup/restore, retained retry keys, cross-owner denial and divergence after later cancellation and lease recovery. A stale restored copy can accept an operation independently, demonstrating why it must not be resumed without reconciliation. This does not test real-user data, payment verification, queue/workflow integration, arbitrary crashes or external exactly-once effects. The new test has not been run on Windows.
+
+### V10 queue/workflow association
+
+On Linux, `python3 -m unittest tests.test_task_associations -v` passed **22 tests**, followed by two successful repetitions. The focused queue/workflow/integrity/recovery group passed **118 tests**; full discovery ran **361 tests: 344 passed and 17 Windows-only skipped**. Compilation and `git diff --check` passed. Test-first import failed before the module existed; the first implementation run had 11 errors from an incorrect digest call, subsequently fixed. Disposable tests cover ownership, exact and competing retries, one-to-one and SQL foreign-key constraints, failure rollback, expiry, explicit migration, failed and interrupted migration, WAL, controlled process exits, backup/restore and earlier-service compatibility. These associations do not coordinate lifecycle state or execute/fence work. Windows v10 and real-data recovery are unverified.
+
+### Association status view
+
+On Linux, `python3 -m unittest tests.test_task_associations -v` passed **29 tests**, followed by three successful repetitions. The association/queue/workflow/authorization/integrity/recovery group passed **112 tests**; full discovery ran **368 tests: 351 passed and 17 Windows-only skipped**. Compilation and `git diff --check` passed. Six new tests initially errored because the method did not yet exist. Disposable tests cover owner denial, session expiry, missing/corrupt parents, lease and deadline boundaries, independent cancellation/review states, no write side effects, a controlled competing writer and backup/reopen. The view samples a wall clock and can become stale immediately; it does not authorize execution or prove work. Windows verification remains pending.
 
 ### User-reported Windows run for Phase 3 through v5
 
