@@ -85,6 +85,74 @@ class AuthenticationTests(unittest.TestCase):
         new_token = self.service.login("alice", "new password long enough")
         self.assertEqual(self.service.profile(new_token)["username"], "alice")
 
+    def test_authenticated_recovery_replacement_is_owned_and_invalidates_old_code(self):
+        old = self.service.register("alice", self.password)
+        bob_old = self.service.register("bobby", self.password)
+        alice = self.service.login("alice", self.password)
+        replacement = self.service.replace_recovery_code(alice, confirmed=True)
+        self.assertNotEqual(old, replacement)
+        with self.assertRaises(AuthError):
+            self.service.recover("alice", old, "another long password")
+        self.assertTrue(self.service.recover("bobby", bob_old, "another long password"))
+        self.assertTrue(self.service.recover("alice", replacement, "another long password"))
+        with self.store.transaction() as conn:
+            audit = str([tuple(row) for row in conn.execute("SELECT * FROM auth_audit")])
+        self.assertIn("recovery_code_replaced", audit)
+        self.assertNotIn(replacement, audit)
+        self.assertNotIn(alice, audit)
+
+    def test_recovery_replacement_requires_explicit_confirmation(self):
+        old = self.service.register("alice", self.password)
+        token = self.service.login("alice", self.password)
+        with self.assertRaises(AuthError):
+            self.service.replace_recovery_code(token)
+        with self.assertRaises(AuthError):
+            self.service.replace_recovery_code(token, confirmed=1)
+        self.assertTrue(self.service.recover("alice", old, "another long password"))
+
+    def test_recovery_replacement_requires_live_session(self):
+        self.service.register("alice", self.password)
+        with self.assertRaises(AccessDenied):
+            self.service.replace_recovery_code("", confirmed=True)
+        token = self.service.login("alice", self.password)
+        self.service.logout(token)
+        with self.assertRaises(AccessDenied):
+            self.service.replace_recovery_code(token, confirmed=True)
+        token = self.service.login("alice", self.password)
+        self.clock.now += SESSION_SECONDS
+        with self.assertRaises(AccessDenied):
+            self.service.replace_recovery_code(token, confirmed=True)
+
+    def test_lost_replacement_can_be_replaced_again_after_login(self):
+        self.service.register("alice", self.password)
+        token = self.service.login("alice", self.password)
+        lost = self.service.replace_recovery_code(token, confirmed=True)  # Simulate failure before display.
+        self.service.logout(token)
+        token = self.service.login("alice", self.password)
+        replacement = self.service.replace_recovery_code(token, confirmed=True)
+        with self.assertRaises(AuthError):
+            self.service.recover("alice", lost, "another long password")
+        self.assertTrue(self.service.recover("alice", replacement, "another long password"))
+
+    def test_failed_replacement_transaction_preserves_previous_code(self):
+        original = self.service.register("alice", self.password)
+        token = self.service.login("alice", self.password)
+        with patch("ai_earn.auth._audit", side_effect=RuntimeError("simulated transaction failure")):
+            with self.assertRaises(RuntimeError):
+                self.service.replace_recovery_code(token, confirmed=True)
+        self.assertTrue(self.service.recover("alice", original, "another long password"))
+
+    def test_recovery_replacement_rate_limit_persists_and_resets(self):
+        self.service.register("alice", self.password)
+        token = self.service.login("alice", self.password)
+        for _ in range(5):
+            self.service.replace_recovery_code(token, confirmed=True)
+        reopened = AuthService(AuthStorage(self.path), self.clock)
+        with self.assertRaises(RateLimitError):
+            reopened.replace_recovery_code(token, confirmed=True)
+        self.clock.now += WINDOW_SECONDS
+        self.assertTrue(reopened.replace_recovery_code(token, confirmed=True))
+
     def test_invalid_credentials_do_not_log_in_with_dummy_password(self):
         self.service.register("alice", "invalid credential")
         with self.assertRaises(AuthError):

@@ -44,6 +44,7 @@ def run(action: str, environ: Mapping[str, str], stdin: TextIO, out: TextIO, err
             recovery = service.register(username, password)
             out.write("Account created. Save this one-time recovery code privately; it cannot be shown again:\n")
             out.write(recovery + "\n")
+            out.flush()
         elif action == "recover":
             recovery = _secret("Recovery code: ", err)
             password = _secret("New password: ", err)
@@ -52,14 +53,27 @@ def run(action: str, environ: Mapping[str, str], stdin: TextIO, out: TextIO, err
             new_recovery = service.recover(username, recovery, password)
             out.write("Password changed and sessions revoked. Save the new one-time recovery code privately:\n")
             out.write(new_recovery + "\n")
+            out.flush()
         else:
             password = _secret("Password: ", err)
             token = service.login(username, password)
             try:
                 profile = service.profile(token)
-                out.write(f"Signed in as {profile['username']}. Press Enter to log out.\n")
+                out.write(f"Signed in as {profile['username']}. Press Enter to log out, or type R to replace your recovery code.\n")
                 out.flush()
-                stdin.readline()
+                choice = stdin.readline().strip()
+                if choice.lower() == "r":
+                    out.write("This invalidates the previous recovery code. Type YES to confirm: ")
+                    out.flush()
+                    if stdin.readline().strip() == "YES":
+                        replacement = service.replace_recovery_code(token, confirmed=True)
+                        out.write("Save this replacement recovery code privately; it cannot be shown again:\n")
+                        out.write(replacement + "\n")
+                        out.flush()
+                    else:
+                        out.write("Recovery code unchanged.\n")
+                elif choice:
+                    out.write("Unrecognized choice; no recovery code was changed.\n")
             finally:
                 service.logout(token)
             out.write("Signed out.\n")
@@ -68,11 +82,11 @@ def run(action: str, environ: Mapping[str, str], stdin: TextIO, out: TextIO, err
         err.write(str(exc) + "\n")
         return 2
     except (EOFError, KeyboardInterrupt, getpass.GetPassWarning):
-        err.write("Authentication cancelled or hidden input unavailable.\n")
+        err.write("Authentication cancelled or hidden input unavailable; an operation in progress may have changed state.\n")
         return 2
     except (OSError, sqlite3.Error):
-        err.write("Authentication storage is unavailable; no success was reported.\n")
+        err.write("The operation could not finish; its state may have changed. If a recovery code was not displayed, sign in to replace it.\n")
         return 1
     except Exception:
-        err.write("An unexpected authentication error occurred.\n")
+        err.write("An unexpected authentication error occurred; the operation's state may have changed.\n")
         return 1

@@ -14,7 +14,7 @@ from .auth_storage import AuthStorage
 PASSWORD_ITERATIONS = 600_000
 SESSION_SECONDS = 30 * 60
 WINDOW_SECONDS = 15 * 60
-_LIMITS = {"register": (10, 10), "login": (5, 30), "recover": (5, 20)}
+_LIMITS = {"register": (10, 10), "login": (5, 30), "recover": (5, 20), "replace_recovery": (5, 20)}
 _USERNAME = re.compile(r"[a-z0-9_]{3,32}\Z")
 _TOKEN = re.compile(r"[A-Za-z0-9_-]{43}\Z")
 
@@ -185,6 +185,41 @@ class AuthService:
                 _audit(conn, now, "logout", session["account_id"])
         if not session:
             raise AccessDenied("Access denied.")
+
+    def replace_recovery_code(self, token: str, *, confirmed: bool = False) -> str:
+        """Replace the signed-in account's code; the previous code stops working.
+
+        If delivery fails, the user can log in again and repeat this operation.
+        No account identifier supplied by a caller is trusted. This local API
+        requires explicit confirmation from the authenticated caller.
+        """
+        if confirmed is not True:
+            raise AuthError("Explicit confirmation is required.")
+        digest = _token_hash(token)
+        if digest is None:
+            raise AccessDenied("Authentication required.")
+        now = int(self.clock())
+        result = "denied"
+        replacement = None
+        with self.storage.transaction() as conn:
+            account = conn.execute(
+                "SELECT accounts.id, accounts.username FROM sessions JOIN accounts ON accounts.id=sessions.account_id WHERE sessions.token_hash=? AND sessions.revoked_at IS NULL AND sessions.expires_at>?",
+                (digest, now),
+            ).fetchone()
+            if not account:
+                _audit_throttled(conn, now, "access_denied")
+            elif not _attempt(conn, "replace_recovery", _subject(account["username"]), now):
+                result = "limited"
+            else:
+                replacement = secrets.token_urlsafe(32)
+                conn.execute("UPDATE accounts SET recovery_hash=? WHERE id=?", (_token_hash(replacement), account["id"]))
+                _audit(conn, now, "recovery_code_replaced", account["id"])
+                result = "ok"
+        if result == "limited":
+            raise RateLimitError("Too many attempts. Try again later.")
+        if result != "ok" or replacement is None:
+            raise AccessDenied("Access denied.")
+        return replacement
 
     def recover(self, username: str, recovery_code: str, new_password: str) -> str:
         username = _username(username)
