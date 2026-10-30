@@ -1,5 +1,5 @@
 """Real Windows ACL integration; the test override never enables user-facing auth."""
-from contextlib import closing
+from contextlib import closing, contextmanager
 import io
 import os
 import re
@@ -66,6 +66,32 @@ class WindowsAuthenticationTests(unittest.TestCase):
                 service.login("alice", "wrong password long")
         with self.assertRaises(RateLimitError):
             AuthService(AuthStorage(self.path), lambda: now[0]).login("alice", self.password)
+
+    def test_session_expiry_uses_time_after_transaction_lock(self):
+        now = [1_800_000_000]
+        clock = lambda: now[0]
+        service = AuthService(self.storage, clock)
+        service.register("alice", self.password)
+        tokens = [service.login("alice", self.password) for _ in range(3)]
+        start = now[0]
+        store = self.storage
+
+        class DelayedStorage:
+            @contextmanager
+            def transaction(self):
+                with store.transaction() as conn:
+                    now[0] += SESSION_SECONDS
+                    yield conn
+
+        delayed = AuthService(DelayedStorage(), clock)
+        for operation in (
+            lambda: delayed.profile(tokens[0]),
+            lambda: delayed.logout(tokens[1]),
+            lambda: delayed.replace_recovery_code(tokens[2], confirmed=True),
+        ):
+            now[0] = start
+            with self.assertRaises(AccessDenied):
+                operation()
 
     def test_cli_registration_and_login_with_hidden_input_mocked(self):
         class Terminal(io.StringIO):

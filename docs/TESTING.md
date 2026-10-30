@@ -28,13 +28,17 @@ The Phase 0 results above are historical and describe the initial commit, not th
 
 ## Phase 2 interim checks
 
-Latest Linux regression (2026-10-30): `python3 -m unittest discover -v` ran **70 tests: 59 passed, 11 Windows-only skipped**; `python3 -m compileall -q ai_earn tests tools` and `git diff --check` passed. Recovery replacement is covered by service and CLI tests, transaction rollback, output/interrupted-flush retry, and a real POSIX terminal test with hidden input. Two new Windows replacement tests are among the 11 skipped tests; they have not run on Windows. These checks are not an independent security audit.
+Latest Linux regression (2026-10-30): `python3 -m unittest discover` ran **75 tests: 63 passed, 12 Windows-only skipped**; `python3 -m compileall -q ai_earn tests tools` and `git diff --check` passed. Recovery replacement is covered by service and CLI tests, transaction rollback, output/interrupted-flush retry, and a real POSIX terminal test with hidden input. New session-time tests cover expiry, issuance and rate limiting after simulated transaction delay and a real SQLite lock-contention test using a controlled clock. One new Windows-specific session-time test was skipped on Linux and has not been run on Windows. These checks are not an independent security audit.
 
 Use `python3 -m unittest discover -v` and `python3 -m compileall -q ai_earn tests`. Auth tests use temporary, disposable databases and test-only passwords. Coverage includes account registration/login, salted hashes, token digests and expiry, logout, one-time recovery and revocation, rate limits (including concurrent attempts), unauthorized/cross-account access, storage permissions and symlink denial, unknown schemas, SQLite backup to a separate copy, hidden input, and a POSIX pseudoterminal registration/login/recovery workflow. Tests do not prove the system secure, validate a multi-user server, test Windows ACLs, or rehearse real-user disaster recovery. Non-POSIX account storage is intentionally disabled, and POSIX-specific tests are skipped on other platforms. Exact results are recorded in the phase register.
 
 ### User-reported Windows result (2026-10-30)
 
 The user shared Windows console output for `.\.venv\Scripts\python.exe -m unittest tests.test_windows_security tests.test_windows_auth -v` (13 passed) and `.\.venv\Scripts\python.exe -m unittest discover -v` (51 total, 30 passed, 21 POSIX-only skips). They subsequently reported a successful disposable Windows terminal run with all four actions and temporary-directory cleanup. These are user-reported results, not runs performed in this sandbox; Python version and exact commit were not supplied. Input prompts appeared blank, but there was no separate explicit confirmation that input was hidden. The terminal harness and Windows integration tests override the gate in their process; normal Windows authentication stays disabled. See [WINDOWS_TESTING.md](WINDOWS_TESTING.md).
+
+### Latest Windows targeted regression (2026-10-30)
+
+The user reported a `main` fast-forward to `4858bfb`, Python **3.13.5**, and a successful `python -m unittest tests.test_windows_security tests.test_windows_auth -v` run: **15 passed, none skipped**. This includes the two new recovery replacement tests and a test that the unpatched gate rejects normal Windows auth. The auth integration tests use a process-local gate override and the CLI replacement test mocks hidden input. The user then reported `python -m unittest discover -v`: **70 tests run, 37 passed and 33 POSIX-specific tests skipped**, in 7.985 seconds. These are user-reported results, not an independent security audit or verification of the skipped tests.
 
 ### Terminal harness follow-up (2026-10-30)
 

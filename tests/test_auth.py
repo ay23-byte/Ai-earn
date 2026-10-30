@@ -1,10 +1,12 @@
 import concurrent.futures
+from contextlib import contextmanager
 import hashlib
 import os
 from pathlib import Path
 from unittest.mock import patch
 import sqlite3
 import tempfile
+import threading
 import unittest
 
 from ai_earn.auth import AccessDenied, AuthError, AuthService, RateLimitError, SESSION_SECONDS, WINDOW_SECONDS
@@ -70,6 +72,83 @@ class AuthenticationTests(unittest.TestCase):
         self.clock.now += SESSION_SECONDS
         with self.assertRaises(AccessDenied):
             self.service.profile(alice)
+
+    def test_session_expiry_is_checked_after_transaction_lock(self):
+        self.service.register("alice", self.password)
+        tokens = [self.service.login("alice", self.password) for _ in range(3)]
+        start = self.clock.now
+        store, clock = self.store, self.clock
+
+        class DelayedStorage:
+            @contextmanager
+            def transaction(self):
+                with store.transaction() as conn:
+                    clock.now += SESSION_SECONDS
+                    yield conn
+
+        delayed = AuthService(DelayedStorage(), clock)
+        for operation in (
+            lambda: delayed.profile(tokens[0]),
+            lambda: delayed.logout(tokens[1]),
+            lambda: delayed.replace_recovery_code(tokens[2], confirmed=True),
+        ):
+            with self.subTest(operation=operation):
+                self.clock.now = start
+                with self.assertRaises(AccessDenied):
+                    operation()
+
+    def test_session_expiry_after_actual_sqlite_lock_wait(self):
+        self.service.register("alice", self.password)
+        token = self.service.login("alice", self.password)
+        started = threading.Event()
+        store = self.store
+
+        class ContendedStorage:
+            @contextmanager
+            def transaction(self):
+                started.set()
+                with store.transaction() as conn:
+                    yield conn
+
+        delayed = AuthService(ContendedStorage(), self.clock)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            with self.store.transaction():
+                future = pool.submit(delayed.profile, token)
+                self.assertTrue(started.wait(timeout=3))
+                self.clock.now += SESSION_SECONDS
+            with self.assertRaises(AccessDenied):
+                future.result(timeout=10)
+
+    def test_login_session_expiry_uses_transaction_time(self):
+        self.service.register("alice", self.password)
+        store, clock = self.store, self.clock
+
+        class DelayedStorage:
+            @contextmanager
+            def transaction(self):
+                with store.transaction() as conn:
+                    clock.now += SESSION_SECONDS
+                    yield conn
+
+        token = AuthService(DelayedStorage(), clock).login("alice", self.password)
+        self.assertEqual(self.service.profile(token)["username"], "alice")
+
+    def test_rate_limit_window_uses_transaction_time(self):
+        self.service.register("alice", self.password)
+        for _ in range(5):
+            with self.assertRaises(AuthError):
+                self.service.login("alice", "wrong password long")
+        store, clock = self.store, self.clock
+
+        class DelayedStorage:
+            @contextmanager
+            def transaction(self):
+                with store.transaction() as conn:
+                    clock.now += WINDOW_SECONDS
+                    yield conn
+
+        token = AuthService(DelayedStorage(), clock).login("alice", self.password)
+        self.assertEqual(self.service.profile(token)["username"], "alice")
 
     def test_recovery_is_one_time_rotated_and_revokes_sessions(self):
         recovery = self.service.register("alice", self.password)
