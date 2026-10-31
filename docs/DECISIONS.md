@@ -67,3 +67,8 @@ Model local potential-to-initiated assertions separately from verified finance. 
 ### Synthetic event policy is not financial verification
 
 Keep the local payment-event policy deliberately disconnected and explicitly synthetic: no credentials, live network, database mutation or real provider. HMAC proves only possession of the supplied test key over the submitted bytes; it cannot prove payment or settlement. The ordered, replay-checked in-memory exercise informs a later provider-specific design but does not satisfy provider sandbox, durable reconciliation, or Phase 3 exit. Real verification requires independently trusted integration and evidence, with its own security and approval gates.
+
+
+### Durable synthetic events do not become real payments
+
+The previously in-memory test helper lost its entire replay history at restart. V14 adds a separately labelled owner-scoped synthetic journal and checked migration to exercise durable event idempotency and recovery. It deliberately does not integrate with `FinancialAssertions` or promote actual verified/settled state. A caller-chosen synthetic HMAC key cannot establish real provider identity or bank settlement. Future actual financial workflows require a separately selected and independently authenticated provider, durable reconciliation and approval gates; merely passing these synthetic tests does not satisfy them.

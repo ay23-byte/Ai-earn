@@ -36,6 +36,32 @@ def _invalid_constant(_value):
     raise SandboxPaymentError("Invalid synthetic event.")
 
 
+def _verify_synthetic_event(key: bytes, payment_id: str, amount_paise: int, body: bytes, signature: str, now: int) -> dict:
+    """Authenticate test bytes and return strictly validated synthetic fields."""
+    if (type(body) is not bytes or not 1 <= len(body) <= 4096
+            or not isinstance(signature, str) or _SIGNATURE.fullmatch(signature) is None
+            or type(now) is not int or not 0 <= now <= _MAX_TIME):
+        raise SandboxPaymentError("Invalid synthetic event.")
+    actual = hmac.new(key, body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(actual, signature):
+        raise SandboxPaymentError("Invalid synthetic event.")
+    try:
+        data = json.loads(body.decode("utf-8"), object_pairs_hook=_object, parse_constant=_invalid_constant)
+    except (UnicodeError, ValueError, RecursionError) as exc:
+        raise SandboxPaymentError("Invalid synthetic event.") from exc
+    if (type(data) is not dict or frozenset(data) != _KEYS
+            or not isinstance(data["event_id"], str) or _EVENT_ID.fullmatch(data["event_id"]) is None
+            or type(data["sequence"]) is not int or not 1 <= data["sequence"] <= 3
+            or type(data["occurred_at"]) is not int or not 0 <= data["occurred_at"] <= _MAX_TIME
+            or abs(data["occurred_at"] - now) > 300
+            or data["payment_id"] != payment_id
+            or type(data["amount_paise"]) is not int or data["amount_paise"] != amount_paise
+            or data["currency"] != "INR"
+            or data["event_type"] not in ("confirmation", "settlement", "failure", "refund")):
+        raise SandboxPaymentError("Invalid synthetic event.")
+    return data
+
+
 class SandboxPaymentEvents:
     """One synthetic test payment, in memory only; state is lost on restart.
 
@@ -69,27 +95,7 @@ class SandboxPaymentEvents:
         signature/freshness validation. Event-ID conflicts and sequence gaps
         fail closed. Neither a state nor an acknowledgement is financial proof.
         """
-        if (type(body) is not bytes or not 1 <= len(body) <= 4096
-                or not isinstance(signature, str) or _SIGNATURE.fullmatch(signature) is None
-                or type(now) is not int or not 0 <= now <= _MAX_TIME):
-            raise SandboxPaymentError("Invalid synthetic event.")
-        actual = hmac.new(self._key, body, hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(actual, signature):
-            raise SandboxPaymentError("Invalid synthetic event.")
-        try:
-            data = json.loads(body.decode("utf-8"), object_pairs_hook=_object, parse_constant=_invalid_constant)
-        except (UnicodeError, ValueError, RecursionError) as exc:
-            raise SandboxPaymentError("Invalid synthetic event.") from exc
-        if (type(data) is not dict or frozenset(data) != _KEYS
-                or not isinstance(data["event_id"], str) or _EVENT_ID.fullmatch(data["event_id"]) is None
-                or type(data["sequence"]) is not int or not 1 <= data["sequence"] <= 3
-                or type(data["occurred_at"]) is not int or not 0 <= data["occurred_at"] <= _MAX_TIME
-                or abs(data["occurred_at"] - now) > 300
-                or data["payment_id"] != self._payment_id
-                or type(data["amount_paise"]) is not int or data["amount_paise"] != self._amount_paise
-                or data["currency"] != "INR"
-                or data["event_type"] not in ("confirmation", "settlement", "failure", "refund")):
-            raise SandboxPaymentError("Invalid synthetic event.")
+        data = _verify_synthetic_event(self._key, self._payment_id, self._amount_paise, body, signature, now)
         digest = hashlib.sha256(body).digest()
         with self._lock:
             prior = self._seen.get(data["event_id"])
