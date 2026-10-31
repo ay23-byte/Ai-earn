@@ -47,3 +47,13 @@ Python's standard library implements PBKDF2-HMAC-SHA256, cryptographic randomnes
 **Decision:** Introduce a versioned managed marker only for newly associated fresh parents; reject new independent queue/workflow mutations in application services for marked pairs, retaining exact historical retry acknowledgements. Keep legacy associations and historical schemas unchanged. Require the paired lifecycle for local work and `complete_pair` for local approval, and retain explicit abandonment for recoverable unfinished cases.
 
 **Alternatives and consequences:** Silently making all existing associations managed could strand legitimate divergent, exhausted or pending-review histories. Rebuilding old schemas or enforcing through database triggers would change compatibility and recovery assumptions. Opt-in service-level guards preserve legacy behavior but cannot protect against raw SQLite or coordinated history erasure and do not guarantee external exactly-once work, business correctness, authenticated human review or financial settlement. Managed items are omitted from ordinary ready listings; owner-scoped v12 listing and ready observations can rediscover their association IDs, and atomic local selection can lease a ready managed pair; no worker or external-effect fence is implemented. Migrations are backup-first and never automatic; snapshot rollback omits subsequent operations. Windows v12 and real-data recovery remain unverified.
+
+
+### Fresh legacy adoption remains explicit
+
+Legacy associations are discoverable through bounded owner-scoped observations. A confirmed v12 adoption is allowed only for a never-leased queued parent and planned workflow; no bulk or automatic conversion, no attempt to reconcile active work, and no new schema version. Adoption writes a managed marker and its operation/audit atomically while preserving the original identity. Nonfresh legacy cases are deliberately left unresolved rather than inventing safety or discarding history. This is local application policy, not an external-effect fence.
+
+
+### Draft-only financial withdrawal
+
+Coordinate withdrawal of local proposed order/invoice drafts and unverified observations as an explicitly confirmed, atomic, bounded operation rather than silently cascading from existing APIs. Preserve independent legacy behavior and its limitations. Do not invent payment confirmation, settlement or financial revenue, or imply that withdrawing an internal draft affects an external invoice/payment. The later financial and provider models still need independent design and verification.
