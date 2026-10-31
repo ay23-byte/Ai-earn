@@ -209,6 +209,43 @@ class TaskAssociations:
             conn.execute("INSERT INTO state_operations VALUES (?,?,?,?,?)", (owner, key, digest, "managed_task_pair", ident))
             return ident
 
+    def adopt_managed(self, token: str, record_id: str, *, confirmed: bool, operation_key: str) -> str:
+        """Opt a fresh legacy association into v12 paired coordination.
+
+        This changes local mutation policy, not the truth of work or external
+        effects. Previously leased or started parents are deliberately refused.
+        Exact retries acknowledge the original conversion, even after later work.
+        """
+        ident, key = _input(_record_id, record_id), _input(_key, operation_key)
+        if confirmed is not True:
+            raise AssociationError("Explicit confirmation is required.")
+        digest = _digest("managed_task_pair_adopt", ident)
+        with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
+            if conn.execute("PRAGMA user_version").fetchone()[0] != 12:
+                raise StateStorageError("State schema version 12 is required for managed pairs.")
+            _is_managed_pair(conn, owner)
+            association, queue, workflow = _owned_rows(conn, owner, ident)
+            existing = conn.execute(
+                "SELECT request_hash,resource_type,resource_id FROM state_operations WHERE owner_id=? AND operation_key=?",
+                (owner, key),
+            ).fetchone()
+            if existing is not None:
+                if existing["resource_type"] != "managed_task_pair" or not hmac.compare_digest(existing["request_hash"], digest):
+                    raise AssociationError("Operation key was already used for a different request.")
+                if existing["resource_id"] != ident or not _is_managed_pair(conn, owner, association_id=ident):
+                    raise StateStorageError("Stored operation result is inconsistent.")
+                return ident
+            if _is_managed_pair(conn, owner, association_id=ident):
+                raise AssociationError("Association is already managed.")
+            if queue["status"] != "queued" or queue["attempts"] != 0 or workflow["status"] != "planned":
+                raise AssociationError("Fresh queued and planned parents are required.")
+            # The v12 marker inherits the association's timestamp; its audit
+            # records when this separate adoption was actually performed.
+            conn.execute("INSERT INTO managed_task_pairs VALUES (?,?,?)", (ident, owner, association["created_at"]))
+            _managed_audit(conn, now, owner, ident)
+            conn.execute("INSERT INTO state_operations VALUES (?,?,?,?,?)", (owner, key, digest, "managed_task_pair", ident))
+            return ident
+
     def claim_next_managed(self, token: str, *, lease_seconds: int, operation_key: str) -> dict | None:
         """Atomically lease the highest-priority ready managed pair, if any.
 
@@ -593,6 +630,34 @@ class TaskAssociations:
             _version(conn)
             association, queue, workflow = _owned_rows(conn, owner, ident)
             return _status_view(conn, owner, association, queue, workflow, now)
+
+    def list_legacy(self, token: str, *, after_id: str | None = None, limit: int = 20) -> list[dict]:
+        """Observe unmarked owned pairs and point-in-time adoption eligibility.
+
+        Pages are not a snapshot and eligibility is rechecked during adoption.
+        This neither converts a pair nor authorizes execution or external work.
+        """
+        cursor = "" if after_id is None else _input(_record_id, after_id)
+        limit = _managed_limit(limit)
+        with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
+            if conn.execute("PRAGMA user_version").fetchone()[0] != 12:
+                raise StateStorageError("State schema version 12 is required for managed pairs.")
+            _is_managed_pair(conn, owner)
+            rows = conn.execute(
+                "SELECT a.id FROM task_associations a LEFT JOIN managed_task_pairs m "
+                "ON m.id=a.id AND m.owner_id=a.owner_id "
+                "WHERE a.owner_id=? AND m.id IS NULL AND a.id>? "
+                "ORDER BY a.id COLLATE BINARY LIMIT ?", (owner, cursor, limit),
+            ).fetchall()
+            results = []
+            for row in rows:
+                association, queue, workflow = _owned_rows(conn, owner, row["id"])
+                observation = _status_view(conn, owner, association, queue, workflow, now)
+                observation["adoption_eligible_at_observation"] = (
+                    queue["status"] == "queued" and queue["attempts"] == 0 and workflow["status"] == "planned"
+                )
+                results.append(observation)
+            return results
 
     def list_managed(self, token: str, *, after_id: str | None = None, limit: int = 20) -> list[dict]:
         """Page this owner's managed pairs by ID, including blocked/terminal ones.

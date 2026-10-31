@@ -63,6 +63,310 @@ class ManagedPairTests(unittest.TestCase):
         self.upgrade()
         return self.associations.create_managed(self.alice, self.item, self.workflow, operation_key="managed")
 
+    def test_legacy_discovery_pages_by_owner_and_reports_adoption_eligibility(self):
+        fresh = self.associations.create(self.alice, self.item, self.workflow, operation_key="legacy")
+        q = self.queue.enqueue(self.alice, "history", operation_key="history-q", backoff_seconds=0)
+        w = self.workflows.create(self.alice, "history", operation_key="history-w")
+        history = self.associations.create(self.alice, q, w, operation_key="history-pair")
+        lease = self.queue.claim(self.alice, q, operation_key="history-claim", lease_seconds=20)
+        self.queue.retry(self.alice, q, lease, operation_key="history-retry")
+        bq = self.queue.enqueue(self.bob, "private", operation_key="bob-q")
+        bw = self.workflows.create(self.bob, "private", operation_key="bob-w")
+        bob_pair = self.associations.create(self.bob, bq, bw, operation_key="bob-pair")
+        self.upgrade()
+        with self.state.transaction() as conn:
+            counts = tuple(conn.execute("SELECT count(*) FROM " + t).fetchone()[0] for t in ("state_audit", "state_operations", "managed_task_pairs"))
+        first = self.associations.list_legacy(self.alice, limit=1)
+        second = self.associations.list_legacy(self.alice, after_id=first[0]["association_id"], limit=1)
+        results = first + second
+        self.assertEqual([v["association_id"] for v in results], sorted((fresh, history)))
+        by_id = {v["association_id"]: v for v in results}
+        self.assertTrue(by_id[fresh]["adoption_eligible_at_observation"])
+        self.assertFalse(by_id[history]["adoption_eligible_at_observation"])
+        self.assertEqual([v["association_id"] for v in self.associations.list_legacy(self.bob)], [bob_pair])
+        self.assertNotIn("Synthetic", str(results))
+        with self.state.transaction() as conn:
+            self.assertEqual(counts, tuple(conn.execute("SELECT count(*) FROM " + t).fetchone()[0] for t in ("state_audit", "state_operations", "managed_task_pairs")))
+        self.associations.adopt_managed(self.alice, fresh, confirmed=True, operation_key="adopt")
+        self.assertEqual([v["association_id"] for v in self.associations.list_legacy(self.alice)], [history])
+        self.assertTrue(by_id[fresh]["adoption_eligible_at_observation"])  # stale observation
+
+    def test_legacy_discovery_validates_version_input_auth_and_owner_corruption(self):
+        pair = self.associations.create(self.alice, self.item, self.workflow, operation_key="legacy")
+        with self.assertRaises(StateStorageError):
+            self.associations.list_legacy(self.alice)
+        self.upgrade()
+        for value in (0, 101, True, None, "1"):
+            with self.assertRaises(AssociationError):
+                self.associations.list_legacy(self.alice, limit=value)
+        with self.assertRaises(AssociationError):
+            self.associations.list_legacy(self.alice, after_id="bad")
+        with self.assertRaises(AccessDenied):
+            self.associations.list_legacy("")
+        self.associations.adopt_managed(self.alice, pair, confirmed=True, operation_key="adopt")
+        with self.state.transaction() as conn:
+            conn.execute("DELETE FROM managed_task_pairs WHERE id=?", (pair,))
+        with self.assertRaises(StateStorageError):
+            self.associations.list_legacy(self.alice)
+        self.assertEqual(self.associations.list_legacy(self.bob), [])
+
+    def test_legacy_discovery_rechecks_session_before_return(self):
+        self.associations.create(self.alice, self.item, self.workflow, operation_key="legacy")
+        self.upgrade()
+        import ai_earn.task_associations as module
+        original = module._status_view
+        def expire(*args):
+            result = original(*args)
+            self.clock.now += SESSION_SECONDS
+            return result
+        with patch.object(module, "_status_view", side_effect=expire):
+            with self.assertRaises(AccessDenied):
+                self.associations.list_legacy(self.alice)
+
+    def test_legacy_adoption_rechecks_observation_and_missing_marker(self):
+        pair = self.associations.create(self.alice, self.item, self.workflow, operation_key="legacy")
+        self.upgrade()
+        self.assertTrue(self.associations.list_legacy(self.alice)[0]["adoption_eligible_at_observation"])
+        self.workflows.start(self.alice, self.workflow, operation_key="start")
+        with self.assertRaises(AssociationError):
+            self.associations.adopt_managed(self.alice, pair, confirmed=True, operation_key="adopt")
+        q = self.queue.enqueue(self.alice, "other", operation_key="q2")
+        w = self.workflows.create(self.alice, "other", operation_key="w2")
+        other = self.associations.create(self.alice, q, w, operation_key="pair2")
+        self.associations.adopt_managed(self.alice, other, confirmed=True, operation_key="adopt2")
+        with self.state.transaction() as conn:
+            conn.execute("DELETE FROM managed_task_pairs WHERE id=?", (other,))
+        with self.assertRaises(StateStorageError):
+            self.associations.adopt_managed(self.alice, other, confirmed=True, operation_key="adopt2")
+        with self.assertRaises(StateStorageError):
+            self.associations.adopt_managed(self.alice, pair, confirmed=True, operation_key="adopt")
+
+    def test_adopt_controlled_process_crashes_before_and_after_state_commit(self):
+        pair = self.associations.create(self.alice, self.item, self.workflow, operation_key="legacy")
+        self.upgrade()
+        code = r"""
+from contextlib import contextmanager
+from pathlib import Path
+import json, os, sys
+import ai_earn.task_associations as module
+from ai_earn.auth import AuthService
+from ai_earn.auth_storage import AuthStorage
+from ai_earn.state_storage import StateStorage
+p = json.load(sys.stdin)
+auth = AuthService(AuthStorage(Path(p['auth']), create=False), lambda: 1800000000)
+service = module.TaskAssociations(auth, StateStorage(Path(p['state'])))
+if p['point'] == 'before':
+    original = module._managed_audit
+    def crash(*args):
+        original(*args)
+        os._exit(73)
+    module._managed_audit = crash
+else:
+    original = auth.storage.transaction
+    @contextmanager
+    def crash_after_state_commit():
+        with original() as conn:
+            yield conn
+            os._exit(74)
+    auth.storage.transaction = crash_after_state_commit
+service.adopt_managed(p['token'], p['pair'], confirmed=True, operation_key='adopt')
+"""
+        def run(point):
+            data = dict(auth=str(self.auth.storage.path), state=str(self.state.path), token=self.alice, pair=pair, point=point)
+            return subprocess.run([sys.executable, "-c", code], input=json.dumps(data), text=True, capture_output=True, timeout=30)
+        self.assertEqual(run("before").returncode, 73)
+        self.assertEqual([v["association_id"] for v in self.associations.list_legacy(self.alice)], [pair])
+        with self.state.transaction() as conn:
+            self.assertEqual(conn.execute("SELECT count(*) FROM managed_task_pairs").fetchone()[0], 0)
+            self.assertEqual(conn.execute("SELECT count(*) FROM state_operations WHERE operation_key='adopt'").fetchone()[0], 0)
+        self.assertEqual(run("after").returncode, 74)
+        self.assertEqual(self.associations.adopt_managed(self.alice, pair, confirmed=True, operation_key="adopt"), pair)
+        self.assertEqual(self.associations.list_legacy(self.alice), [])
+        self.state.backup_to(self.directory / "adopt-crash.sqlite3", confirmed=True)
+
+    def test_adopted_pair_can_complete_managed_lifecycle(self):
+        pair = self.associations.create(self.alice, self.item, self.workflow, operation_key="legacy")
+        self.upgrade()
+        self.associations.adopt_managed(self.alice, pair, confirmed=True, operation_key="adopt")
+        result = self.associations.claim_next_managed(self.alice, lease_seconds=30, operation_key="claim")
+        self.assertEqual(result["association_id"], pair)
+        self.associations.submit_pair(self.alice, pair, result["lease_id"], "output", operation_key="submit")
+        self.associations.complete_pair(self.alice, pair, result["lease_id"], "output", confirmed=True, operation_key="complete")
+        self.assertEqual(self.associations.inspect(self.alice, pair)["queue_status"], "completed")
+        self.assertEqual(self.associations.adopt_managed(self.alice, pair, confirmed=True, operation_key="adopt"), pair)
+        self.state.backup_to(self.directory / "adopt-complete.sqlite3", confirmed=True)
+
+    def test_adopt_and_direct_claim_compete_across_processes(self):
+        pair = self.associations.create(self.alice, self.item, self.workflow, operation_key="legacy")
+        self.upgrade()
+        code = r"""
+import json, sys
+from pathlib import Path
+from ai_earn.auth import AuthService
+from ai_earn.auth_storage import AuthStorage
+from ai_earn.state_storage import StateStorage
+from ai_earn.task_associations import TaskAssociations, AssociationError
+from ai_earn.task_queue import TaskQueue, QueueError
+p = json.loads(sys.stdin.readline())
+auth = AuthService(AuthStorage(Path(p['auth']), create=False), lambda: 1800000000)
+state = StateStorage(Path(p['state']))
+print('READY', flush=True)
+sys.stdin.readline()
+try:
+    if p['action'] == 'adopt':
+        TaskAssociations(auth, state).adopt_managed(p['token'], p['pair'], confirmed=True, operation_key='adopt')
+    else:
+        TaskQueue(auth, state).claim(p['token'], p['queue'], operation_key='direct', lease_seconds=30)
+    print('won')
+except (AssociationError, QueueError):
+    print('denied')
+"""
+        processes = []
+        try:
+            for action in ("adopt", "claim"):
+                data = dict(auth=str(self.auth.storage.path), state=str(self.state.path), token=self.alice,
+                            pair=pair, queue=self.item, action=action)
+                process = subprocess.Popen([sys.executable, "-c", code], stdin=subprocess.PIPE,
+                                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                processes.append(process)
+                process.stdin.write(json.dumps(data) + "\n")
+                process.stdin.flush()
+                lines = thread_queue.Queue()
+                threading.Thread(target=lambda p=process: lines.put(p.stdout.readline()), daemon=True).start()
+                try:
+                    self.assertEqual(lines.get(timeout=20).strip(), "READY")
+                except thread_queue.Empty as exc:
+                    raise AssertionError("Child did not reach barrier.") from exc
+            for process in processes:
+                process.stdin.write("go\n")
+                process.stdin.close()
+                process.stdin = None
+            results = []
+            for process in processes:
+                out, _ = process.communicate(timeout=30)
+                self.assertEqual(process.returncode, 0, "Child process failed.")
+                results.append(out.strip())
+            self.assertCountEqual(results, ["won", "denied"])
+            self.assertEqual(bool(self.associations.list_managed(self.alice)), results[0] == "won")
+        finally:
+            for process in processes:
+                if process.poll() is None:
+                    process.kill()
+                process.communicate(timeout=10)
+        self.state.backup_to(self.directory / "adopt-race.sqlite3", confirmed=True)
+
+    def test_adopt_fresh_legacy_pair_preserves_identity_and_requires_paired_operations(self):
+        pair = self.associations.create(self.alice, self.item, self.workflow, operation_key="legacy")
+        self.clock.now += 5
+        self.upgrade()
+        self.assertIn(self.item, [item["id"] for item in self.queue.ready(self.alice)])
+        self.assertEqual(self.associations.adopt_managed(self.alice, pair, confirmed=True, operation_key="adopt"), pair)
+        self.assertNotIn(self.item, [item["id"] for item in self.queue.ready(self.alice)])
+        self.assertEqual([v["association_id"] for v in self.associations.ready_managed(self.alice)], [pair])
+        with self.assertRaises(QueueError):
+            self.queue.claim(self.alice, self.item, operation_key="direct", lease_seconds=20)
+        with self.assertRaises(WorkflowError):
+            self.workflows.start(self.alice, self.workflow, operation_key="direct-workflow")
+        lease = self.associations.start_pair(self.alice, pair, operation_key="start", lease_seconds=20)
+        self.assertEqual(self.associations.adopt_managed(self.alice, pair, confirmed=True, operation_key="adopt"), pair)
+        self.assertTrue(self.queue.get_lease(self.alice, lease)["active"])
+        backup = self.directory / "adopt-backup.sqlite3"
+        self.state.backup_to(backup, confirmed=True)
+        restored = TaskAssociations(self.auth, StateStorage(backup))
+        self.assertEqual(restored.adopt_managed(self.alice, pair, confirmed=True, operation_key="adopt"), pair)
+
+    def test_adopt_requires_confirmation_version_owner_and_valid_key(self):
+        pair = self.associations.create(self.alice, self.item, self.workflow, operation_key="legacy")
+        with self.assertRaises(StateStorageError):
+            self.associations.adopt_managed(self.alice, pair, confirmed=True, operation_key="adopt")
+        self.upgrade()
+        for value in (False, None, 1, "yes"):
+            with self.assertRaises(AssociationError):
+                self.associations.adopt_managed(self.alice, pair, confirmed=value, operation_key="adopt")
+        with self.assertRaises(AccessDenied):
+            self.associations.adopt_managed(self.bob, pair, confirmed=True, operation_key="adopt")
+        with self.assertRaises(AccessDenied):
+            self.associations.adopt_managed("", pair, confirmed=True, operation_key="adopt")
+        with self.assertRaises(AssociationError):
+            self.associations.adopt_managed(self.alice, pair, confirmed=True, operation_key="")
+        self.assertEqual(self.associations.list_managed(self.alice), [])
+
+    def test_adopt_rejects_previously_leased_or_started_legacy_parents(self):
+        pair = self.associations.create(self.alice, self.item, self.workflow, operation_key="legacy")
+        self.upgrade()
+        lease = self.queue.claim(self.alice, self.item, operation_key="lease", lease_seconds=20)
+        with self.assertRaises(AssociationError):
+            self.associations.adopt_managed(self.alice, pair, confirmed=True, operation_key="adopt")
+        self.queue.retry(self.alice, self.item, lease, operation_key="retry")
+        with self.assertRaises(AssociationError):
+            self.associations.adopt_managed(self.alice, pair, confirmed=True, operation_key="adopt")
+        q = self.queue.enqueue(self.alice, "other", operation_key="q2")
+        w = self.workflows.create(self.alice, "other", operation_key="w2")
+        other = self.associations.create(self.alice, q, w, operation_key="pair2")
+        self.workflows.start(self.alice, w, operation_key="start2")
+        with self.assertRaises(AssociationError):
+            self.associations.adopt_managed(self.alice, other, confirmed=True, operation_key="adopt2")
+        self.assertEqual(self.associations.list_managed(self.alice), [])
+
+    def test_adopt_rejects_conflicting_keys_and_result_swaps(self):
+        pair = self.associations.create(self.alice, self.item, self.workflow, operation_key="legacy")
+        self.upgrade()
+        with self.assertRaises(AssociationError):
+            self.associations.adopt_managed(self.alice, pair, confirmed=True, operation_key="legacy")
+        self.associations.adopt_managed(self.alice, pair, confirmed=True, operation_key="adopt")
+        with self.assertRaises(AssociationError):
+            self.associations.adopt_managed(self.alice, pair, confirmed=True, operation_key="other")
+        q = self.queue.enqueue(self.alice, "other", operation_key="q2")
+        w = self.workflows.create(self.alice, "other", operation_key="w2")
+        other = self.associations.create(self.alice, q, w, operation_key="pair2")
+        self.associations.adopt_managed(self.alice, other, confirmed=True, operation_key="adopt2")
+        with self.assertRaises(AssociationError):
+            self.associations.adopt_managed(self.alice, other, confirmed=True, operation_key="adopt")
+        with self.state.transaction() as conn:
+            conn.execute("UPDATE state_operations SET resource_id=? WHERE operation_key='adopt'", (other,))
+        with self.assertRaises(StateStorageError):
+            self.associations.adopt_managed(self.alice, pair, confirmed=True, operation_key="adopt")
+
+    def test_adopt_rolls_back_on_failure_and_expired_session(self):
+        pair = self.associations.create(self.alice, self.item, self.workflow, operation_key="legacy")
+        self.upgrade()
+        import ai_earn.task_associations as module
+        with patch.object(module, "_managed_audit", side_effect=RuntimeError("injected")):
+            with self.assertRaises(RuntimeError):
+                self.associations.adopt_managed(self.alice, pair, confirmed=True, operation_key="adopt")
+        self.assertEqual(self.associations.list_managed(self.alice), [])
+        original = module._managed_audit
+        def expire(*args):
+            original(*args)
+            self.clock.now += SESSION_SECONDS
+        with patch.object(module, "_managed_audit", side_effect=expire):
+            with self.assertRaises(AccessDenied):
+                self.associations.adopt_managed(self.alice, pair, confirmed=True, operation_key="adopt")
+        self.alice = self.auth.login("alice", "disposable test password")
+        self.assertEqual(self.associations.list_managed(self.alice), [])
+        self.assertEqual(self.associations.adopt_managed(self.alice, pair, confirmed=True, operation_key="adopt"), pair)
+
+    def test_adopt_and_direct_claim_are_serialized(self):
+        pair = self.associations.create(self.alice, self.item, self.workflow, operation_key="legacy")
+        self.upgrade()
+        barrier = threading.Barrier(2)
+        def adopt():
+            barrier.wait()
+            try:
+                return "adopt", self.associations.adopt_managed(self.alice, pair, confirmed=True, operation_key="adopt")
+            except AssociationError:
+                return "adopt", None
+        def claim():
+            barrier.wait()
+            try:
+                return "claim", self.queue.claim(self.alice, self.item, operation_key="direct", lease_seconds=20)
+            except QueueError:
+                return "claim", None
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = dict(f.result() for f in (pool.submit(adopt), pool.submit(claim)))
+        self.assertEqual(sum(value is not None for value in results.values()), 1)
+        self.assertEqual(bool(self.associations.list_managed(self.alice)), results["adopt"] is not None)
+
     def test_managed_discovery_scopes_pages_and_does_not_mutate(self):
         first = self.managed()
         q = self.queue.enqueue(self.alice, "Higher priority", operation_key="high-q", priority=9)
