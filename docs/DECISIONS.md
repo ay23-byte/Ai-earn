@@ -62,3 +62,8 @@ Coordinate withdrawal of local proposed order/invoice drafts and unverified obse
 ### Separate unverified financial assertions
 
 Model local potential-to-initiated assertions separately from verified finance. The v13 schema intentionally has no confirmed or settled status and no earnings calculation; every read labels values unverified and not revenue. Forward transitions and withdrawal are local record changes only and require explicit confirmation. Checked migration and prior-service compatibility preserve existing data semantics. This is a partial Phase 3 state model, not a contract/invoice/payment lifecycle or permission to use real financial data.
+
+
+### Synthetic event policy is not financial verification
+
+Keep the local payment-event policy deliberately disconnected and explicitly synthetic: no credentials, live network, database mutation or real provider. HMAC proves only possession of the supplied test key over the submitted bytes; it cannot prove payment or settlement. The ordered, replay-checked in-memory exercise informs a later provider-specific design but does not satisfy provider sandbox, durable reconciliation, or Phase 3 exit. Real verification requires independently trusted integration and evidence, with its own security and approval gates.
