@@ -66,6 +66,38 @@ class WindowsPhase3GateTests(unittest.TestCase):
         unexpected = result(skipped=[(FakeTest(ids[2]), "unexpected")], count=3)
         self.assertFalse(gate._valid_result(ids, unexpected, required, strict, gate._ALLOWED_FOCUS_SKIPS))
 
+    def test_runner_reports_skipped_ids_without_reasons_and_preserves_gate_policy(self):
+        class Demo(unittest.TestCase):
+            @unittest.skip("sensitive reason or path")
+            def test_skip(self):
+                pass
+            def test_ok(self):
+                pass
+        suite = unittest.defaultTestLoader.loadTestsFromTestCase(Demo)
+        skipped_id = next(test.id() for test in suite if test._testMethodName == "test_skip")
+        out = io.StringIO()
+        with patch.object(gate.re, "fullmatch", wraps=gate.re.fullmatch):
+            self.assertTrue(gate._run_suite(suite, "Example", (), (), (), out))
+        self.assertIn("Skipped tests in Example:", out.getvalue())
+        # Test IDs outside the repository test namespace are sanitized.
+        self.assertIn("[test identifier unavailable]", out.getvalue())
+        self.assertNotIn("sensitive reason or path", out.getvalue())
+        suite = unittest.defaultTestLoader.loadTestsFromTestCase(Demo)
+        out = io.StringIO()
+        self.assertFalse(gate._run_suite(suite, "Example", (), (skipped_id,), (), out))
+
+    def test_runner_reports_repository_test_id(self):
+        class Demo(unittest.TestCase):
+            @unittest.skip("private")
+            def test_skip(self):
+                pass
+            def id(self):
+                return "tests.test_example.Example.test_skip"
+        out = io.StringIO()
+        self.assertTrue(gate._run_suite(unittest.TestSuite([Demo("test_skip")]), "Example", (), (), (), out))
+        self.assertIn("tests.test_example.Example.test_skip", out.getvalue())
+        self.assertNotIn("private", out.getvalue())
+
     def test_repository_state_is_checked_without_printing_paths_or_file_names(self):
         root = str(gate._ROOT)
         responses = [SimpleNamespace(stdout=root + "\n"), SimpleNamespace(stdout="a"*40 + "\n"), SimpleNamespace(stdout="?? sensitive-name\n")]
