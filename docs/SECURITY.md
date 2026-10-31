@@ -197,3 +197,12 @@ V11 workflow lookups validate an associated completion marker before reads and m
 ### Opt-in v12 managed-pair boundary
 
 New v12 managed pairs block new independent parent-service mutations in trusted code and require paired lifecycle methods; legacy pairs are not converted. Queue `ready` omits managed items, and a historical exact retry is not current authority. Explicit abandonment can discard output hash/size and cannot undo external work. Checked copies and scoped lookups validate marker/parent state but are not tamper-evident: raw SQLite access, coordinated erasure of marker and history, stale snapshots, or a compromised process can bypass the guard. A current lease does not fence external effects. Never treat this local policy as proof of human review, correct delivery, settlement or production readiness. V12 migration is confirmation-gated and requires a checked backup to a new path; do not migrate real data merely to test it. The reported Windows gate at `dfe86c6` predates v12; actual Windows v12 and real-data recovery remain unverified.
+
+
+`list_managed` and `ready_managed` are owner-scoped internal observations, not authorization to execute work or fence external effects. They validate recognized managed state for the requesting owner and may be expensive or report corruption outside the returned page. Their cursor and readiness flags are not stable snapshots; stale backups, coordinated erasure of marker/history, clock changes and hostile local database access remain risks. No production, real-data recovery or financial verification is implied.
+
+
+A disposable v12 rehearsal demonstrates that a stale restored snapshot can accept the same start key and create a different active lease after the current copy has completed. Never infer external exactly-once behavior or safe replay from local retry keys or a passing snapshot check.
+
+
+`claim_next_managed` atomically selects and leases a local managed item, but a lease or successful retry is not authority for an external action. The exact retry acknowledges the original result, which may be inactive; a no-ready result reserves no key. An association-operation/audit binding detects some swapped stored results, but it is unauthenticated and coordinated database changes can evade it. Owner-wide consistency checks can block or expose the owner's corruption; stale snapshots can produce a different locally active lease for the same key. The method neither executes work nor establishes financial or human-review truth.

@@ -229,3 +229,68 @@ assert not queue.get_lease(p['token'], p['lease'])['active']
         self.assertGreaterEqual(comparison.compare(self.alice)["candidate_only"], 1)
         self.assertEqual(comparison.compare_records(self.alice)["tables"]["paired_completions"]["current_only"], 1)
         restored.backup_to(self.directory / "stale-divergent.sqlite3", confirmed=True)
+
+    def test_v12_managed_pair_recovery_and_stale_retry_divergence(self):
+        for version in range(2, 8):
+            self._upgrade(version)
+        queue = TaskQueue(self.auth, self.state)
+        item = queue.enqueue(self.alice, "synthetic queue", operation_key="item", backoff_seconds=0)
+        self._upgrade(8)
+        workflows = TaskWorkflows(self.auth, self.state)
+        workflow = workflows.create(self.alice, "synthetic workflow", operation_key="workflow")
+        for version in range(9, 13):
+            self._upgrade(version)
+        old_version = StateStorage(self.directory / "before-v12.sqlite3")
+        with self.assertRaises(StateStorageError):
+            StateRecoveryComparison(self.auth, self.state, old_version).compare_records(self.alice)
+        pairs = TaskAssociations(self.auth, self.state)
+        pair = pairs.create_managed(self.alice, item, workflow, operation_key="pair")
+        old = self.directory / "v12-stale.sqlite3"
+        restore = self.directory / "v12-stale-restored.sqlite3"
+        self.state.backup_to(old, confirmed=True)
+        StateStorage(old).backup_to(restore, confirmed=True)
+        restored = StateStorage(restore)
+        original_lease = pairs.start_pair(self.alice, pair, operation_key="start", lease_seconds=30)
+        pairs.submit_pair(self.alice, pair, original_lease, "synthetic output", operation_key="submit")
+        pairs.complete_pair(self.alice, pair, original_lease, "synthetic output", confirmed=True, operation_key="complete")
+        self.assertEqual(queue.get(self.alice, item)["status"], "completed")
+        self.assertFalse(queue.get_lease(self.alice, original_lease)["active"])
+        comparison = StateRecoveryComparison(self.auth, self.state, restored)
+        self.assertEqual(comparison.compare_records(self.alice)["tables"]["managed_task_pairs"]["matching"], 1)
+        self.assertEqual(comparison.compare_records(self.alice)["tables"]["paired_completions"]["current_only"], 1)
+        self.assertGreaterEqual(comparison.compare(self.alice)["current_only"], 3)
+        self.assertEqual(comparison.compare_records(self.bob)["tables"]["managed_task_pairs"]["matching"], 0)
+        restored_pairs = TaskAssociations(self.auth, restored)
+        self.assertEqual([row["association_id"] for row in restored_pairs.ready_managed(self.alice)], [pair])
+        self.assertEqual(restored_pairs.ready_managed(self.bob), [])
+        self.assertEqual(TaskQueue(self.auth, restored).ready(self.alice), [])
+        # A checked stale copy has lost the later operation keys. The same
+        # request can start another local lease: it must not be replayed as an
+        # external effect without independent reconciliation/fencing.
+        stale_lease = restored_pairs.start_pair(self.alice, pair, operation_key="start", lease_seconds=30)
+        self.assertNotEqual(stale_lease, original_lease)
+        self.assertTrue(TaskQueue(self.auth, restored).get_lease(self.alice, stale_lease)["active"])
+        self.assertEqual(TaskQueue(self.auth, self.state).get(self.alice, item)["status"], "completed")
+        self.assertGreaterEqual(comparison.compare(self.alice)["conflicts"], 1)
+        restored.backup_to(self.directory / "v12-divergent.sqlite3", confirmed=True)
+
+    def test_v12_atomic_claim_on_stale_copy_is_not_external_fencing(self):
+        for version in range(2, 13):
+            self._upgrade(version)
+        queue = TaskQueue(self.auth, self.state)
+        workflows = TaskWorkflows(self.auth, self.state)
+        pairs = TaskAssociations(self.auth, self.state)
+        item = queue.enqueue(self.alice, "synthetic queue", operation_key="item")
+        workflow = workflows.create(self.alice, "synthetic workflow", operation_key="workflow")
+        pair = pairs.create_managed(self.alice, item, workflow, operation_key="pair")
+        stale_path = self.directory / "before-atomic-claim.sqlite3"
+        self.state.backup_to(stale_path, confirmed=True)
+        stale = StateStorage(stale_path)
+        current = pairs.claim_next_managed(self.alice, lease_seconds=30, operation_key="next")
+        restored = TaskAssociations(self.auth, stale).claim_next_managed(self.alice, lease_seconds=30, operation_key="next")
+        self.assertEqual((current["association_id"], restored["association_id"]), (pair, pair))
+        self.assertNotEqual(current["lease_id"], restored["lease_id"])
+        self.assertTrue(queue.get_lease(self.alice, current["lease_id"])["active"])
+        self.assertTrue(TaskQueue(self.auth, stale).get_lease(self.alice, restored["lease_id"])["active"])
+        self.assertGreaterEqual(StateRecoveryComparison(self.auth, self.state, stale).compare(self.alice)["conflicts"], 1)
+        stale.backup_to(self.directory / "atomic-claim-divergence.sqlite3", confirmed=True)

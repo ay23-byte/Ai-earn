@@ -96,6 +96,45 @@ def _managed_audit(conn, now, owner, ident):
                  (now, owner, "managed_task_pair_created", "managed_task_pair", ident))
 
 
+def _status_view(conn, owner, association, queue, workflow, now):
+    """Build a point-in-time observation, not an authorization to work."""
+    deadline_passed = bool(queue["deadline_at"] and queue["deadline_at"] <= now)
+    ready = queue["status"] == "queued" and queue["available_at"] <= now and not deadline_passed
+    complete = _has_paired_completion(conn, owner, association["queue_id"])
+    active = queue["status"] == "leased" and now < queue["lease_until"] and not complete
+    return {
+        "association_id": association["id"],
+        "queue_id": association["queue_id"],
+        "workflow_id": association["workflow_id"],
+        "observed_at": now,
+        "queue_status": "completed" if complete else queue["status"],
+        "workflow_status": workflow["status"],
+        "queue_ready_at_observation": ready,
+        "lease_active_at_observation": active,
+        "deadline_passed_at_observation": deadline_passed,
+    }
+
+
+def _managed_limit(value):
+    try:
+        return _queue_integer(value, 1, 100)
+    except QueueError as exc:
+        raise AssociationError("Invalid association input.") from exc
+
+
+def _ready_managed_rows(conn, owner, now, limit):
+    """Select ready managed IDs after the caller's owner consistency check."""
+    return conn.execute(
+        "SELECT a.id FROM managed_task_pairs m JOIN task_associations a "
+        "ON a.id=m.id AND a.owner_id=m.owner_id JOIN task_queue q "
+        "ON q.id=a.queue_id AND q.owner_id=a.owner_id "
+        "WHERE m.owner_id=? AND q.status='queued' AND q.available_at<=? "
+        "AND (q.deadline_at=0 OR q.deadline_at>?) "
+        "ORDER BY q.priority DESC, q.available_at, q.id LIMIT ?",
+        (owner, now, now, limit),
+    ).fetchall()
+
+
 def _pair_child_key():
     # These are internal idempotency records, not credentials. Check the shared
     # owner keyspace before use: caller-provided keys are not reserved.
@@ -169,6 +208,73 @@ class TaskAssociations:
             _managed_audit(conn, now, owner, ident)
             conn.execute("INSERT INTO state_operations VALUES (?,?,?,?,?)", (owner, key, digest, "managed_task_pair", ident))
             return ident
+
+    def claim_next_managed(self, token: str, *, lease_seconds: int, operation_key: str) -> dict | None:
+        """Atomically lease the highest-priority ready managed pair, if any.
+
+        An exact retry acknowledges its original lease, which can be stale.
+        No-ready returns None without reserving the key. This does not execute
+        work, prove output, or authorize or fence any external effect.
+        """
+        key = _input(_key, operation_key)
+        try:
+            duration = _queue_integer(lease_seconds, 1, 3600)
+        except QueueError as exc:
+            raise AssociationError("Invalid association input.") from exc
+        digest = _queue_request("association_claim_next_managed", [duration])
+        with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
+            if conn.execute("PRAGMA user_version").fetchone()[0] != 12:
+                raise StateStorageError("State schema version 12 is required for managed pairs.")
+            _is_managed_pair(conn, owner)
+            try:
+                existing = _queue_retry(conn, owner, key, digest, "queue_lease")
+            except QueueError as exc:
+                raise AssociationError("Operation key was already used for a different request.") from exc
+            if existing is not None:
+                record = conn.execute(
+                    "SELECT a.id FROM queue_leases l JOIN task_associations a "
+                    "ON a.queue_id=l.queue_id AND a.owner_id=l.owner_id "
+                    "JOIN managed_task_pairs m ON m.id=a.id AND m.owner_id=a.owner_id "
+                    "WHERE l.id=? AND l.owner_id=?", (existing, owner),
+                ).fetchone()
+                if record is None:
+                    raise StateStorageError("Stored operation result is inconsistent.")
+                association = _owned(conn, owner, record["id"])
+                if not _is_managed_pair(conn, owner, association_id=association["id"]):
+                    raise StateStorageError("Managed pair marker is unavailable.")
+                binding = _queue_request("association_claim_next_binding", [key, association["id"], existing])
+                if conn.execute("SELECT 1 FROM state_operations WHERE owner_id=? AND resource_type=? AND resource_id=? AND request_hash=?", (owner, _RESOURCE, association["id"], binding)).fetchone() is None:
+                    raise StateStorageError("Stored operation result is inconsistent.")
+                return {"association_id": association["id"], "lease_id": existing}
+            rows = _ready_managed_rows(conn, owner, now, 1)
+            if not rows:
+                return None
+            association, queue, workflow = _owned_rows(conn, owner, rows[0]["id"])
+            if not _is_managed_pair(conn, owner, association_id=association["id"]):
+                raise StateStorageError("Managed pair marker is unavailable.")
+            if workflow["status"] not in ("planned", "in_progress", "pending_review"):
+                raise StateStorageError("Managed pair state is inconsistent.")
+            binding_key = _pair_child_key()
+            child = _pair_child_key() if workflow["status"] == "planned" else None
+            keys = [binding_key] + ([child] if child is not None else [])
+            if (key in keys or len(set(keys)) != len(keys)
+                    or any(conn.execute("SELECT 1 FROM state_operations WHERE owner_id=? AND operation_key=?", (owner, value)).fetchone() is not None for value in keys)):
+                raise StateStorageError("Internal operation key collision.")
+            try:
+                lease, until = _claim_in_transaction(conn, owner, now, queue, duration, key, digest)
+            except QueueError as exc:
+                raise AssociationError("Task is not ready for a lease.") from exc
+            if child is not None:
+                workflow_id = association["workflow_id"]
+                conn.execute("UPDATE task_workflows SET status='in_progress', output_hash=NULL, output_size=NULL, updated_at=? WHERE id=? AND owner_id=?", (now, workflow_id, owner))
+                _workflow_audit(conn, now, owner, "workflow_started", workflow_id)
+                _workflow_remember(conn, owner, child, _workflow_request("workflow_start", [workflow_id]), workflow_id)
+            binding = _queue_request("association_claim_next_binding", [key, association["id"], lease])
+            _audit(conn, now, owner, association["id"], "task_association_claim_next_linked")
+            _remember(conn, owner, binding_key, binding, association["id"])
+            if int(self._auth.clock()) >= until:
+                raise AssociationError("Lease expired before commit.")
+            return {"association_id": association["id"], "lease_id": lease}
 
     def start_pair(self, token: str, record_id: str, *, operation_key: str, lease_seconds: int) -> str:
         """Atomically lease a queued item and start its planned local workflow.
@@ -486,18 +592,48 @@ class TaskAssociations:
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
             _version(conn)
             association, queue, workflow = _owned_rows(conn, owner, ident)
-            deadline_passed = bool(queue["deadline_at"] and queue["deadline_at"] <= now)
-            ready = queue["status"] == "queued" and queue["available_at"] <= now and not deadline_passed
-            complete = _has_paired_completion(conn, owner, association["queue_id"])
-            active = queue["status"] == "leased" and now < queue["lease_until"] and not complete
-            return {
-                "association_id": association["id"],
-                "queue_id": association["queue_id"],
-                "workflow_id": association["workflow_id"],
-                "observed_at": now,
-                "queue_status": "completed" if complete else queue["status"],
-                "workflow_status": workflow["status"],
-                "queue_ready_at_observation": ready,
-                "lease_active_at_observation": active,
-                "deadline_passed_at_observation": deadline_passed,
-            }
+            return _status_view(conn, owner, association, queue, workflow, now)
+
+    def list_managed(self, token: str, *, after_id: str | None = None, limit: int = 20) -> list[dict]:
+        """Page this owner's managed pairs by ID, including blocked/terminal ones.
+
+        Cursors are not snapshots; conditions and membership may change between
+        calls. Results neither claim work nor authorize an external effect.
+        """
+        cursor = "" if after_id is None else _input(_record_id, after_id)
+        limit = _managed_limit(limit)
+        with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
+            if conn.execute("PRAGMA user_version").fetchone()[0] != 12:
+                raise StateStorageError("State schema version 12 is required for managed pairs.")
+            # Check all recognized managed state for this owner before listing;
+            # an orphan with retained history is an error rather than omission.
+            _is_managed_pair(conn, owner)
+            rows = conn.execute(
+                "SELECT a.id FROM managed_task_pairs m JOIN task_associations a "
+                "ON a.id=m.id AND a.owner_id=m.owner_id "
+                "WHERE m.owner_id=? AND a.id>? ORDER BY a.id COLLATE BINARY LIMIT ?",
+                (owner, cursor, limit),
+            ).fetchall()
+            results = []
+            for row in rows:
+                association, queue, workflow = _owned_rows(conn, owner, row["id"])
+                if not _is_managed_pair(conn, owner, association_id=association["id"]):
+                    raise StateStorageError("Managed pair marker is unavailable.")
+                results.append(_status_view(conn, owner, association, queue, workflow, now))
+            return results
+
+    def ready_managed(self, token: str, *, limit: int = 20) -> list[dict]:
+        """Observe ready managed pairs by priority; no claim or worker is run."""
+        limit = _managed_limit(limit)
+        with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
+            if conn.execute("PRAGMA user_version").fetchone()[0] != 12:
+                raise StateStorageError("State schema version 12 is required for managed pairs.")
+            _is_managed_pair(conn, owner)
+            rows = _ready_managed_rows(conn, owner, now, limit)
+            results = []
+            for row in rows:
+                association, queue, workflow = _owned_rows(conn, owner, row["id"])
+                if not _is_managed_pair(conn, owner, association_id=association["id"]):
+                    raise StateStorageError("Managed pair marker is unavailable.")
+                results.append(_status_view(conn, owner, association, queue, workflow, now))
+            return results
