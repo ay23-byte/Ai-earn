@@ -42,8 +42,8 @@ def _input(validator, value):
 
 
 def _version(conn):
-    if conn.execute("PRAGMA user_version").fetchone()[0] not in (10, 11, 12):
-        raise StateStorageError("State schema version 10, 11 or 12 is required for associations.")
+    if conn.execute("PRAGMA user_version").fetchone()[0] not in (10, 11, 12, 13):
+        raise StateStorageError("State schema version 10, 11, 12 or 13 is required for associations.")
 
 
 def _owned_rows(conn, owner, ident):
@@ -176,8 +176,8 @@ class TaskAssociations:
         queue_id, workflow_id, key = _input(_record_id, queue_id), _input(_record_id, workflow_id), _input(_key, operation_key)
         digest = _digest("managed_task_pair_create", queue_id + workflow_id)
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
-            if conn.execute("PRAGMA user_version").fetchone()[0] != 12:
-                raise StateStorageError("State schema version 12 is required for managed pairs.")
+            if conn.execute("PRAGMA user_version").fetchone()[0] not in (12, 13):
+                raise StateStorageError("State schema version 12 or 13 is required for managed pairs.")
             existing = conn.execute("SELECT request_hash,resource_type,resource_id FROM state_operations WHERE owner_id=? AND operation_key=?", (owner, key)).fetchone()
             if existing is not None:
                 if existing["resource_type"] != "managed_task_pair" or not hmac.compare_digest(existing["request_hash"], digest):
@@ -221,8 +221,8 @@ class TaskAssociations:
             raise AssociationError("Explicit confirmation is required.")
         digest = _digest("managed_task_pair_adopt", ident)
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
-            if conn.execute("PRAGMA user_version").fetchone()[0] != 12:
-                raise StateStorageError("State schema version 12 is required for managed pairs.")
+            if conn.execute("PRAGMA user_version").fetchone()[0] not in (12, 13):
+                raise StateStorageError("State schema version 12 or 13 is required for managed pairs.")
             _is_managed_pair(conn, owner)
             association, queue, workflow = _owned_rows(conn, owner, ident)
             existing = conn.execute(
@@ -260,8 +260,8 @@ class TaskAssociations:
             raise AssociationError("Invalid association input.") from exc
         digest = _queue_request("association_claim_next_managed", [duration])
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
-            if conn.execute("PRAGMA user_version").fetchone()[0] != 12:
-                raise StateStorageError("State schema version 12 is required for managed pairs.")
+            if conn.execute("PRAGMA user_version").fetchone()[0] not in (12, 13):
+                raise StateStorageError("State schema version 12 or 13 is required for managed pairs.")
             _is_managed_pair(conn, owner)
             try:
                 existing = _queue_retry(conn, owner, key, digest, "queue_lease")
@@ -494,8 +494,8 @@ class TaskAssociations:
             raise AssociationError("Invalid association input.") from exc
         digest = _workflow_request("association_complete_pair", [ident, lease_id, output_hash.hex(), size])
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
-            if conn.execute("PRAGMA user_version").fetchone()[0] not in (11, 12):
-                raise StateStorageError("State schema version 11 or 12 is required for paired completion.")
+            if conn.execute("PRAGMA user_version").fetchone()[0] not in (11, 12, 13):
+                raise StateStorageError("State schema version 11, 12 or 13 is required for paired completion.")
             association, queue, workflow = _owned_rows(conn, owner, ident)
             existing = conn.execute("SELECT request_hash,resource_type,resource_id FROM state_operations WHERE owner_id=? AND operation_key=?", (owner, key)).fetchone()
             if existing is not None:
@@ -640,8 +640,8 @@ class TaskAssociations:
         cursor = "" if after_id is None else _input(_record_id, after_id)
         limit = _managed_limit(limit)
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
-            if conn.execute("PRAGMA user_version").fetchone()[0] != 12:
-                raise StateStorageError("State schema version 12 is required for managed pairs.")
+            if conn.execute("PRAGMA user_version").fetchone()[0] not in (12, 13):
+                raise StateStorageError("State schema version 12 or 13 is required for managed pairs.")
             _is_managed_pair(conn, owner)
             rows = conn.execute(
                 "SELECT a.id FROM task_associations a LEFT JOIN managed_task_pairs m "
@@ -668,8 +668,8 @@ class TaskAssociations:
         cursor = "" if after_id is None else _input(_record_id, after_id)
         limit = _managed_limit(limit)
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
-            if conn.execute("PRAGMA user_version").fetchone()[0] != 12:
-                raise StateStorageError("State schema version 12 is required for managed pairs.")
+            if conn.execute("PRAGMA user_version").fetchone()[0] not in (12, 13):
+                raise StateStorageError("State schema version 12 or 13 is required for managed pairs.")
             # Check all recognized managed state for this owner before listing;
             # an orphan with retained history is an error rather than omission.
             _is_managed_pair(conn, owner)
@@ -691,8 +691,8 @@ class TaskAssociations:
         """Observe ready managed pairs by priority; no claim or worker is run."""
         limit = _managed_limit(limit)
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
-            if conn.execute("PRAGMA user_version").fetchone()[0] != 12:
-                raise StateStorageError("State schema version 12 is required for managed pairs.")
+            if conn.execute("PRAGMA user_version").fetchone()[0] not in (12, 13):
+                raise StateStorageError("State schema version 12 or 13 is required for managed pairs.")
             _is_managed_pair(conn, owner)
             rows = _ready_managed_rows(conn, owner, now, limit)
             results = []
