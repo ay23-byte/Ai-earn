@@ -254,6 +254,40 @@ class PairedCompletionTests(unittest.TestCase):
         with self.assertRaises(StateStorageError):
             self.state.backup_to(self.directory / "bad-timestamp.sqlite3", confirmed=True)
 
+    def test_corrupt_completion_cannot_be_listed_as_ready_or_newly_claimed(self):
+        lease = self.pending()
+        self.associations.complete_pair(self.alice, self.association, lease, "synthetic output", confirmed=True, operation_key="complete")
+        # A malformed, but individually valid, queue row must not be offered or
+        # re-claimed while its completion marker remains. No history is repaired.
+        with self.state.transaction() as conn:
+            conn.execute("UPDATE task_queue SET status='queued', current_lease_id=NULL, lease_until=NULL, available_at=? WHERE id=?", (self.clock.now, self.item))
+        with self.assertRaises(StateStorageError):
+            self.queue.ready(self.alice)
+        with self.assertRaises(StateStorageError):
+            self.queue.claim(self.alice, self.item, operation_key="new-claim", lease_seconds=5)
+        bob_item = self.queue.enqueue(self.bob, "other owner", operation_key="bob-item")
+        self.assertEqual([row["id"] for row in self.queue.ready(self.bob)], [bob_item])
+        with self.state.transaction() as conn:
+            self.assertEqual(conn.execute("SELECT count(*) FROM queue_leases WHERE queue_id=?", (self.item,)).fetchone()[0], 1)
+            self.assertEqual(conn.execute("SELECT count(*) FROM state_operations WHERE operation_key='new-claim'").fetchone()[0], 0)
+
+    def test_corrupt_completion_blocks_workflow_reads_and_mutations(self):
+        lease = self.pending()
+        self.associations.complete_pair(self.alice, self.association, lease, "synthetic output", confirmed=True, operation_key="complete")
+        # This individually legal row conflicts with its completion marker.
+        with self.state.transaction() as conn:
+            conn.execute("UPDATE task_workflows SET status='in_progress', output_hash=NULL, output_size=NULL WHERE id=?", (self.workflow,))
+        with self.assertRaises(StateStorageError):
+            self.workflows.get(self.alice, self.workflow)
+        with self.assertRaises(StateStorageError):
+            self.workflows.submit(self.alice, self.workflow, "more output", operation_key="new-submit")
+        with self.assertRaises(StateStorageError):
+            self.workflows.cancel(self.alice, self.workflow, operation_key="new-cancel")
+        other = self.workflows.create(self.bob, "other owner", operation_key="bob-workflow")
+        self.assertEqual(self.workflows.get(self.bob, other)["status"], "planned")
+        with self.state.transaction() as conn:
+            self.assertEqual(conn.execute("SELECT count(*) FROM state_operations WHERE operation_key IN ('new-submit', 'new-cancel')").fetchone()[0], 0)
+
     def test_deleted_completion_creation_event_and_operation_rejected_by_backup(self):
         lease = self.pending()
         self.associations.complete_pair(self.alice, self.association, lease, "synthetic output", confirmed=True, operation_key="complete")
