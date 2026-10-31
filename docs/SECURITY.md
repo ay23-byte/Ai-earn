@@ -218,3 +218,6 @@ V13 financial assertions are explicitly unverified local claims. Literal confirm
 
 
 `payment_sandbox.py` is a synthetic in-memory test helper and must not be used as a real provider or webhook verifier. Its caller-supplied HMAC test key and event payload can be fabricated by anyone controlling that configuration; signatures prove only possession of that key. State and replay tracking disappear on restart, and acknowledgements do not authorize external action or represent actual money. No real credentials, provider, customer data, external action or financial verification is supported.
+
+
+`DurableSandboxPayments` persists **synthetic only** records, not payment truth. It stores a fingerprint of the disposable test key; never use real credentials or customer data. Session ownership, test-key matching, event HMAC, freshness, sequence, retry and recognized audit/history checks protect the local rehearsal in trusted application code. They are not a real provider protocol, tamper evidence, bank reconciliation or an external-effect fence. Restored stale copies can accept divergent events. No live payments, refunds, credentials or external actions are supported. Windows v14 is unverified.

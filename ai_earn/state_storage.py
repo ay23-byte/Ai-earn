@@ -19,7 +19,7 @@ from .auth_storage import AuthStorage, StorageError, _windows_auth_verified
 
 APPLICATION_ID = 0x41494533  # AIE3, distinct from the auth-only database.
 SCHEMA_VERSION = 1  # New files still bootstrap as version 1; upgrades are explicit.
-LATEST_SCHEMA_VERSION = 13
+LATEST_SCHEMA_VERSION = 14
 
 
 class StateStorageError(Exception):
@@ -271,10 +271,37 @@ _V13_SCHEMA = {
 )""",
 }
 
+
+_V14_SCHEMA = {
+    "sandbox_payments": """CREATE TABLE sandbox_payments (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    amount_paise INTEGER NOT NULL CHECK(typeof(amount_paise)='integer' AND amount_paise BETWEEN 0 AND 1000000000000),
+    currency TEXT NOT NULL CHECK(currency='INR'),
+    key_fingerprint BLOB NOT NULL CHECK(typeof(key_fingerprint)='blob' AND length(key_fingerprint)=32),
+    stage TEXT NOT NULL CHECK(stage IN ('sandbox_awaiting', 'sandbox_confirmed', 'sandbox_settled', 'sandbox_failed', 'sandbox_refunded')),
+    sequence INTEGER NOT NULL CHECK(typeof(sequence)='integer' AND sequence BETWEEN 0 AND 3),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at),
+    UNIQUE(id, owner_id)
+)""",
+    "sandbox_payment_events": """CREATE TABLE sandbox_payment_events (
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    event_id TEXT NOT NULL CHECK(length(event_id) BETWEEN 1 AND 64 AND event_id NOT GLOB '*[^A-Za-z0-9_-]*'),
+    payment_id TEXT NOT NULL CHECK(length(payment_id)=32 AND payment_id NOT GLOB '*[^0-9a-f]*'),
+    event_type TEXT NOT NULL CHECK(event_type IN ('confirmation', 'settlement', 'failure', 'refund')),
+    sequence INTEGER NOT NULL CHECK(typeof(sequence)='integer' AND sequence BETWEEN 1 AND 3),
+    body_hash BLOB NOT NULL CHECK(typeof(body_hash)='blob' AND length(body_hash)=32),
+    PRIMARY KEY(owner_id, event_id),
+    UNIQUE(payment_id, sequence),
+    FOREIGN KEY(payment_id, owner_id) REFERENCES sandbox_payments(id, owner_id)
+)""",
+}
+
 def _validate_schema(conn: sqlite3.Connection) -> int:
     application_id = conn.execute("PRAGMA application_id").fetchone()[0]
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if application_id != APPLICATION_ID or version not in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13):
+    if application_id != APPLICATION_ID or version not in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14):
         raise StateStorageError("Unsupported or uninitialized state database; no migration was performed.")
     expected_columns = {
         "state_meta": [("key", "TEXT", 0, 1), ("value", "TEXT", 1, 0)],
@@ -364,6 +391,16 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
             ("stage", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
             ("updated_at", "INTEGER", 1, 0),
         ]
+    if version >= 14:
+        expected_columns["sandbox_payments"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("amount_paise", "INTEGER", 1, 0),
+            ("currency", "TEXT", 1, 0), ("key_fingerprint", "BLOB", 1, 0), ("stage", "TEXT", 1, 0), ("sequence", "INTEGER", 1, 0),
+            ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["sandbox_payment_events"] = [
+            ("owner_id", "TEXT", 1, 1), ("event_id", "TEXT", 1, 2), ("payment_id", "TEXT", 1, 0),
+            ("event_type", "TEXT", 1, 0), ("sequence", "INTEGER", 1, 0), ("body_hash", "BLOB", 1, 0),
+        ]
     objects = conn.execute(
         "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name"
     ).fetchall()
@@ -423,6 +460,8 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         schemas.append(_V12_SCHEMA)
     if version >= 13:
         schemas.append(_V13_SCHEMA)
+    if version >= 14:
+        schemas.append(_V14_SCHEMA)
     for schema in schemas:
         for name, statement in schema.items():
             row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()
@@ -524,6 +563,13 @@ def _apply_v13(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA user_version = 13")
 
 
+def _apply_v14(conn: sqlite3.Connection) -> None:
+    for statement in _V14_SCHEMA.values():
+        conn.execute(statement)
+    conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (14, int(time.time())))
+    conn.execute("PRAGMA user_version = 14")
+
+
 def _check_managed_pairs(conn: sqlite3.Connection, owner=None, queue_id=None, workflow_id=None, association_id=None) -> None:
     """Check managed-parent state combinations, not history authenticity."""
     invalid = conn.execute("""
@@ -616,6 +662,7 @@ _OPERATION_RESULTS = (
     (11, "paired_completion", "paired_completions"),
     (12, "managed_task_pair", "managed_task_pairs"),
     (13, "financial_assertion", "financial_assertions"),
+    (14, "sandbox_payment", "sandbox_payments"),
 )
 
 
@@ -678,6 +725,7 @@ _CREATION_EVENTS = (
     (11, "paired_completions", "paired_completion", "paired_completion_created"),
     (12, "managed_task_pairs", "managed_task_pair", "managed_task_pair_created"),
     (13, "financial_assertions", "financial_assertion", "financial_assertion_created"),
+    (14, "sandbox_payments", "sandbox_payment", "sandbox_payment_created"),
 )
 
 
@@ -894,6 +942,50 @@ def _check_financial_assertion_binding(conn: sqlite3.Connection, owner: str, ide
         raise StateStorageError("Financial assertion creation binding is inconsistent.")
 
 
+_SANDBOX_TRANSITIONS = {
+    ("sandbox_awaiting", "confirmation"): "sandbox_confirmed",
+    ("sandbox_awaiting", "failure"): "sandbox_failed",
+    ("sandbox_confirmed", "settlement"): "sandbox_settled",
+    ("sandbox_settled", "refund"): "sandbox_refunded",
+}
+
+
+def _check_sandbox_payment_integrity(conn: sqlite3.Connection, owner=None, ident=None) -> None:
+    """Check selected synthetic journal links, not signatures or authenticity."""
+    payments = conn.execute("SELECT id,owner_id,amount_paise,key_fingerprint,stage,sequence FROM sandbox_payments "
+                            "WHERE (? IS NULL OR owner_id=?) AND (? IS NULL OR id=?)",
+                            (owner, owner, ident, ident)).fetchall()
+    for payment_id, actor, amount, fingerprint, stage, sequence in payments:
+        created = _financial_assertion_request("sandbox_payment_create", [amount, fingerprint.hex()])
+        keys = conn.execute("SELECT operation_key FROM state_operations WHERE owner_id=? AND resource_type='sandbox_payment' "
+                            "AND resource_id=? AND request_hash=? LIMIT 2", (actor, payment_id, created)).fetchall()
+        if len(keys) != 1:
+            raise StateStorageError("Synthetic payment creation is inconsistent.")
+        binding = _financial_assertion_request("sandbox_payment_binding", [keys[0][0], payment_id, amount, fingerprint.hex()])
+        if conn.execute("SELECT count(*) FROM state_operations WHERE owner_id=? AND resource_type='sandbox_payment' "
+                        "AND resource_id=? AND request_hash=?", (actor, payment_id, binding)).fetchone()[0] != 1:
+            raise StateStorageError("Synthetic payment binding is inconsistent.")
+        events = conn.execute("SELECT event_id,event_type,sequence,body_hash FROM sandbox_payment_events "
+                              "WHERE owner_id=? AND payment_id=? ORDER BY sequence", (actor, payment_id)).fetchall()
+        audits = [r[0] for r in conn.execute("SELECT event FROM state_audit WHERE actor_id=? AND resource_type='sandbox_payment' "
+                                             "AND resource_id=? ORDER BY id", (actor, payment_id))]
+        expected = ["sandbox_payment_created", "sandbox_payment_bound"]
+        state = "sandbox_awaiting"
+        for index, (event_id, kind, seq, digest) in enumerate(events, 1):
+            state = _SANDBOX_TRANSITIONS.get((state, kind))
+            if state is None or seq != index:
+                raise StateStorageError("Synthetic payment event history is inconsistent.")
+            request = _financial_assertion_request("sandbox_payment_event", [payment_id, event_id, digest.hex()])
+            if conn.execute("SELECT count(*) FROM state_operations WHERE owner_id=? AND resource_type='sandbox_payment' "
+                            "AND resource_id=? AND request_hash=?", (actor, payment_id, request)).fetchone()[0] != 1:
+                raise StateStorageError("Synthetic payment event operation is inconsistent.")
+            expected.append("sandbox_payment_" + kind)
+        count = conn.execute("SELECT count(*) FROM state_operations WHERE owner_id=? AND resource_type='sandbox_payment' "
+                             "AND resource_id=?", (actor, payment_id)).fetchone()[0]
+        if sequence != len(events) or state != stage or audits != expected or count != len(expected):
+            raise StateStorageError("Synthetic payment event history is inconsistent.")
+
+
 def _check_integrity(conn: sqlite3.Connection) -> None:
     rows = conn.execute("PRAGMA quick_check").fetchall()
     if len(rows) != 1 or rows[0][0] != "ok":
@@ -920,6 +1012,8 @@ def _check_integrity(conn: sqlite3.Connection) -> None:
     if version >= 13:
         for row in conn.execute("SELECT id,owner_id,title,amount_paise FROM financial_assertions"):
             _check_financial_assertion_binding(conn, row[1], row[0], row[2], row[3])
+    if version >= 14:
+        _check_sandbox_payment_integrity(conn)
 
 
 def _copy_database(source: sqlite3.Connection, destination: sqlite3.Connection) -> None:
@@ -1134,6 +1228,19 @@ class StateStorage:
             self.backup_to(backup, confirmed=True)
             _apply_v13(conn)
             if _validate_schema(conn) != 13:
+                raise StateStorageError("Migration produced an incompatible schema.")
+            _check_integrity(conn)
+
+    def migrate_to_v14(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 13 only after a checked non-overwriting backup."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 13:
+                raise StateStorageError("Only version 13 can be upgraded to version 14.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v14(conn)
+            if _validate_schema(conn) != 14:
                 raise StateStorageError("Migration produced an incompatible schema.")
             _check_integrity(conn)
 
