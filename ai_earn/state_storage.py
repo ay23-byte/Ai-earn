@@ -17,7 +17,7 @@ from .auth_storage import AuthStorage, StorageError, _windows_auth_verified
 
 APPLICATION_ID = 0x41494533  # AIE3, distinct from the auth-only database.
 SCHEMA_VERSION = 1  # New files still bootstrap as version 1; upgrades are explicit.
-LATEST_SCHEMA_VERSION = 11
+LATEST_SCHEMA_VERSION = 12
 
 
 class StateStorageError(Exception):
@@ -246,10 +246,20 @@ _V11_SCHEMA = {
 }
 
 
+_V12_SCHEMA = {
+    "managed_task_pairs": """CREATE TABLE managed_task_pairs (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    FOREIGN KEY(id, owner_id) REFERENCES task_associations(id, owner_id)
+)""",
+}
+
+
 def _validate_schema(conn: sqlite3.Connection) -> int:
     application_id = conn.execute("PRAGMA application_id").fetchone()[0]
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if application_id != APPLICATION_ID or version not in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11):
+    if application_id != APPLICATION_ID or version not in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12):
         raise StateStorageError("Unsupported or uninitialized state database; no migration was performed.")
     expected_columns = {
         "state_meta": [("key", "TEXT", 0, 1), ("value", "TEXT", 1, 0)],
@@ -328,6 +338,10 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
             ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("queue_id", "TEXT", 1, 0),
             ("workflow_id", "TEXT", 1, 0), ("lease_id", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
         ]
+    if version >= 12:
+        expected_columns["managed_task_pairs"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+        ]
     objects = conn.execute(
         "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name"
     ).fetchall()
@@ -383,6 +397,8 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         schemas.append(_V10_SCHEMA)
     if version >= 11:
         schemas.append(_V11_SCHEMA)
+    if version >= 12:
+        schemas.append(_V12_SCHEMA)
     for schema in schemas:
         for name, statement in schema.items():
             row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()
@@ -470,6 +486,63 @@ def _apply_v11(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA user_version = 11")
 
 
+def _apply_v12(conn: sqlite3.Connection) -> None:
+    for statement in _V12_SCHEMA.values():
+        conn.execute(statement)
+    conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (12, int(time.time())))
+    conn.execute("PRAGMA user_version = 12")
+
+
+def _check_managed_pairs(conn: sqlite3.Connection, owner=None, queue_id=None, workflow_id=None, association_id=None) -> None:
+    """Check managed-parent state combinations, not history authenticity."""
+    invalid = conn.execute("""
+        SELECT 1 FROM managed_task_pairs m
+        LEFT JOIN task_associations a ON a.id=m.id AND a.owner_id=m.owner_id
+        LEFT JOIN task_queue q ON q.id=a.queue_id AND q.owner_id=m.owner_id
+        LEFT JOIN task_workflows w ON w.id=a.workflow_id AND w.owner_id=m.owner_id
+        LEFT JOIN paired_completions c ON c.id=m.id AND c.owner_id=m.owner_id
+        WHERE (? IS NULL OR m.owner_id=?) AND (? IS NULL OR a.queue_id=?)
+          AND (? IS NULL OR a.workflow_id=?) AND (? IS NULL OR m.id=?)
+          AND (a.id IS NULL OR q.id IS NULL OR w.id IS NULL OR m.created_at!=a.created_at
+               OR NOT (
+                    (q.status='queued' AND w.status IN ('planned','in_progress','pending_review') AND c.id IS NULL)
+                 OR (q.status='leased' AND w.status IN ('in_progress','pending_review') AND c.id IS NULL)
+                 OR (q.status='leased' AND w.status='completed' AND c.id IS NOT NULL)
+                 OR (q.status='exhausted' AND w.status IN ('in_progress','pending_review','cancelled') AND c.id IS NULL)
+                 OR (q.status='cancelled' AND w.status='cancelled' AND c.id IS NULL)
+               )) LIMIT 1
+    """, (owner, owner, queue_id, queue_id, workflow_id, workflow_id, association_id, association_id)).fetchone()
+    if invalid is not None:
+        raise StateStorageError("Managed pair state is inconsistent.")
+
+
+def _is_managed_pair(conn: sqlite3.Connection, owner: str, *, queue_id=None, workflow_id=None, association_id=None) -> bool:
+    """Check an owned marker; not a defense against direct SQLite access."""
+    if conn.execute("PRAGMA user_version").fetchone()[0] < 12:
+        return False
+    _check_managed_pairs(conn, owner, queue_id, workflow_id, association_id)
+    orphan = conn.execute("""
+        SELECT 1 FROM task_associations a
+        LEFT JOIN managed_task_pairs m ON m.id=a.id AND m.owner_id=a.owner_id
+        WHERE a.owner_id=? AND (? IS NULL OR a.queue_id=?)
+          AND (? IS NULL OR a.workflow_id=?) AND (? IS NULL OR a.id=?)
+          AND m.id IS NULL AND (
+              EXISTS (SELECT 1 FROM state_operations o WHERE o.owner_id=a.owner_id
+                      AND o.resource_id=a.id AND o.resource_type='managed_task_pair')
+              OR EXISTS (SELECT 1 FROM state_audit e WHERE e.actor_id=a.owner_id
+                         AND e.resource_id=a.id AND e.resource_type='managed_task_pair')
+          ) LIMIT 1
+    """, (owner, queue_id, queue_id, workflow_id, workflow_id, association_id, association_id)).fetchone()
+    if orphan is not None:
+        raise StateStorageError("Managed pair marker is unavailable.")
+    return conn.execute("""
+        SELECT 1 FROM managed_task_pairs m JOIN task_associations a
+          ON a.id=m.id AND a.owner_id=m.owner_id
+        WHERE m.owner_id=? AND (? IS NULL OR a.queue_id=?)
+          AND (? IS NULL OR a.workflow_id=?) AND (? IS NULL OR a.id=?) LIMIT 1
+    """, (owner, queue_id, queue_id, workflow_id, workflow_id, association_id, association_id)).fetchone() is not None
+
+
 def _check_queue_integrity(conn: sqlite3.Connection, *, owner: str | None = None, record_id: str | None = None) -> None:
     """Reject inconsistent queue/lease metadata; never modify the source.
 
@@ -510,6 +583,7 @@ _OPERATION_RESULTS = (
     (9, "payment_observation", "payment_observations"),
     (10, "task_association", "task_associations"),
     (11, "paired_completion", "paired_completions"),
+    (12, "managed_task_pair", "managed_task_pairs"),
 )
 
 
@@ -570,6 +644,7 @@ _CREATION_EVENTS = (
     (9, "payment_observations", "payment_observation", "payment_observation_created"),
     (10, "task_associations", "task_association", "task_association_created"),
     (11, "paired_completions", "paired_completion", "paired_completion_created"),
+    (12, "managed_task_pairs", "managed_task_pair", "managed_task_pair_created"),
 )
 
 
@@ -774,6 +849,8 @@ def _check_integrity(conn: sqlite3.Connection) -> None:
         _check_multistep_histories(conn, version)
     if version >= 11:
         _check_paired_completions(conn)
+    if version >= 12:
+        _check_managed_pairs(conn)
 
 
 def _copy_database(source: sqlite3.Connection, destination: sqlite3.Connection) -> None:
@@ -962,6 +1039,19 @@ class StateStorage:
             self.backup_to(backup, confirmed=True)
             _apply_v11(conn)
             if _validate_schema(conn) != 11:
+                raise StateStorageError("Migration produced an incompatible schema.")
+            _check_integrity(conn)
+
+    def migrate_to_v12(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 11 only after a checked non-overwriting backup."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 11:
+                raise StateStorageError("Only version 11 can be upgraded to version 12.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v12(conn)
+            if _validate_schema(conn) != 12:
                 raise StateStorageError("Migration produced an incompatible schema.")
             _check_integrity(conn)
 

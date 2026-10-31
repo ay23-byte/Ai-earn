@@ -33,6 +33,7 @@ _FOCUS = (
     "tests.test_task_workflows",
     "tests.test_task_associations",
     "tests.test_paired_completion",
+    "tests.test_managed_pairs",
     "tests.test_payment_observations",
 )
 _WINDOWS_AUTH = "tests.test_windows_auth.WindowsAuthenticationTests."
