@@ -6,6 +6,8 @@ contains experimental drafts and task plans, but no customer or payment data.
 """
 
 from contextlib import closing, contextmanager
+import hashlib
+import json
 import os
 from pathlib import Path
 import sqlite3
@@ -17,7 +19,7 @@ from .auth_storage import AuthStorage, StorageError, _windows_auth_verified
 
 APPLICATION_ID = 0x41494533  # AIE3, distinct from the auth-only database.
 SCHEMA_VERSION = 1  # New files still bootstrap as version 1; upgrades are explicit.
-LATEST_SCHEMA_VERSION = 12
+LATEST_SCHEMA_VERSION = 13
 
 
 class StateStorageError(Exception):
@@ -256,10 +258,23 @@ _V12_SCHEMA = {
 }
 
 
+_V13_SCHEMA = {
+    "financial_assertions": """CREATE TABLE financial_assertions (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 200 AND length(trim(title)) > 0),
+    amount_paise INTEGER NOT NULL CHECK(typeof(amount_paise)='integer' AND amount_paise BETWEEN 0 AND 1000000000000),
+    currency TEXT NOT NULL CHECK(currency='INR'),
+    stage TEXT NOT NULL CHECK(stage IN ('potential', 'quote_asserted', 'contract_asserted', 'invoice_asserted', 'initiated_asserted', 'withdrawn')),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at)
+)""",
+}
+
 def _validate_schema(conn: sqlite3.Connection) -> int:
     application_id = conn.execute("PRAGMA application_id").fetchone()[0]
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if application_id != APPLICATION_ID or version not in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12):
+    if application_id != APPLICATION_ID or version not in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13):
         raise StateStorageError("Unsupported or uninitialized state database; no migration was performed.")
     expected_columns = {
         "state_meta": [("key", "TEXT", 0, 1), ("value", "TEXT", 1, 0)],
@@ -342,6 +357,13 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         expected_columns["managed_task_pairs"] = [
             ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
         ]
+    if version >= 13:
+        expected_columns["financial_assertions"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("title", "TEXT", 1, 0),
+            ("amount_paise", "INTEGER", 1, 0), ("currency", "TEXT", 1, 0),
+            ("stage", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+            ("updated_at", "INTEGER", 1, 0),
+        ]
     objects = conn.execute(
         "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name"
     ).fetchall()
@@ -399,6 +421,8 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         schemas.append(_V11_SCHEMA)
     if version >= 12:
         schemas.append(_V12_SCHEMA)
+    if version >= 13:
+        schemas.append(_V13_SCHEMA)
     for schema in schemas:
         for name, statement in schema.items():
             row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()
@@ -493,6 +517,13 @@ def _apply_v12(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA user_version = 12")
 
 
+def _apply_v13(conn: sqlite3.Connection) -> None:
+    for statement in _V13_SCHEMA.values():
+        conn.execute(statement)
+    conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (13, int(time.time())))
+    conn.execute("PRAGMA user_version = 13")
+
+
 def _check_managed_pairs(conn: sqlite3.Connection, owner=None, queue_id=None, workflow_id=None, association_id=None) -> None:
     """Check managed-parent state combinations, not history authenticity."""
     invalid = conn.execute("""
@@ -584,6 +615,7 @@ _OPERATION_RESULTS = (
     (10, "task_association", "task_associations"),
     (11, "paired_completion", "paired_completions"),
     (12, "managed_task_pair", "managed_task_pairs"),
+    (13, "financial_assertion", "financial_assertions"),
 )
 
 
@@ -645,6 +677,7 @@ _CREATION_EVENTS = (
     (10, "task_associations", "task_association", "task_association_created"),
     (11, "paired_completions", "paired_completion", "paired_completion_created"),
     (12, "managed_task_pairs", "managed_task_pair", "managed_task_pair_created"),
+    (13, "financial_assertions", "financial_assertion", "financial_assertion_created"),
 )
 
 
@@ -735,6 +768,16 @@ _MULTI_STEP_HISTORIES = (
         ("pending_review", "workflow_rejected"): "in_progress",
         ("pending_review", "workflow_approved"): "completed",
     }),
+    (13, "financial_assertions", "financial_assertion", {
+        (None, "financial_assertion_created"): "potential",
+        ("potential", "financial_assertion_bound"): "potential",
+        ("potential", "financial_assertion_quote_asserted"): "quote_asserted",
+        ("quote_asserted", "financial_assertion_contract_asserted"): "contract_asserted",
+        ("contract_asserted", "financial_assertion_invoice_asserted"): "invoice_asserted",
+        ("invoice_asserted", "financial_assertion_initiated_asserted"): "initiated_asserted",
+        **{(stage, "financial_assertion_withdrawn"): "withdrawn" for stage in (
+            "potential", "quote_asserted", "contract_asserted", "invoice_asserted", "initiated_asserted")},
+    }),
     (9, "payment_observations", "payment_observation", {
         (None, "payment_observation_created"): "unverified",
         ("unverified", "payment_observation_flag"): "flagged",
@@ -755,8 +798,9 @@ def _check_multistep_histories(conn: sqlite3.Connection, version: int) -> None:
     for minimum, table, kind, transitions in _MULTI_STEP_HISTORIES:
         if version < minimum:
             continue
+        status_column = "stage" if table == "financial_assertions" else "status"
         rows = conn.execute(
-            f"SELECT r.id, r.status, a.event FROM {table} AS r "
+            f"SELECT r.id, r.{status_column}, a.event FROM {table} AS r "
             "LEFT JOIN state_audit AS a ON a.actor_id=r.owner_id AND a.resource_id=r.id "
             "AND a.resource_type=? ORDER BY r.id, a.id", (kind,),
         )
@@ -828,6 +872,28 @@ def _has_paired_completion(conn: sqlite3.Connection, owner: str, queue_id: str) 
     return conn.execute("SELECT 1 FROM paired_completions WHERE owner_id=? AND queue_id=?", (owner, queue_id)).fetchone() is not None
 
 
+def _financial_assertion_request(action: str, values: list) -> bytes:
+    value = json.dumps(values, ensure_ascii=True, separators=(",", ":"))
+    payload = json.dumps([action, value], ensure_ascii=True, separators=(",", ":")).encode("ascii")
+    return hashlib.sha256(payload).digest()
+
+
+def _check_financial_assertion_binding(conn: sqlite3.Connection, owner: str, ident: str, title: str, amount: int) -> None:
+    """Detect selected mismatches, not coordinated database forgery."""
+    creation = _financial_assertion_request("financial_assertion_create", [title, amount, "INR"])
+    keys = conn.execute("SELECT operation_key FROM state_operations WHERE owner_id=? AND resource_type='financial_assertion' "
+                        "AND resource_id=? AND request_hash=? LIMIT 2", (owner, ident, creation)).fetchall()
+    if len(keys) != 1:
+        raise StateStorageError("Financial assertion creation binding is inconsistent.")
+    binding = _financial_assertion_request("financial_assertion_create_binding", [keys[0][0], ident, title, amount])
+    bound = conn.execute("SELECT count(*) FROM state_operations WHERE owner_id=? AND resource_type='financial_assertion' "
+                         "AND resource_id=? AND request_hash=?", (owner, ident, binding)).fetchone()[0]
+    events = conn.execute("SELECT count(*) FROM state_audit WHERE actor_id=? AND resource_type='financial_assertion' "
+                          "AND resource_id=? AND event='financial_assertion_bound'", (owner, ident)).fetchone()[0]
+    if bound != 1 or events != 1:
+        raise StateStorageError("Financial assertion creation binding is inconsistent.")
+
+
 def _check_integrity(conn: sqlite3.Connection) -> None:
     rows = conn.execute("PRAGMA quick_check").fetchall()
     if len(rows) != 1 or rows[0][0] != "ok":
@@ -851,6 +917,9 @@ def _check_integrity(conn: sqlite3.Connection) -> None:
         _check_paired_completions(conn)
     if version >= 12:
         _check_managed_pairs(conn)
+    if version >= 13:
+        for row in conn.execute("SELECT id,owner_id,title,amount_paise FROM financial_assertions"):
+            _check_financial_assertion_binding(conn, row[1], row[0], row[2], row[3])
 
 
 def _copy_database(source: sqlite3.Connection, destination: sqlite3.Connection) -> None:
@@ -1052,6 +1121,19 @@ class StateStorage:
             self.backup_to(backup, confirmed=True)
             _apply_v12(conn)
             if _validate_schema(conn) != 12:
+                raise StateStorageError("Migration produced an incompatible schema.")
+            _check_integrity(conn)
+
+    def migrate_to_v13(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 12 only after a checked non-overwriting backup."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 12:
+                raise StateStorageError("Only version 12 can be upgraded to version 13.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v13(conn)
+            if _validate_schema(conn) != 13:
                 raise StateStorageError("Migration produced an incompatible schema.")
             _check_integrity(conn)
 

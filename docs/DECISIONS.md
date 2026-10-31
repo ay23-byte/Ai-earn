@@ -57,3 +57,8 @@ Legacy associations are discoverable through bounded owner-scoped observations. 
 ### Draft-only financial withdrawal
 
 Coordinate withdrawal of local proposed order/invoice drafts and unverified observations as an explicitly confirmed, atomic, bounded operation rather than silently cascading from existing APIs. Preserve independent legacy behavior and its limitations. Do not invent payment confirmation, settlement or financial revenue, or imply that withdrawing an internal draft affects an external invoice/payment. The later financial and provider models still need independent design and verification.
+
+
+### Separate unverified financial assertions
+
+Model local potential-to-initiated assertions separately from verified finance. The v13 schema intentionally has no confirmed or settled status and no earnings calculation; every read labels values unverified and not revenue. Forward transitions and withdrawal are local record changes only and require explicit confirmation. Checked migration and prior-service compatibility preserve existing data semantics. This is a partial Phase 3 state model, not a contract/invoice/payment lifecycle or permission to use real financial data.
