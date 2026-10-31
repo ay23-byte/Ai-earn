@@ -302,3 +302,17 @@ The checkout includes v12 managed pairs, discovery, adoption, atomic claims and 
 Linux `python3 -m unittest tests.test_financial_assertions` passed **15 tests**. The financial-draft, state-migration/integrity/recovery and gate focused group passed **193 tests**; assertions/managed/completion suites passed **103 tests**. Full discovery ran **582 tests: 565 passed and 17 Windows-only skipped**. Compileall and `git diff --check` passed. The migration test initially failed because v13 did not exist. A backup test then exposed tuple-versus-row access and was fixed before the passing run.
 
 Disposable tests cover explicit backup-first migration, pre-v13 snapshot/version mismatch, reserved retry-resource collision, interrupted migration, old-service and managed completion compatibility, denial/ownership, bounded INR values, forward-only and withdrawn stages, explicit confirmation, historical retry, pagination, recognized stage and amount/binding corruption, same-owner result swaps, cross-owner isolation, session expiry, concurrent keys, controlled process crashes, checked backups and v13 record comparison. Raw/coordinated rewriting can evade checks; stale backups are not external-effect fences. The user-reported Windows gate at `cd7f6ff` predates v13; the new changes have not run on Windows. No real data or external action was involved.
+
+
+### User-reported Windows v13 gate at `a2651b7` (2026-10-31)
+
+The user reported running the disposable gate on Windows at commit `a2651b73da6bf509f43c24f0ced82cca41995acf`, Python **3.13.5**. The pasted output says the focused suite contained **512 cases** and its final summary says **582 tests ran, 535 passed and 47 skipped**, in **369.957 seconds**. The gate reported `WINDOWS PHASE 3 TESTS PASSED` and exit code **0**. The pasted output omits the focused-suite result/counts and full-suite label; individual skipped tests were not provided. The gate's success message is reported only after its focused and full checks succeed, but the missing focused counts cannot be reconstructed from this excerpt. This is user-reported evidence, not independent reproduction.
+
+This is disposable test evidence for the v13 checkout, not proof of verified payments, settlement, safe real-data recovery, production readiness or Phase 3 completion. Skipped tests are not passes; later changes require their own verification. Earlier Windows-pending statements describe their original checkpoints.
+
+
+### Synthetic payment-event policy (2026-10-31)
+
+Linux `python3 -m unittest tests.test_payment_sandbox` passed **11 tests**; synthetic plus Windows-gate fake tests passed **19**; financial/recovery focused group passed **204**. Full discovery ran **593 tests: 576 passed and 17 Windows-only skipped**. Compileall and `git diff --check` passed. Test-first imports failed before the module existed. The Windows gate includes the new suite, but the user-reported `a2651b7` pass predates it.
+
+Tests use a hard-coded disposable synthetic key and cover exact-byte HMAC authentication, signature/format errors, malformed JSON and duplicate fields, strict amount/currency/payment binding, boundary timestamps, ordering and gaps, stale retries, event-ID conflicts, failed-payment terminal behavior, synthetic refund, concurrency, copied acknowledgements and loss of all state on restart. This is not a real provider protocol or durable replay protection, financial verification, reconciliation, external payment action or Phase 3 completion.
