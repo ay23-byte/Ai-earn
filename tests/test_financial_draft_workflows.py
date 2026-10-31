@@ -57,6 +57,103 @@ class FinancialDraftWorkflowTests(unittest.TestCase):
         self.invoice = self.invoices.create(self.alice, self.order, operation_key="invoice")
         self.observation = self.observations.create(self.alice, self.invoice, operation_key="observation")
 
+    def test_withdraw_one_invoice_and_its_observations_without_touching_siblings(self):
+        other = self.invoices.create(self.alice, self.order, operation_key="other-invoice")
+        other_observation = self.observations.create(self.alice, other, operation_key="other-observation")
+        self.observations.flag(self.alice, self.observation, operation_key="flag")
+        self.assertEqual(self.flows.withdraw_invoice(self.alice, self.invoice, confirmed=True, operation_key="withdraw-invoice"), self.invoice)
+        self.assertEqual(self.flows.withdraw_invoice(self.alice, self.invoice, confirmed=True, operation_key="withdraw-invoice"), self.invoice)
+        self.assertEqual(self.invoices.get(self.alice, self.invoice)["status"], "cancelled")
+        self.assertEqual(self.observations.get(self.alice, self.observation)["status"], "discarded")
+        self.assertEqual(self.orders.get(self.alice, self.order)["status"], "draft")
+        self.assertEqual(self.invoices.get(self.alice, other)["status"], "draft")
+        self.assertEqual(self.observations.get(self.alice, other_observation)["status"], "unverified")
+        backup = self.directory / "invoice-withdraw.sqlite3"
+        self.state.backup_to(backup, confirmed=True)
+        from ai_earn.financial_draft_workflows import FinancialDraftWorkflows
+        restored = FinancialDraftWorkflows(self.auth, StateStorage(backup))
+        self.assertEqual(restored.withdraw_invoice(self.alice, self.invoice, confirmed=True, operation_key="withdraw-invoice"), self.invoice)
+
+    def test_invoice_withdraw_denial_cleanup_and_key_conflicts(self):
+        from ai_earn.financial_draft_workflows import FinancialDraftError
+        for value in (False, None, 1, "yes"):
+            with self.assertRaises(FinancialDraftError):
+                self.flows.withdraw_invoice(self.alice, self.invoice, confirmed=value, operation_key="withdraw")
+        with self.assertRaises(AccessDenied):
+            self.flows.withdraw_invoice(self.bob, self.invoice, confirmed=True, operation_key="withdraw")
+        with self.assertRaises(FinancialDraftError):
+            self.flows.withdraw_invoice(self.alice, self.invoice, confirmed=True, operation_key="invoice")
+        self.invoices.cancel(self.alice, self.invoice, operation_key="old-cancel")
+        self.flows.withdraw_invoice(self.alice, self.invoice, confirmed=True, operation_key="cleanup")
+        self.assertEqual(self.observations.get(self.alice, self.observation)["status"], "discarded")
+        with self.assertRaises(FinancialDraftError):
+            self.flows.withdraw_invoice(self.alice, self.invoice, confirmed=True, operation_key="new")
+        self.state.backup_to(self.directory / "invoice-cleanup.sqlite3", confirmed=True)
+
+    def test_invoice_withdraw_rollback_expiry_and_scope_bound(self):
+        import ai_earn.financial_draft_workflows as module
+        with patch.object(module, "_invoice_audit", side_effect=RuntimeError("injected")):
+            with self.assertRaises(RuntimeError):
+                self.flows.withdraw_invoice(self.alice, self.invoice, confirmed=True, operation_key="withdraw")
+        self.assertEqual(self.observations.get(self.alice, self.observation)["status"], "unverified")
+        with patch.object(module, "MAX_LINKED_RECORDS", 0):
+            with self.assertRaises(module.FinancialDraftError):
+                self.flows.withdraw_invoice(self.alice, self.invoice, confirmed=True, operation_key="withdraw")
+        original = module._invoice_audit
+        def expire(*args):
+            original(*args)
+            self.clock.now += SESSION_SECONDS
+        with patch.object(module, "_invoice_audit", side_effect=expire):
+            with self.assertRaises(AccessDenied):
+                self.flows.withdraw_invoice(self.alice, self.invoice, confirmed=True, operation_key="withdraw")
+        self.alice = self.auth.login("alice", "disposable test password")
+        self.assertEqual(self.invoices.get(self.alice, self.invoice)["status"], "draft")
+        self.assertEqual(self.observations.get(self.alice, self.observation)["status"], "unverified")
+        self.flows.withdraw_invoice(self.alice, self.invoice, confirmed=True, operation_key="withdraw")
+
+    def test_invoice_withdraw_concurrent_exact_retries(self):
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            calls = [pool.submit(self.flows.withdraw_invoice, self.alice, self.invoice, confirmed=True, operation_key="withdraw") for _ in range(2)]
+            self.assertEqual([call.result(timeout=20) for call in calls], [self.invoice, self.invoice])
+        self.state.backup_to(self.directory / "invoice-race.sqlite3", confirmed=True)
+
+    def test_invoice_withdraw_detects_internal_key_collision_and_bad_history(self):
+        import ai_earn.financial_draft_workflows as module
+        for collision in ("withdraw", "invoice", "duplicate-child"):
+            with patch.object(module, "_child_key", return_value=collision):
+                with self.assertRaises(StateStorageError):
+                    self.flows.withdraw_invoice(self.alice, self.invoice, confirmed=True, operation_key="withdraw")
+        self.assertEqual(self.observations.get(self.alice, self.observation)["status"], "unverified")
+        other = self.invoices.create(self.alice, self.order, operation_key="other")
+        self.flows.withdraw_invoice(self.alice, self.invoice, confirmed=True, operation_key="withdraw")
+        with self.state.transaction() as conn:
+            conn.execute("UPDATE state_operations SET resource_id=? WHERE operation_key='withdraw'", (other,))
+        with self.assertRaises(StateStorageError):
+            self.flows.withdraw_invoice(self.alice, self.invoice, confirmed=True, operation_key="withdraw")
+
+    def test_invoice_withdraw_rejects_corrupt_observation_and_isolates_other_owner(self):
+        other = self.orders.create(self.bob, "Other", 100, operation_key="order")
+        other_invoice = self.invoices.create(self.bob, other, operation_key="invoice")
+        with self.state.transaction() as conn:
+            conn.execute("UPDATE payment_observations SET proposed_amount_paise=1 WHERE id=?", (self.observation,))
+        with self.assertRaises(StateStorageError):
+            self.flows.withdraw_invoice(self.alice, self.invoice, confirmed=True, operation_key="withdraw")
+        self.assertEqual(self.invoices.get(self.alice, self.invoice)["status"], "draft")
+        self.flows.withdraw_invoice(self.bob, other_invoice, confirmed=True, operation_key="withdraw")
+        self.assertEqual(self.orders.get(self.bob, other)["status"], "draft")
+
+    def test_swapped_invoice_withdraw_results_are_rejected_by_snapshot_checks(self):
+        other = self.invoices.create(self.alice, self.order, operation_key="other")
+        self.flows.withdraw_invoice(self.alice, self.invoice, confirmed=True, operation_key="withdraw-one")
+        self.flows.withdraw_invoice(self.alice, other, confirmed=True, operation_key="withdraw-two")
+        with self.state.transaction() as conn:
+            conn.execute("UPDATE state_operations SET resource_id=? WHERE operation_key='withdraw-one'", (other,))
+            conn.execute("UPDATE state_operations SET resource_id=? WHERE operation_key='withdraw-two'", (self.invoice,))
+        with self.assertRaises(StateStorageError):
+            self.state.backup_to(self.directory / "swapped-withdraw.sqlite3", confirmed=True)
+        with self.assertRaises(StateStorageError):
+            self.flows.withdraw_invoice(self.alice, self.invoice, confirmed=True, operation_key="withdraw-one")
+
     def test_v10_through_v12_compatibility_and_owner_isolation(self):
         bob_order = self.orders.create(self.bob, "Private", 100, operation_key="bob-order")
         bob_invoice = self.invoices.create(self.bob, bob_order, operation_key="bob-invoice")

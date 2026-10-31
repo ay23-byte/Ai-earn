@@ -4,6 +4,26 @@ Ai-earn is in early development. It currently contains an offline status command
 
 **Windows:** the user reported the experimental offline authentication path passed its Windows tests at `72241cc`. Phase 2 passed with documented limitations for this offline increment only; it is not production-ready. Use only disposable test credentials, and do not store customer or financial data.
 
+## Experimental manual tracker (first increment)
+
+The user-approved smaller product is an offline tracker rather than the original full financial platform. A first terminal interface is available for **disposable test data**: it creates and lists opportunities with proposed INR amounts, advances unverified quote/contract/invoice/payment-initiated stages, and withdraws entries. **It cannot yet record a claimed payment receipt**, verify a payment or settlement, issue invoices, calculate earnings, or connect to Razorpay. It is not ready for real customer or financial data. The original Phase 3 has not passed; see [phase status](docs/PHASE_STATUS.md).
+
+On Windows PowerShell, after pulling the change and creating `.venv`, create a **new** private directory on a trusted local drive (the helper refuses existing directories). Do not reuse this test path for existing data:
+
+```powershell
+$private = Join-Path $HOME 'AiEarn-Tracker-Test'
+.\.venv\Scripts\python.exe -c "import sys; from pathlib import Path; from ai_earn.windows_security import create_private_directory; create_private_directory(Path(sys.argv[1]))" "$private"
+$env:AI_EARN_AUTH_DB = Join-Path $private 'auth.sqlite3'
+$env:AI_EARN_STATE_DB = Join-Path $private 'state.sqlite3'
+.\.venv\Scripts\python.exe -m ai_earn auth register
+.\.venv\Scripts\python.exe -m ai_earn tracker init
+.\.venv\Scripts\python.exe -m ai_earn tracker open
+```
+
+Registration requests a hidden password and displays a one-time recovery code: save it privately. `tracker init` requires typing `YES`, creates a new state database and 12 non-overwriting migration backups, and never upgrades an existing file. If setup is interrupted, **do not delete or overwrite files automatically**; inspect the private directory and use a different new test directory or review recovery. Environment variables above last only for the current PowerShell session; set them again before opening the tracker later. The tracker requires a real terminal, does not accept passwords as arguments, and closes the session on exit where possible. Entries may be visible to anyone who can access your OS account or files; never use sensitive data. If an operation is interrupted or reports an error, inspect entries before retrying: the outcome may be ambiguous and the CLI creates a new operation key for each attempt.
+
+On POSIX use a newly created owner-only directory (`mkdir -m 700`), export the same two absolute paths, and run `python3 -m ai_earn auth register`, `python3 -m ai_earn tracker init`, then `python3 -m ai_earn tracker open`. Never replace an existing database. Windows verification of this new interface is pending.
+
 ## Setup and tests
 
 Python 3.11+ is required; no third-party packages are used. From the repository root:

@@ -347,3 +347,13 @@ The Windows gate now prints sanitized repository test IDs for skipped cases afte
 ### Snapshot comparison increment (2026-10-31)
 
 `compare_snapshot` compares recognized owner-scoped rows, operations and synthetic payment event rows together under validated copy locks, reporting counts only. Three added disposable tests cover event hash conflicts, one-sided events, owner isolation, old-schema behavior, invalid and expiring sessions, corrupt history and same-file refusal. Test-first methods were missing. On Linux, the recovery/managed/financial/gate focused group passed 135 tests; full discovery ran 616 tests: 599 passed and 17 Windows-only skipped. Compileall and `git diff --check` passed. Windows testing is pending. Comparison is not audit equality, authenticity, freshness, reconciliation, an external-effects fence or permission to restore real data.
+
+
+### Invoice-level local draft withdrawal (2026-10-31)
+
+The test-first call failed because `withdraw_invoice` did not exist. On Linux the financial-draft suite passed 21 tests, the financial/recovery/gate focused group passed 148, and full discovery ran 623 tests: 606 passed and 17 Windows-only skipped. Compileall and `git diff --check` passed. Tests use disposable data and exercise owner/confirmation denial, siblings, bounds, corruption, key conflicts and swapped results, rollback, expiry, concurrent retries, checked backup and pre-cancelled invoice cleanup. A separate test-first check found that swapping two invoice withdrawal operation results preserved generic audit counts and escaped backup checks; scoped withdrawal and full checked backups now verify the recognized request-hash-to-invoice/audit binding. This is not tamper evidence against coordinated rewriting. No real invoice or payment is affected. This increment has not been run on Windows.
+
+
+### Offline tracker first increment (2026-10-31)
+
+Linux tracker/CLI/assertions/draft/gate group: 63 tests passed. Full discovery: 629 run, 612 passed and 17 Windows-only skipped. Compileall and `git diff --check` passed. Tracker tests cover new-file initialization and backup refusal, account isolation, creation/listing, amount parsing, stage/withdrawal confirmation, production and noninteractive refusal, and refusing missing/old state on open. Tests use mocked terminal/password input and disposable data; actual interactive Windows operation is unverified. The Windows gate includes the new suite. This is not payment verification, receipt recording, real-data readiness, or completion of the original Phase 3. The terminal generates a new operation key on each attempt; an ambiguous error can have committed, so inspect before retry.

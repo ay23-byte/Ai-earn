@@ -37,6 +37,7 @@ _FOCUS = (
     "tests.test_payment_observations",
     "tests.test_financial_draft_workflows",
     "tests.test_financial_assertions",
+    "tests.test_tracker_cli",
     "tests.test_payment_sandbox",
     "tests.test_durable_sandbox_payments",
 )

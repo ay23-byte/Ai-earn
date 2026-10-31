@@ -986,6 +986,20 @@ def _check_sandbox_payment_integrity(conn: sqlite3.Connection, owner=None, ident
             raise StateStorageError("Synthetic payment event history is inconsistent.")
 
 
+def _check_invoice_withdraw_binding(conn: sqlite3.Connection, owner: str, ident: str) -> None:
+    """Check selected local withdrawal operation/audit bindings, not authenticity."""
+    payload = json.dumps(["financial_invoice_withdraw", ident], ensure_ascii=True, separators=(",", ":")).encode("ascii")
+    digest = hashlib.sha256(payload).digest()
+    operation_count = conn.execute(
+        "SELECT count(*) FROM state_operations WHERE owner_id=? AND resource_type='invoice_draft' "
+        "AND resource_id=? AND request_hash=?", (owner, ident, digest)).fetchone()[0]
+    audit_count = conn.execute(
+        "SELECT count(*) FROM state_audit WHERE actor_id=? AND resource_type='invoice_draft' "
+        "AND resource_id=? AND event='financial_invoice_withdrawn'", (owner, ident)).fetchone()[0]
+    if operation_count != audit_count or audit_count > 1:
+        raise StateStorageError("Invoice draft withdrawal binding is inconsistent.")
+
+
 def _check_integrity(conn: sqlite3.Connection) -> None:
     rows = conn.execute("PRAGMA quick_check").fetchall()
     if len(rows) != 1 or rows[0][0] != "ok":
@@ -998,6 +1012,9 @@ def _check_integrity(conn: sqlite3.Connection) -> None:
         _check_audit_operation_balance(conn, version)
     if version >= 6:
         _check_proposed_amount_snapshots(conn, version)
+    if version >= 9:
+        for ident, owner in conn.execute("SELECT id,owner_id FROM invoice_drafts"):
+            _check_invoice_withdraw_binding(conn, owner, ident)
     if version >= 7:
         _check_queue_integrity(conn)
     if version >= 3:
