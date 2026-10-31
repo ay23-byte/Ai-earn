@@ -13,7 +13,7 @@ import unicodedata
 from .auth import AccessDenied, AuthService
 from .opportunity_drafts import DraftError, _digest, _key, _record_id, _title
 from .state_authorization import _authorized_transaction
-from .state_storage import StateStorage, StateStorageError
+from .state_storage import StateStorage, StateStorageError, _has_paired_completion
 
 
 _RESOURCE = "task_workflow"
@@ -55,6 +55,10 @@ def _owned(conn, owner, ident):
     row = conn.execute("SELECT * FROM task_workflows WHERE id=? AND owner_id=?", (ident, owner)).fetchone()
     if row is None:
         raise AccessDenied("Access denied.")
+    if conn.execute("PRAGMA user_version").fetchone()[0] >= 11:
+        association = conn.execute("SELECT queue_id FROM task_associations WHERE owner_id=? AND workflow_id=?", (owner, ident)).fetchone()
+        if association is not None:
+            _has_paired_completion(conn, owner, association["queue_id"])
     return row
 
 

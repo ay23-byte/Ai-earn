@@ -3,7 +3,10 @@
 This does not verify real-data recovery, external work, or payment settlement.
 """
 from contextlib import closing
+import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -17,7 +20,9 @@ from ai_earn.opportunity_drafts import OpportunityDrafts
 from ai_earn.order_drafts import OrderDrafts
 from ai_earn.payment_observations import PaymentObservations
 from ai_earn.state_audit import StateAudit
-from ai_earn.state_storage import StateStorage
+from ai_earn.state_storage import StateStorage, StateStorageError
+from ai_earn.state_recovery_comparison import StateRecoveryComparison
+from ai_earn.task_associations import TaskAssociations
 from ai_earn.task_plans import TaskPlans
 from ai_earn.task_queue import TaskQueue
 from ai_earn.task_workflows import TaskWorkflows
@@ -140,3 +145,87 @@ class Phase3RecoveryRehearsalTests(unittest.TestCase):
         restored_observations.discard(self.alice, observation, operation_key="later-discard")
         self.assertEqual(restored_observations.get(self.alice, observation)["status"], "discarded")
         self.assertEqual(restored_invoices.get(self.alice, invoice)["status"], "draft")
+
+    def test_v11_completion_stale_copy_and_process_restart(self):
+        # All paths, users and output are synthetic. No existing file is restored.
+        for version in range(2, 10):
+            self._upgrade(version)
+        queue = TaskQueue(self.auth, self.state)
+        workflows = TaskWorkflows(self.auth, self.state)
+        item = queue.enqueue(self.alice, "rehearsal queue", operation_key="item", max_attempts=1, backoff_seconds=0)
+        workflow = workflows.create(self.alice, "rehearsal workflow", operation_key="workflow")
+        self._upgrade(10)
+        pairs = TaskAssociations(self.auth, self.state)
+        association = pairs.create(self.alice, item, workflow, operation_key="pair")
+        lease = pairs.start_pair(self.alice, association, operation_key="start", lease_seconds=30)
+        pairs.submit_pair(self.alice, association, lease, "synthetic result", operation_key="submit")
+        self._upgrade(11)
+        self.assertEqual(queue.get(self.alice, item)["status"], "leased")
+        self.assertEqual(workflows.get(self.alice, workflow)["status"], "pending_review")
+
+        # Earlier schema copies cannot be silently compared or merged.
+        before_v11 = StateStorage(self.directory / "before-v11.sqlite3")
+        with self.assertRaises(StateStorageError):
+            StateRecoveryComparison(self.auth, self.state, before_v11).compare_records(self.alice)
+        checkpoint = self.directory / "v11-checkpoint.sqlite3"
+        restored_path = self.directory / "v11-restored.sqlite3"
+        self.state.backup_to(checkpoint, confirmed=True)
+        StateStorage(checkpoint).backup_to(restored_path, confirmed=True)
+        restored = StateStorage(restored_path)
+        pairs.complete_pair(self.alice, association, lease, "synthetic result", confirmed=True, operation_key="complete")
+        queue.enqueue(self.bob, "other owner", operation_key="other-item")
+        comparison = StateRecoveryComparison(self.auth, self.state, restored)
+        records = comparison.compare_records(self.alice)
+        self.assertEqual(records["schema_version"], 11)
+        self.assertEqual(records["tables"]["paired_completions"]["current_only"], 1)
+        self.assertEqual(records["tables"]["task_workflows"]["conflicts"], 1)
+        self.assertEqual(records["tables"]["task_queue"]["current_only"], 0)
+        self.assertEqual(comparison.compare_records(self.bob)["tables"]["task_queue"]["current_only"], 1)
+        self.assertGreaterEqual(comparison.compare(self.alice)["current_only"], 2)
+        with self.assertRaises(AccessDenied):
+            TaskAssociations(self.auth, restored).inspect(self.bob, association)
+
+        # A checked completed copy can be reopened in a fresh interpreter;
+        # exact retries acknowledge history, but the old lease is not active.
+        completed = self.directory / "v11-completed.sqlite3"
+        self.state.backup_to(completed, confirmed=True)
+        script = r"""
+import json, sys
+from pathlib import Path
+from ai_earn.auth import AuthService
+from ai_earn.auth_storage import AuthStorage
+from ai_earn.state_storage import StateStorage
+from ai_earn.task_associations import TaskAssociations
+from ai_earn.task_queue import TaskQueue
+p = json.load(sys.stdin)
+auth = AuthService(AuthStorage(Path(p['auth']), create=False), lambda: 1800000000)
+state = StateStorage(Path(p['state']))
+pair = TaskAssociations(auth, state)
+queue = TaskQueue(auth, state)
+assert pair.complete_pair(p['token'], p['pair'], p['lease'], 'synthetic result', confirmed=True, operation_key='complete') == p['pair']
+assert queue.get(p['token'], p['item'])['status'] == 'completed'
+assert not queue.get_lease(p['token'], p['lease'])['active']
+"""
+        result = subprocess.run([sys.executable, "-c", script], input=json.dumps({
+            "auth": str(self.auth.storage.path), "state": str(completed), "token": self.alice,
+            "pair": association, "lease": lease, "item": item,
+        }), text=True, capture_output=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        # The stale snapshot cannot know completion happened. At the old lease
+        # boundary it can independently exhaust and abandon the pending output.
+        # This demonstrates why restoring it is not safe reconciliation.
+        self.now += 30
+        old_pairs = TaskAssociations(self.auth, restored)
+        old_queue = TaskQueue(self.auth, restored)
+        old_workflows = TaskWorkflows(self.auth, restored)
+        old_pairs.recover_pair(self.alice, association, lease, operation_key="recovery")
+        old_pairs.abandon_pair(self.alice, association, confirmed=True, operation_key="abandon")
+        self.assertEqual(old_queue.get(self.alice, item)["status"], "exhausted")
+        self.assertEqual(old_workflows.get(self.alice, workflow)["status"], "cancelled")
+        self.assertEqual(queue.get(self.alice, item)["status"], "completed")
+        self.assertEqual(workflows.get(self.alice, workflow)["status"], "completed")
+        comparison = StateRecoveryComparison(self.auth, self.state, restored)
+        self.assertGreaterEqual(comparison.compare(self.alice)["candidate_only"], 1)
+        self.assertEqual(comparison.compare_records(self.alice)["tables"]["paired_completions"]["current_only"], 1)
+        restored.backup_to(self.directory / "stale-divergent.sqlite3", confirmed=True)

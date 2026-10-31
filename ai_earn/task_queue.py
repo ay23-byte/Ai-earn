@@ -44,6 +44,8 @@ def _owned(conn, owner, record_id):
     if row is None:
         raise AccessDenied("Access denied.")
     _check_queue_integrity(conn, owner=owner, record_id=record_id)
+    # Validate a v11 completion marker even for mutations and historical retries.
+    _has_paired_completion(conn, owner, record_id)
     return row
 
 
@@ -180,6 +182,7 @@ class TaskQueue:
                                 (owner, now, now, limit)).fetchall()
             for row in rows:
                 _check_queue_integrity(conn, owner=owner, record_id=row["id"])
+                _has_paired_completion(conn, owner, row["id"])
             return [dict(row) for row in rows]
 
     def claim(self, token: str, record_id: str, *, operation_key: str, lease_seconds: int) -> str:

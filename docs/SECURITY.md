@@ -186,3 +186,9 @@ The v10-to-v11 migration requires explicit confirmation and a checked pre-migrat
 
 
 `TaskAssociations.abandon_pair` is an explicitly confirmed local cancellation for an unschedulable unfinished pair. It discards a pending workflow output hash and size, preserves exhausted/cancelled queue history, and cannot cancel work already performed outside this local store. Do not use it to claim completion, proof of review, financial outcomes or external revocation. Recover an expired but still-leased queue first; a completed workflow is not abandoned. Direct independent parent APIs, clock manipulation, local database access and separate auth/state commits remain limitations.
+
+
+Queue-owned reads and returned ready rows now check any v11 completion marker before queue use, but this is scoped validation, not whole-database authentication. A coordinated deletion of the marker and history can still evade it; nonreturned ready rows are not scanned. The extended disposable v11 rehearsal demonstrates that a checked stale snapshot may lead to a different local outcome than current state. Do not automatically replay work or external effects from an old copy. Actual Windows and real-data recovery remain unverified.
+
+
+V11 workflow lookups validate an associated completion marker before reads and mutations. This scoped consistency check is not a tamper-evident log, whole-database audit or substitute for independent authorization and a coordinated workflow. Fully erased markers or independent operations before completion remain outside its guarantees.
