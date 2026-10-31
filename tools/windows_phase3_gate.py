@@ -105,6 +105,15 @@ def _run_suite(suite, label, required, strict, allowed_skips, out):
     out.write(f"Running {label}: {len(expected)} test cases.\n")
     out.flush()
     result = unittest.TextTestRunner(stream=out, verbosity=1).run(suite)
+    if result.skipped:
+        out.write(f"Skipped tests in {label}:\n")
+        for test, _reason in result.skipped:
+            ident = test.id()
+            # Do not print arbitrary skip reasons, paths, or test-generated data.
+            if re.fullmatch(r"tests(?:\.[A-Za-z_][A-Za-z_0-9]*)+", ident):
+                out.write(f"  {ident}\n")
+            else:
+                out.write("  [test identifier unavailable]\n")
     if not _valid_result(expected, result, required, strict, allowed_skips):
         out.write(f"{label} failed or required tests were missing/skipped.\n")
         return False

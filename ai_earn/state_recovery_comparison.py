@@ -81,6 +81,29 @@ def _compare_records(current, candidate, owner, version):
     return results
 
 
+def _compare_sandbox_events(current, candidate, owner):
+    def rows(conn):
+        return iter(conn.execute(
+            "SELECT event_id,payment_id,event_type,sequence,body_hash FROM sandbox_payment_events "
+            "WHERE owner_id=? ORDER BY event_id COLLATE BINARY", (owner,)))
+    left, right = rows(current), rows(candidate)
+    a, b = next(left, None), next(right, None)
+    counts = {"matching": 0, "current_only": 0, "candidate_only": 0, "conflicts": 0}
+    while a is not None or b is not None:
+        if b is None or (a is not None and a["event_id"] < b["event_id"]):
+            counts["current_only"] += 1
+            a = next(left, None)
+        elif a is None or b["event_id"] < a["event_id"]:
+            counts["candidate_only"] += 1
+            b = next(right, None)
+        else:
+            same = (a["payment_id"] == b["payment_id"] and a["event_type"] == b["event_type"]
+                    and a["sequence"] == b["sequence"] and hmac.compare_digest(a["body_hash"], b["body_hash"]))
+            counts["matching" if same else "conflicts"] += 1
+            a, b = next(left, None), next(right, None)
+    return counts
+
+
 class StateRecoveryComparison:
     """Compare a session owner's records or operation keys across copies.
 
@@ -136,3 +159,15 @@ class StateRecoveryComparison:
         """Compare recognized owned rows, not audit, freshness or authenticity."""
         with self._validated_copies(token) as (current, candidate, owner, version):
             return {"schema_version": version, "tables": _compare_records(current, candidate, owner, version)}
+
+    def compare_snapshot(self, token: str) -> dict:
+        """Compare owned recognized rows and operations in one locked observation.
+
+        Synthetic event counts are absent before v14. This is not an audit
+        comparison, authenticity check, freshness proof or restore approval.
+        """
+        with self._validated_copies(token) as (current, candidate, owner, version):
+            return {"schema_version": version,
+                    "operations": _compare_operations(current, candidate, owner),
+                    "tables": _compare_records(current, candidate, owner, version),
+                    "sandbox_payment_events": _compare_sandbox_events(current, candidate, owner) if version >= 14 else None}

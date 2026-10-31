@@ -63,6 +63,78 @@ class DurableSandboxPaymentsTests(unittest.TestCase):
         from ai_earn.durable_sandbox_payments import DurableSandboxPayments
         return DurableSandboxPayments(self.auth, self.state, KEY)
 
+    def test_snapshot_comparison_covers_owned_events_and_divergence(self):
+        from ai_earn.durable_sandbox_payments import DurableSandboxPayments
+        from ai_earn.state_recovery_comparison import StateRecoveryComparison
+        service = self.upgrade()
+        alice = service.create(self.alice, 1200, operation_key="create")
+        bob = service.create(self.bob, 1200, operation_key="create")
+        for token, pid in ((self.alice, alice), (self.bob, bob)):
+            body = payload(pid)
+            service.accept(token, pid, body, sign(body), operation_key="first")
+        path = self.directory / "snapshot.sqlite3"
+        self.state.backup_to(path, confirmed=True)
+        candidate = StateStorage(path)
+        comparison = StateRecoveryComparison(self.auth, self.state, candidate)
+        expected = {"matching": 1, "current_only": 0, "candidate_only": 0, "conflicts": 0}
+        self.assertEqual(comparison.compare_snapshot(self.alice)["sandbox_payment_events"], expected)
+        service_copy = DurableSandboxPayments(self.auth, candidate, KEY)
+        body = payload(alice, "evt2", "settlement", 2)
+        service.accept(self.alice, alice, body, sign(body), operation_key="next")
+        alternate = payload(alice, "evt2", "settlement", 2, at=NOW - 1)
+        service_copy.accept(self.alice, alice, alternate, sign(alternate), operation_key="next")
+        result = comparison.compare_snapshot(self.alice)
+        self.assertEqual(result["sandbox_payment_events"], {"matching": 1, "current_only": 0, "candidate_only": 0, "conflicts": 1})
+        self.assertEqual(result["operations"]["conflicts"], 1)
+        self.assertEqual(comparison.compare_snapshot(self.bob)["sandbox_payment_events"], expected)
+        with self.assertRaises(AccessDenied):
+            comparison.compare_snapshot("invalid")
+
+    def test_snapshot_comparison_detects_one_sided_event_and_old_schema(self):
+        from ai_earn.state_recovery_comparison import StateRecoveryComparison
+        before = self.directory / "v13-copy.sqlite3"
+        self.state.backup_to(before, confirmed=True)
+        old = StateRecoveryComparison(self.auth, self.state, StateStorage(before)).compare_snapshot(self.alice)
+        self.assertIsNone(old["sandbox_payment_events"])
+        service = self.upgrade()
+        pid = service.create(self.alice, 1200, operation_key="create")
+        path = self.directory / "old-copy.sqlite3"
+        self.state.backup_to(path, confirmed=True)
+        body = payload(pid)
+        service.accept(self.alice, pid, body, sign(body), operation_key="event")
+        comparison = StateRecoveryComparison(self.auth, self.state, StateStorage(path))
+        self.assertEqual(comparison.compare_snapshot(self.alice)["sandbox_payment_events"],
+                         {"matching": 0, "current_only": 1, "candidate_only": 0, "conflicts": 0})
+        reverse = StateRecoveryComparison(self.auth, StateStorage(path), self.state)
+        self.assertEqual(reverse.compare_snapshot(self.alice)["sandbox_payment_events"]["candidate_only"], 1)
+
+    def test_snapshot_comparison_fails_closed_on_corruption_and_session_expiry(self):
+        from ai_earn.state_recovery_comparison import StateRecoveryComparison
+        import ai_earn.state_recovery_comparison as module
+        service = self.upgrade()
+        pid = service.create(self.alice, 1200, operation_key="create")
+        body = payload(pid)
+        service.accept(self.alice, pid, body, sign(body), operation_key="event")
+        path = self.directory / "snapshot.sqlite3"
+        self.state.backup_to(path, confirmed=True)
+        candidate = StateStorage(path)
+        comparison = StateRecoveryComparison(self.auth, self.state, candidate)
+        original = module._compare_sandbox_events
+        def expire(*args):
+            result = original(*args)
+            self.clock.now += SESSION_SECONDS
+            return result
+        with patch.object(module, "_compare_sandbox_events", side_effect=expire):
+            with self.assertRaises(AccessDenied):
+                comparison.compare_snapshot(self.alice)
+        self.alice = self.auth.login("alice", "disposable test password")
+        with candidate.transaction() as conn:
+            conn.execute("UPDATE sandbox_payment_events SET body_hash=?", (b"x" * 32,))
+        with self.assertRaises(StateStorageError):
+            comparison.compare_snapshot(self.alice)
+        with self.assertRaises(StateStorageError):
+            StateRecoveryComparison(self.auth, self.state, self.state).compare_snapshot(self.alice)
+
     def test_migration_preserves_backup_and_requires_confirmation(self):
         with self.assertRaises(StateStorageError):
             self.state.migrate_to_v14(self.directory / "before-v14.sqlite3")
