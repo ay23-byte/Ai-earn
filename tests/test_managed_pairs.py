@@ -3,10 +3,12 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 import json
 import os
+import queue as thread_queue
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -60,6 +62,485 @@ class ManagedPairTests(unittest.TestCase):
     def managed(self):
         self.upgrade()
         return self.associations.create_managed(self.alice, self.item, self.workflow, operation_key="managed")
+
+    def test_managed_discovery_scopes_pages_and_does_not_mutate(self):
+        first = self.managed()
+        q = self.queue.enqueue(self.alice, "Higher priority", operation_key="high-q", priority=9)
+        w = self.workflows.create(self.alice, "Higher priority", operation_key="high-w")
+        second = self.associations.create_managed(self.alice, q, w, operation_key="high-pair")
+        bob_q = self.queue.enqueue(self.bob, "Private owner", operation_key="bob-q")
+        bob_w = self.workflows.create(self.bob, "Private owner", operation_key="bob-w")
+        bob_pair = self.associations.create_managed(self.bob, bob_q, bob_w, operation_key="bob-pair")
+        # Legacy pairs must not enter a managed-only listing.
+        legacy_q = self.queue.enqueue(self.alice, "legacy", operation_key="legacy-q")
+        legacy_w = self.workflows.create(self.alice, "legacy", operation_key="legacy-w")
+        legacy = self.associations.create(self.alice, legacy_q, legacy_w, operation_key="legacy")
+        with self.state.transaction() as conn:
+            counts = tuple(conn.execute("SELECT count(*) FROM " + table).fetchone()[0] for table in ("state_audit", "state_operations"))
+        page = self.associations.list_managed(self.alice, limit=1)
+        next_page = self.associations.list_managed(self.alice, after_id=page[-1]["association_id"], limit=1)
+        ids = [page[0]["association_id"], next_page[0]["association_id"]]
+        self.assertEqual(ids, sorted((first, second)))
+        self.assertEqual(self.associations.list_managed(self.alice, after_id=ids[-1], limit=1), [])
+        self.assertEqual([v["association_id"] for v in self.associations.list_managed(self.bob)], [bob_pair])
+        self.assertNotIn(legacy, ids)
+        self.assertNotIn("Synthetic", str(page + next_page))
+        self.assertNotIn("output_hash", str(page + next_page))
+        self.assertEqual([v["association_id"] for v in self.associations.ready_managed(self.alice)], [second, first])
+        self.assertEqual([v["association_id"] for v in self.associations.ready_managed(self.alice, limit=1)], [second])
+        self.assertEqual([v["association_id"] for v in self.associations.ready_managed(self.bob)], [bob_pair])
+        with self.state.transaction() as conn:
+            self.assertEqual(counts, tuple(conn.execute("SELECT count(*) FROM " + table).fetchone()[0] for table in ("state_audit", "state_operations")))
+
+    def test_managed_discovery_handles_expiry_recovery_completion_and_restart(self):
+        pair = self.managed()
+        initial = self.associations.list_managed(self.alice)[0]
+        self.assertEqual(initial, self.associations.inspect(self.alice, pair))
+        self.assertTrue(initial["queue_ready_at_observation"])
+        lease = self.associations.start_pair(self.alice, pair, operation_key="start", lease_seconds=5)
+        self.assertEqual(self.associations.ready_managed(self.alice), [])
+        self.assertTrue(self.associations.list_managed(self.alice)[0]["lease_active_at_observation"])
+        self.associations.submit_pair(self.alice, pair, lease, "output", operation_key="submit")
+        self.clock.now += 5
+        self.assertFalse(self.associations.list_managed(self.alice)[0]["lease_active_at_observation"])
+        self.associations.recover_pair(self.alice, pair, lease, operation_key="recover")
+        ready = self.associations.ready_managed(self.alice)[0]
+        self.assertEqual((ready["association_id"], ready["workflow_status"]), (pair, "pending_review"))
+        lease2 = self.associations.resume_pair(self.alice, pair, operation_key="resume", lease_seconds=15)
+        self.associations.complete_pair(self.alice, pair, lease2, "output", confirmed=True, operation_key="complete")
+        completed = self.associations.list_managed(self.alice)[0]
+        self.assertEqual((completed["queue_status"], completed["workflow_status"]), ("completed", "completed"))
+        self.assertFalse(completed["lease_active_at_observation"])
+        self.assertEqual(self.associations.ready_managed(self.alice), [])
+        backup = self.directory / "discover-backup.sqlite3"
+        restore = self.directory / "discover-restore.sqlite3"
+        self.state.backup_to(backup, confirmed=True)
+        StateStorage(backup).backup_to(restore, confirmed=True)
+        restored = TaskAssociations(self.auth, StateStorage(restore))
+        self.assertEqual(restored.list_managed(self.alice), [completed])
+        self.assertEqual(restored.ready_managed(self.alice), [])
+
+    def test_managed_discovery_validates_input_auth_and_version(self):
+        for name in ("list_managed", "ready_managed"):
+            with self.assertRaises(StateStorageError):
+                getattr(self.associations, name)(self.alice)
+        self.upgrade()
+        for name in ("list_managed", "ready_managed"):
+            for bad in (0, 101, -1, True, "1", None):
+                with self.assertRaises(AssociationError):
+                    getattr(self.associations, name)(self.alice, limit=bad)
+            with self.assertRaises(AccessDenied):
+                getattr(self.associations, name)("")
+        for bad in ("", "z"*32, "0"*31, 0, True):
+            with self.assertRaises(AssociationError):
+                self.associations.list_managed(self.alice, after_id=bad)
+        self.assertEqual(self.associations.list_managed(self.bob), [])
+
+    def test_managed_discovery_deadlines_and_cancelled_records(self):
+        self.upgrade()
+        q = self.queue.enqueue(self.alice, "deadline", operation_key="deadline-q", deadline_at=self.clock.now + 5)
+        w = self.workflows.create(self.alice, "deadline", operation_key="deadline-w")
+        pair = self.associations.create_managed(self.alice, q, w, operation_key="deadline-pair")
+        self.assertEqual([v["association_id"] for v in self.associations.ready_managed(self.alice)], [pair])
+        self.clock.now += 5
+        self.assertEqual(self.associations.ready_managed(self.alice), [])
+        observation = self.associations.list_managed(self.alice)[0]
+        self.assertTrue(observation["deadline_passed_at_observation"])
+        self.associations.abandon_pair(self.alice, pair, confirmed=True, operation_key="abandon")
+        observation = self.associations.list_managed(self.alice)[0]
+        self.assertEqual((observation["queue_status"], observation["workflow_status"]), ("cancelled", "cancelled"))
+
+    def test_managed_discovery_fails_closed_on_missing_marker_and_other_owner_isolated(self):
+        pair = self.managed()
+        q = self.queue.enqueue(self.bob, "bob", operation_key="bob-q")
+        w = self.workflows.create(self.bob, "bob", operation_key="bob-w")
+        bob_pair = self.associations.create_managed(self.bob, q, w, operation_key="bob-pair")
+        with self.state.transaction() as conn:
+            conn.execute("DELETE FROM managed_task_pairs WHERE id=?", (pair,))
+        for name in ("list_managed", "ready_managed"):
+            with self.assertRaises(StateStorageError):
+                getattr(self.associations, name)(self.alice)
+            self.assertEqual([v["association_id"] for v in getattr(self.associations, name)(self.bob)], [bob_pair])
+
+    def test_managed_discovery_rechecks_session_before_return(self):
+        self.managed()
+        import ai_earn.task_associations as module
+        original = module._status_view
+        def expire(*args):
+            result = original(*args)
+            self.clock.now += SESSION_SECONDS
+            return result
+        with patch.object(module, "_status_view", side_effect=expire):
+            with self.assertRaises(AccessDenied):
+                self.associations.list_managed(self.alice)
+        # No write was performed despite an invalidated observation.
+        with self.state.transaction() as conn:
+            self.assertEqual(conn.execute("SELECT status FROM task_queue WHERE id=?", (self.item,)).fetchone()[0], "queued")
+
+    def test_managed_ready_observation_is_stale_after_start(self):
+        pair = self.managed()
+        before = self.associations.ready_managed(self.alice)
+        self.assertEqual([item["association_id"] for item in before], [pair])
+        lease = self.associations.start_pair(self.alice, pair, operation_key="start", lease_seconds=30)
+        self.assertTrue(before[0]["queue_ready_at_observation"])
+        self.assertEqual(self.associations.ready_managed(self.alice), [])
+        self.assertTrue(self.queue.get_lease(self.alice, lease)["active"])
+
+    def test_managed_ready_respects_future_availability(self):
+        self.upgrade()
+        q = self.queue.enqueue(self.alice, "later", operation_key="later-q", available_at=self.clock.now + 10)
+        w = self.workflows.create(self.alice, "later", operation_key="later-w")
+        pair = self.associations.create_managed(self.alice, q, w, operation_key="later-pair")
+        self.assertEqual(self.associations.ready_managed(self.alice), [])
+        self.assertFalse(self.associations.list_managed(self.alice)[0]["queue_ready_at_observation"])
+        self.clock.now += 10
+        self.assertEqual([item["association_id"] for item in self.associations.ready_managed(self.alice)], [pair])
+
+    def test_managed_discovery_fails_if_owned_corruption_is_outside_page(self):
+        first = self.managed()
+        q = self.queue.enqueue(self.alice, "another", operation_key="another-q")
+        w = self.workflows.create(self.alice, "another", operation_key="another-w")
+        second = self.associations.create_managed(self.alice, q, w, operation_key="another-pair")
+        corrupted = max(first, second)
+        with self.state.transaction() as conn:
+            conn.execute("DELETE FROM managed_task_pairs WHERE id=?", (corrupted,))
+        for method in (self.associations.list_managed, self.associations.ready_managed):
+            with self.assertRaises(StateStorageError):
+                method(self.alice, limit=1)
+
+    def test_managed_discovery_reopens_in_fresh_process(self):
+        pair = self.managed()
+        backup = self.directory / "discovery-process.sqlite3"
+        self.state.backup_to(backup, confirmed=True)
+        code = r"""
+import json, sys
+from pathlib import Path
+from ai_earn.auth import AuthService
+from ai_earn.auth_storage import AuthStorage
+from ai_earn.state_storage import StateStorage
+from ai_earn.task_associations import TaskAssociations
+p = json.load(sys.stdin)
+auth = AuthService(AuthStorage(Path(p['auth']), create=False), lambda: 1800000000)
+pairs = TaskAssociations(auth, StateStorage(Path(p['state'])))
+assert [v['association_id'] for v in pairs.list_managed(p['token'])] == [p['pair']]
+assert [v['association_id'] for v in pairs.ready_managed(p['token'])] == [p['pair']]
+"""
+        payload = dict(auth=str(self.auth.storage.path), state=str(backup), token=self.alice, pair=pair)
+        result = subprocess.run([sys.executable, "-c", code], input=json.dumps(payload), text=True, capture_output=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_ready_managed_rechecks_session_before_return(self):
+        self.managed()
+        import ai_earn.task_associations as module
+        original = module._status_view
+        def expire(*args):
+            result = original(*args)
+            self.clock.now += SESSION_SECONDS
+            return result
+        with patch.object(module, "_status_view", side_effect=expire):
+            with self.assertRaises(AccessDenied):
+                self.associations.ready_managed(self.alice)
+
+    def test_atomic_claim_next_uses_priority_and_retries_historical_lease(self):
+        first = self.managed()
+        q = self.queue.enqueue(self.alice, "high", operation_key="high-q", priority=9, backoff_seconds=0)
+        w = self.workflows.create(self.alice, "high", operation_key="high-w")
+        high = self.associations.create_managed(self.alice, q, w, operation_key="high-pair")
+        result = self.associations.claim_next_managed(self.alice, lease_seconds=5, operation_key="next")
+        self.assertEqual(result["association_id"], high)
+        self.assertTrue(self.queue.get_lease(self.alice, result["lease_id"])["active"])
+        self.assertEqual(self.workflows.get(self.alice, w)["status"], "in_progress")
+        self.assertEqual(self.associations.claim_next_managed(self.alice, lease_seconds=5, operation_key="next"), result)
+        with self.assertRaises(AssociationError):
+            self.associations.claim_next_managed(self.alice, lease_seconds=6, operation_key="next")
+        self.assertEqual(self.associations.claim_next_managed(self.alice, lease_seconds=30, operation_key="next2")["association_id"], first)
+        self.clock.now += 5
+        self.assertEqual(self.associations.claim_next_managed(self.alice, lease_seconds=5, operation_key="next"), result)
+        self.assertFalse(self.queue.get_lease(self.alice, result["lease_id"])["active"])
+        backup = self.directory / "claim-next.sqlite3"
+        self.state.backup_to(backup, confirmed=True)
+        restored = TaskAssociations(self.auth, StateStorage(backup))
+        self.assertEqual(restored.claim_next_managed(self.alice, lease_seconds=5, operation_key="next"), result)
+
+    def test_atomic_claim_next_resumes_pending_review_and_no_ready_does_not_reserve_key(self):
+        pair = self.managed()
+        self.assertIsNone(self.associations.claim_next_managed(self.bob, lease_seconds=5, operation_key="later"))
+        lease = self.associations.start_pair(self.alice, pair, operation_key="start", lease_seconds=5)
+        self.associations.submit_pair(self.alice, pair, lease, "output", operation_key="submit")
+        self.assertIsNone(self.associations.claim_next_managed(self.alice, lease_seconds=5, operation_key="resume"))
+        self.clock.now += 5
+        self.associations.recover_pair(self.alice, pair, lease, operation_key="recover")
+        result = self.associations.claim_next_managed(self.alice, lease_seconds=5, operation_key="resume")
+        self.assertEqual(result["association_id"], pair)
+        self.assertNotEqual(result["lease_id"], lease)
+        self.assertEqual(self.workflows.get(self.alice, self.workflow)["status"], "pending_review")
+        self.associations.complete_pair(self.alice, pair, result["lease_id"], "output", confirmed=True, operation_key="complete")
+        self.assertEqual(self.queue.get(self.alice, self.item)["status"], "completed")
+        self.assertEqual(self.associations.claim_next_managed(self.alice, lease_seconds=5, operation_key="resume"), result)
+        self.assertFalse(self.queue.get_lease(self.alice, result["lease_id"])["active"])
+        bob_q = self.queue.enqueue(self.bob, "bob", operation_key="bob-q")
+        bob_w = self.workflows.create(self.bob, "bob", operation_key="bob-w")
+        bob_pair = self.associations.create_managed(self.bob, bob_q, bob_w, operation_key="bob-pair")
+        self.assertEqual(self.associations.claim_next_managed(self.bob, lease_seconds=5, operation_key="later")["association_id"], bob_pair)
+        self.state.backup_to(self.directory / "claim-next-resume.sqlite3", confirmed=True)
+
+    def test_atomic_claim_next_rejects_invalid_input_version_and_conflicting_key(self):
+        with self.assertRaises(StateStorageError):
+            self.associations.claim_next_managed(self.alice, lease_seconds=5, operation_key="next")
+        self.upgrade()
+        for bad in (0, 3601, True, "5", None):
+            with self.assertRaises(AssociationError):
+                self.associations.claim_next_managed(self.alice, lease_seconds=bad, operation_key="next")
+        with self.assertRaises(AccessDenied):
+            self.associations.claim_next_managed("", lease_seconds=5, operation_key="next")
+        with self.assertRaises(AssociationError):
+            self.associations.claim_next_managed(self.alice, lease_seconds=5, operation_key="queue")
+        with self.state.transaction() as conn:
+            self.assertEqual(conn.execute("SELECT count(*) FROM queue_leases").fetchone()[0], 0)
+
+    def test_atomic_claim_next_ignores_legacy_other_owner_and_future_deadline(self):
+        self.upgrade()
+        legacy_q = self.queue.enqueue(self.alice, "legacy", operation_key="legacy-q", priority=9)
+        legacy_w = self.workflows.create(self.alice, "legacy", operation_key="legacy-w")
+        self.associations.create(self.alice, legacy_q, legacy_w, operation_key="legacy")
+        future_q = self.queue.enqueue(self.alice, "future", operation_key="future-q", available_at=self.clock.now+10, deadline_at=self.clock.now+20)
+        future_w = self.workflows.create(self.alice, "future", operation_key="future-w")
+        future = self.associations.create_managed(self.alice, future_q, future_w, operation_key="future-pair")
+        bob_q = self.queue.enqueue(self.bob, "bob", operation_key="bob-q")
+        bob_w = self.workflows.create(self.bob, "bob", operation_key="bob-w")
+        bob = self.associations.create_managed(self.bob, bob_q, bob_w, operation_key="bob-pair")
+        self.assertIsNone(self.associations.claim_next_managed(self.alice, lease_seconds=30, operation_key="next"))
+        self.assertEqual(self.associations.claim_next_managed(self.bob, lease_seconds=30, operation_key="next")["association_id"], bob)
+        self.clock.now += 10
+        result = self.associations.claim_next_managed(self.alice, lease_seconds=30, operation_key="next")
+        self.assertEqual(result["association_id"], future)
+        self.assertEqual(self.queue.get_lease(self.alice, result["lease_id"])["lease_until"], self.clock.now+10)
+        self.assertEqual(self.queue.get(self.alice, legacy_q)["status"], "queued")
+
+    def test_atomic_claim_next_concurrent_keys_and_same_key(self):
+        pair = self.managed()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(lambda _: self.associations.claim_next_managed(self.alice, lease_seconds=30, operation_key="next"), range(2)))
+        self.assertEqual(results[0], results[1])
+        self.assertEqual(results[0]["association_id"], pair)
+        self.assertIsNone(self.associations.claim_next_managed(self.alice, lease_seconds=30, operation_key="new"))
+        with self.state.transaction() as conn:
+            self.assertEqual(conn.execute("SELECT count(*) FROM queue_leases WHERE queue_id=?", (self.item,)).fetchone()[0], 1)
+            self.assertEqual(conn.execute("SELECT count(*) FROM state_audit WHERE event='queue_leased' AND resource_id=?", (self.item,)).fetchone()[0], 1)
+        self.state.backup_to(self.directory / "claim-next-concurrent.sqlite3", confirmed=True)
+
+    def test_atomic_claim_next_failure_expiry_and_internal_collision_rollback(self):
+        pair = self.managed()
+        with patch("ai_earn.task_associations._pair_child_key", return_value="queue"):
+            with self.assertRaises(StateStorageError):
+                self.associations.claim_next_managed(self.alice, lease_seconds=5, operation_key="next")
+        with patch("ai_earn.task_associations._workflow_audit", side_effect=RuntimeError("injected")):
+            with self.assertRaises(RuntimeError):
+                self.associations.claim_next_managed(self.alice, lease_seconds=5, operation_key="next")
+        with patch("ai_earn.task_associations._audit", side_effect=RuntimeError("injected binding audit")):
+            with self.assertRaises(RuntimeError):
+                self.associations.claim_next_managed(self.alice, lease_seconds=5, operation_key="next")
+        import ai_earn.task_associations as module
+        original = module._workflow_audit
+        def expire(*args):
+            original(*args)
+            self.clock.now += 5
+        with patch.object(module, "_workflow_audit", side_effect=expire):
+            with self.assertRaises(AssociationError):
+                self.associations.claim_next_managed(self.alice, lease_seconds=5, operation_key="next")
+        self.assertEqual(self.associations.inspect(self.alice, pair)["queue_status"], "queued")
+        self.assertEqual(self.workflows.get(self.alice, self.workflow)["status"], "planned")
+        with self.state.transaction() as conn:
+            self.assertEqual(conn.execute("SELECT count(*) FROM queue_leases").fetchone()[0], 0)
+            self.assertEqual(conn.execute("SELECT count(*) FROM state_operations WHERE operation_key='next'").fetchone()[0], 0)
+
+    def test_atomic_claim_next_detects_owned_marker_corruption(self):
+        pair = self.managed()
+        with self.state.transaction() as conn:
+            conn.execute("DELETE FROM managed_task_pairs WHERE id=?", (pair,))
+        with self.assertRaises(StateStorageError):
+            self.associations.claim_next_managed(self.alice, lease_seconds=5, operation_key="next")
+        self.assertIsNone(self.associations.claim_next_managed(self.bob, lease_seconds=5, operation_key="next"))
+        with self.state.transaction() as conn:
+            self.assertEqual(conn.execute("SELECT count(*) FROM queue_leases").fetchone()[0], 0)
+
+    def test_atomic_claim_next_distinct_keys_compete_without_double_lease(self):
+        pair = self.managed()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            calls = [pool.submit(self.associations.claim_next_managed, self.alice, lease_seconds=30, operation_key=key) for key in ("a", "b")]
+            results = [call.result(timeout=15) for call in calls]
+        self.assertEqual(sum(result is None for result in results), 1)
+        self.assertEqual(next(result for result in results if result is not None)["association_id"], pair)
+        with self.state.transaction() as conn:
+            self.assertEqual(conn.execute("SELECT count(*) FROM queue_leases WHERE queue_id=?", (self.item,)).fetchone()[0], 1)
+        self.state.backup_to(self.directory / "different-key-race.sqlite3", confirmed=True)
+
+    def test_atomic_claim_next_separate_process_competition(self):
+        self.upgrade()
+        code = r"""
+import json, sys
+from pathlib import Path
+from ai_earn.auth import AuthService
+from ai_earn.auth_storage import AuthStorage
+from ai_earn.state_storage import StateStorage
+from ai_earn.task_associations import TaskAssociations
+p = json.loads(sys.stdin.readline())
+auth = AuthService(AuthStorage(Path(p['auth']), create=False), lambda: 1800000000)
+service = TaskAssociations(auth, StateStorage(Path(p['state'])))
+print('READY', flush=True)
+sys.stdin.readline()
+result = service.claim_next_managed(p['token'], lease_seconds=30, operation_key=p['key'])
+print(json.dumps(result), flush=True)
+"""
+        def readline(process):
+            lines = thread_queue.Queue()
+            threading.Thread(target=lambda: lines.put(process.stdout.readline()), daemon=True).start()
+            try:
+                return lines.get(timeout=20).strip()
+            except thread_queue.Empty as exc:
+                raise AssertionError("Child did not reach barrier.") from exc
+        for same in (True, False):
+            suffix = "same" if same else "different"
+            q = self.queue.enqueue(self.alice, "synthetic", operation_key=suffix + "-q")
+            w = self.workflows.create(self.alice, "synthetic", operation_key=suffix + "-w")
+            pair = self.associations.create_managed(self.alice, q, w, operation_key=suffix + "-pair")
+            processes = []
+            try:
+                for index in range(2):
+                    key = suffix + ("-shared" if same else f"-key-{index}")
+                    data = dict(auth=str(self.auth.storage.path), state=str(self.state.path), token=self.alice, key=key)
+                    process = subprocess.Popen([sys.executable, "-c", code], stdin=subprocess.PIPE,
+                                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                    processes.append(process)
+                    process.stdin.write(json.dumps(data) + "\n")
+                    process.stdin.flush()
+                    self.assertEqual(readline(process), "READY")
+                for process in processes:
+                    process.stdin.write("go\n")
+                    process.stdin.close()
+                    process.stdin = None
+                outputs = []
+                for process in processes:
+                    out, _ = process.communicate(timeout=30)
+                    self.assertEqual(process.returncode, 0, "Child process failed.")
+                    outputs.append(json.loads(out.strip()))
+                if same:
+                    self.assertEqual(outputs[0], outputs[1])
+                    self.assertEqual(outputs[0]["association_id"], pair)
+                else:
+                    self.assertEqual(sum(item is None for item in outputs), 1)
+                    self.assertEqual(next(item for item in outputs if item is not None)["association_id"], pair)
+                with self.state.transaction() as conn:
+                    self.assertEqual(conn.execute("SELECT count(*) FROM queue_leases WHERE queue_id=?", (q,)).fetchone()[0], 1)
+            finally:
+                for process in processes:
+                    if process.poll() is None:
+                        process.kill()
+                    process.communicate(timeout=10)
+        self.state.backup_to(self.directory / "next-process-race.sqlite3", confirmed=True)
+
+    def test_atomic_claim_next_resumes_in_progress_without_restarting_workflow(self):
+        pair = self.managed()
+        lease = self.associations.start_pair(self.alice, pair, operation_key="start", lease_seconds=30)
+        self.associations.retry_pair(self.alice, pair, lease, operation_key="retry")
+        next_lease = self.associations.claim_next_managed(self.alice, lease_seconds=5, operation_key="next")
+        self.assertEqual(next_lease["association_id"], pair)
+        self.assertEqual(self.workflows.get(self.alice, self.workflow)["status"], "in_progress")
+        with self.state.transaction() as conn:
+            self.assertEqual(conn.execute("SELECT count(*) FROM state_audit WHERE event='workflow_started' AND resource_id=?", (self.workflow,)).fetchone()[0], 1)
+        self.state.backup_to(self.directory / "progress-resumed.sqlite3", confirmed=True)
+
+    def test_atomic_claim_next_session_expiry_and_ambiguous_auth_exit(self):
+        pair = self.managed()
+        import ai_earn.task_associations as module
+        original_audit = module._workflow_audit
+        def expire(*args):
+            original_audit(*args)
+            self.clock.now += SESSION_SECONDS
+        with patch.object(module, "_workflow_audit", side_effect=expire):
+            with self.assertRaises(AccessDenied):
+                self.associations.claim_next_managed(self.alice, lease_seconds=3600, operation_key="next")
+        with self.state.transaction() as conn:
+            self.assertEqual(conn.execute("SELECT count(*) FROM queue_leases").fetchone()[0], 0)
+        self.clock.now -= SESSION_SECONDS
+        original_transaction = self.auth.storage.transaction
+        @contextmanager
+        def fail_after_commit():
+            with original_transaction() as conn:
+                yield conn
+                raise RuntimeError("injected auth exit")
+        with patch.object(self.auth.storage, "transaction", fail_after_commit):
+            with self.assertRaises(RuntimeError):
+                self.associations.claim_next_managed(self.alice, lease_seconds=30, operation_key="next")
+        result = self.associations.claim_next_managed(self.alice, lease_seconds=30, operation_key="next")
+        self.assertEqual(result["association_id"], pair)
+        self.assertTrue(self.queue.get_lease(self.alice, result["lease_id"])["active"])
+        self.state.backup_to(self.directory / "next-ambiguous.sqlite3", confirmed=True)
+
+    def test_atomic_claim_next_rejects_swapped_same_owner_managed_results(self):
+        self.managed()
+        q = self.queue.enqueue(self.alice, "second", operation_key="second-q", priority=9)
+        w = self.workflows.create(self.alice, "second", operation_key="second-w")
+        self.associations.create_managed(self.alice, q, w, operation_key="second-pair")
+        first = self.associations.claim_next_managed(self.alice, lease_seconds=30, operation_key="first")
+        second = self.associations.claim_next_managed(self.alice, lease_seconds=30, operation_key="second")
+        with self.state.transaction() as conn:
+            conn.execute("UPDATE state_operations SET resource_id=? WHERE operation_key='first'", (second["lease_id"],))
+            conn.execute("UPDATE state_operations SET resource_id=? WHERE operation_key='second'", (first["lease_id"],))
+        for key in ("first", "second"):
+            with self.assertRaises(StateStorageError):
+                self.associations.claim_next_managed(self.alice, lease_seconds=30, operation_key=key)
+
+    def test_atomic_claim_next_rejects_tampered_retry_result(self):
+        self.managed()
+        self.associations.claim_next_managed(self.alice, lease_seconds=30, operation_key="next")
+        other = self.queue.enqueue(self.alice, "legacy", operation_key="legacy-q")
+        other_lease = self.queue.claim(self.alice, other, operation_key="legacy-claim", lease_seconds=30)
+        with self.state.transaction() as conn:
+            conn.execute("UPDATE state_operations SET resource_id=? WHERE operation_key='next'", (other_lease,))
+        with self.assertRaises(StateStorageError):
+            self.associations.claim_next_managed(self.alice, lease_seconds=30, operation_key="next")
+
+    def test_atomic_claim_next_controlled_process_crash_before_and_after_commit(self):
+        pair = self.managed()
+        code = r"""
+from contextlib import contextmanager
+from pathlib import Path
+import json, os, sys
+import ai_earn.task_associations as module
+from ai_earn.auth import AuthService
+from ai_earn.auth_storage import AuthStorage
+from ai_earn.state_storage import StateStorage
+p = json.load(sys.stdin)
+auth = AuthService(AuthStorage(Path(p['auth']), create=False), lambda: 1800000000)
+service = module.TaskAssociations(auth, StateStorage(Path(p['state'])))
+if p['point'] == 'before':
+    original = module._workflow_audit
+    def crash(*args):
+        original(*args)
+        os._exit(73)
+    module._workflow_audit = crash
+else:
+    original = auth.storage.transaction
+    @contextmanager
+    def crash_after_state_commit():
+        with original() as conn:
+            yield conn
+            os._exit(74)
+    auth.storage.transaction = crash_after_state_commit
+service.claim_next_managed(p['token'], lease_seconds=30, operation_key='next')
+"""
+        def run(point):
+            payload = dict(auth=str(self.auth.storage.path), state=str(self.state.path), token=self.alice, point=point)
+            return subprocess.run([sys.executable, "-c", code], input=json.dumps(payload), text=True, capture_output=True, timeout=30)
+        self.assertEqual(run("before").returncode, 73)
+        self.assertEqual(self.queue.get(self.alice, self.item)["status"], "queued")
+        self.assertEqual(self.workflows.get(self.alice, self.workflow)["status"], "planned")
+        self.assertEqual(run("after").returncode, 74)
+        result = self.associations.claim_next_managed(self.alice, lease_seconds=30, operation_key="next")
+        self.assertEqual(result["association_id"], pair)
+        self.assertTrue(self.queue.get_lease(self.alice, result["lease_id"])["active"])
+        self.state.backup_to(self.directory / "claim-next-crash.sqlite3", confirmed=True)
 
     def test_migration_confirmation_backup_and_legacy_compatibility(self):
         target = self.directory / "before-v12.sqlite3"
