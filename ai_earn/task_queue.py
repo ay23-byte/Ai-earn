@@ -11,7 +11,7 @@ import sqlite3
 from .auth import AccessDenied, AuthService
 from .opportunity_drafts import DraftError, _digest, _key, _record_id, _title
 from .state_authorization import _authorized_transaction
-from .state_storage import StateStorage, StateStorageError, _check_queue_integrity, _has_paired_completion
+from .state_storage import StateStorage, StateStorageError, _check_queue_integrity, _has_paired_completion, _is_managed_pair
 
 
 _MAX_TIME = 4_102_444_800  # 2100-01-01 UTC; avoid unbounded timestamp arithmetic.
@@ -35,8 +35,8 @@ def _integer(value, minimum, maximum):
 
 
 def _version(conn):
-    if conn.execute("PRAGMA user_version").fetchone()[0] not in (7, 8, 9, 10, 11):
-        raise StateStorageError("State schema version 7, 8, 9, 10 or 11 is required for the queue.")
+    if conn.execute("PRAGMA user_version").fetchone()[0] not in (7, 8, 9, 10, 11, 12):
+        raise StateStorageError("State schema version 7, 8, 9, 10, 11 or 12 is required for the queue.")
 
 
 def _owned(conn, owner, record_id):
@@ -46,6 +46,7 @@ def _owned(conn, owner, record_id):
     _check_queue_integrity(conn, owner=owner, record_id=record_id)
     # Validate a v11 completion marker even for mutations and historical retries.
     _has_paired_completion(conn, owner, record_id)
+    _is_managed_pair(conn, owner, queue_id=record_id)
     return row
 
 
@@ -176,13 +177,19 @@ class TaskQueue:
         limit = _integer(limit, 1, 100)
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
             _version(conn)
+            managed_filter = ("AND NOT EXISTS (SELECT 1 FROM task_associations a JOIN managed_task_pairs m "
+                              "ON m.id=a.id AND m.owner_id=a.owner_id "
+                              "WHERE a.queue_id=task_queue.id AND a.owner_id=task_queue.owner_id) "
+                              if conn.execute("PRAGMA user_version").fetchone()[0] >= 12 else "")
             rows = conn.execute("SELECT id, title, priority, available_at, deadline_at FROM task_queue "
                                 "WHERE owner_id=? AND status='queued' AND available_at<=? "
-                                "AND (deadline_at=0 OR deadline_at>?) ORDER BY priority DESC, available_at, id LIMIT ?",
+                                "AND (deadline_at=0 OR deadline_at>?) " + managed_filter +
+                                "ORDER BY priority DESC, available_at, id LIMIT ?",
                                 (owner, now, now, limit)).fetchall()
             for row in rows:
                 _check_queue_integrity(conn, owner=owner, record_id=row["id"])
                 _has_paired_completion(conn, owner, row["id"])
+                _is_managed_pair(conn, owner, queue_id=row["id"])
             return [dict(row) for row in rows]
 
     def claim(self, token: str, record_id: str, *, operation_key: str, lease_seconds: int) -> str:
@@ -196,6 +203,8 @@ class TaskQueue:
             existing = _retry(conn, owner, key, digest, "queue_lease")
             if existing is not None:
                 return existing
+            if _is_managed_pair(conn, owner, queue_id=ident):
+                raise QueueError("Managed queue items require paired operations.")
             lease_id, until = _claim_in_transaction(conn, owner, now, task, duration, key, digest)
             if int(self._auth.clock()) >= until:
                 raise QueueError("Lease expired before commit.")
@@ -233,6 +242,8 @@ class TaskQueue:
             existing = _retry(conn, owner, key, digest, "task_queue")
             if existing is not None:
                 return existing
+            if _is_managed_pair(conn, owner, queue_id=ident):
+                raise QueueError("Managed queue items require paired operations.")
             result = _reschedule_in_transaction(conn, owner, now, task, lease_id, key, digest, expired=expired)
             if (int(self._auth.clock()) >= task["lease_until"]) != expired:
                 raise QueueError("Lease timing changed before commit.")
@@ -248,6 +259,8 @@ class TaskQueue:
             existing = _retry(conn, owner, key, digest, "task_queue")
             if existing is not None:
                 return existing
+            if _is_managed_pair(conn, owner, queue_id=ident):
+                raise QueueError("Managed queue items require paired operations.")
             if task["status"] != "queued":
                 raise QueueError("Transition is not allowed.")
             conn.execute("UPDATE task_queue SET status='cancelled', updated_at=? WHERE id=? AND owner_id=?", (now, ident, owner))

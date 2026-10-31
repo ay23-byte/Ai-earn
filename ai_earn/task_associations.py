@@ -1,8 +1,9 @@
 """Owned queue/workflow associations, not execution or authority.
 
-Associations are immutable local metadata. Opt-in paired operations use a
-single state transaction, but the parents can still change independently; a
-link does not prove work, human review, delivery or payment.
+Associations are immutable local metadata. Paired operations use a single
+state transaction. Legacy parents can change independently; v12 managed pairs
+require paired APIs in trusted application code. Neither establishes work,
+human review, delivery, payment, or an external-effect fence.
 This internal service requires a trusted fixed auth/state pair and disposable data.
 """
 import hmac
@@ -11,7 +12,7 @@ import secrets
 from .auth import AccessDenied, AuthService
 from .opportunity_drafts import DraftError, _digest, _key, _record_id
 from .state_authorization import _authorized_transaction
-from .state_storage import StateStorage, StateStorageError, _has_paired_completion
+from .state_storage import StateStorage, StateStorageError, _has_paired_completion, _is_managed_pair
 from .task_queue import (
     QueueError, _claim_in_transaction, _reschedule_in_transaction, _integer as _queue_integer,
     _owned as _owned_queue, _audit as _queue_audit,
@@ -41,8 +42,8 @@ def _input(validator, value):
 
 
 def _version(conn):
-    if conn.execute("PRAGMA user_version").fetchone()[0] not in (10, 11):
-        raise StateStorageError("State schema version 10 or 11 is required for associations.")
+    if conn.execute("PRAGMA user_version").fetchone()[0] not in (10, 11, 12):
+        raise StateStorageError("State schema version 10, 11 or 12 is required for associations.")
 
 
 def _owned_rows(conn, owner, ident):
@@ -90,6 +91,11 @@ def _completion_audit(conn, now, owner, ident):
                  (now, owner, "paired_completion_created", "paired_completion", ident))
 
 
+def _managed_audit(conn, now, owner, ident):
+    conn.execute("INSERT INTO state_audit(occurred_at,actor_id,event,resource_type,resource_id) VALUES (?,?,?,?,?)",
+                 (now, owner, "managed_task_pair_created", "managed_task_pair", ident))
+
+
 def _pair_child_key():
     # These are internal idempotency records, not credentials. Check the shared
     # owner keyspace before use: caller-provided keys are not reserved.
@@ -126,12 +132,50 @@ class TaskAssociations:
             _remember(conn, owner, key, digest, ident)
             return ident
 
+    def create_managed(self, token: str, queue_id: str, workflow_id: str, *, operation_key: str) -> str:
+        """Create an opt-in managed pair from fresh owned parents (v12 only)."""
+        queue_id, workflow_id, key = _input(_record_id, queue_id), _input(_record_id, workflow_id), _input(_key, operation_key)
+        digest = _digest("managed_task_pair_create", queue_id + workflow_id)
+        with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
+            if conn.execute("PRAGMA user_version").fetchone()[0] != 12:
+                raise StateStorageError("State schema version 12 is required for managed pairs.")
+            existing = conn.execute("SELECT request_hash,resource_type,resource_id FROM state_operations WHERE owner_id=? AND operation_key=?", (owner, key)).fetchone()
+            if existing is not None:
+                if existing["resource_type"] != "managed_task_pair" or not hmac.compare_digest(existing["request_hash"], digest):
+                    raise AssociationError("Operation key was already used for a different request.")
+                ident = existing["resource_id"]
+                try:
+                    association = _owned(conn, owner, ident)
+                except AccessDenied as exc:
+                    raise StateStorageError("Stored operation result is unavailable.") from exc
+                if (association["queue_id"] != queue_id or association["workflow_id"] != workflow_id
+                        or not _is_managed_pair(conn, owner, association_id=ident)):
+                    raise StateStorageError("Stored operation result is inconsistent.")
+                return ident
+            queue = _owned_queue(conn, owner, queue_id)
+            workflow = _owned_workflow(conn, owner, workflow_id)
+            if queue["status"] != "queued" or queue["attempts"] != 0 or workflow["status"] != "planned":
+                raise AssociationError("Fresh queued and planned parents are required.")
+            if conn.execute("SELECT 1 FROM task_associations WHERE owner_id=? AND (queue_id=? OR workflow_id=?)", (owner, queue_id, workflow_id)).fetchone() is not None:
+                raise AssociationError("A record is already associated.")
+            child = _pair_child_key()
+            if child == key or conn.execute("SELECT 1 FROM state_operations WHERE owner_id=? AND operation_key=?", (owner, child)).fetchone() is not None:
+                raise StateStorageError("Internal operation key collision.")
+            ident = secrets.token_hex(16)
+            conn.execute("INSERT INTO task_associations VALUES (?,?,?,?,?)", (ident, owner, queue_id, workflow_id, now))
+            _audit(conn, now, owner, ident)
+            _remember(conn, owner, child, _digest("task_association_create", queue_id + workflow_id), ident)
+            conn.execute("INSERT INTO managed_task_pairs VALUES (?,?,?)", (ident, owner, now))
+            _managed_audit(conn, now, owner, ident)
+            conn.execute("INSERT INTO state_operations VALUES (?,?,?,?,?)", (owner, key, digest, "managed_task_pair", ident))
+            return ident
+
     def start_pair(self, token: str, record_id: str, *, operation_key: str, lease_seconds: int) -> str:
         """Atomically lease a queued item and start its planned local workflow.
 
         A returned lease ID may be stale, including on an exact retry. It does
-        not authorize or fence execution or external effects; parent methods
-        remain independently callable and can bypass this opt-in operation.
+        not authorize or fence execution or external effects; legacy parent
+        methods remain independently callable and can bypass coordination.
         """
         ident = _input(_record_id, record_id)
         key = _input(_key, operation_key)
@@ -209,7 +253,7 @@ class TaskAssociations:
         """Claim a ready linked queue item without changing its active workflow.
 
         Exact retries may return an inactive lease. This opt-in operation cannot
-        prevent independent parent calls or fence work outside the local database.
+        prevent legacy independent parent calls or fence work outside the local database.
         """
         ident, key = _input(_record_id, record_id), _input(_key, operation_key)
         try:
@@ -243,7 +287,7 @@ class TaskAssociations:
         """Submit output for local review while the linked lease is current.
 
         An exact retry acknowledges an earlier mutation, not an active lease or
-        permission to do work. Independent workflow APIs can bypass this check.
+        permission to do work. Legacy workflow APIs can bypass this check.
         """
         return self._review_operation(token, record_id, lease_id, output, operation_key, action="submit")
 
@@ -275,6 +319,8 @@ class TaskAssociations:
                 if existing != association["workflow_id"]:
                     raise StateStorageError("Stored operation result is inconsistent.")
                 return existing
+            if action == "review" and approved and _is_managed_pair(conn, owner, association_id=ident):
+                raise AssociationError("Managed approvals require paired completion.")
             if (queue["status"] != "leased" or queue["current_lease_id"] != lease_id
                     or now >= queue["lease_until"]):
                 raise AssociationError("A current unexpired lease is required.")
@@ -305,8 +351,8 @@ class TaskAssociations:
             raise AssociationError("Invalid association input.") from exc
         digest = _workflow_request("association_complete_pair", [ident, lease_id, output_hash.hex(), size])
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
-            if conn.execute("PRAGMA user_version").fetchone()[0] != 11:
-                raise StateStorageError("State schema version 11 is required for paired completion.")
+            if conn.execute("PRAGMA user_version").fetchone()[0] not in (11, 12):
+                raise StateStorageError("State schema version 11 or 12 is required for paired completion.")
             association, queue, workflow = _owned_rows(conn, owner, ident)
             existing = conn.execute("SELECT request_hash,resource_type,resource_id FROM state_operations WHERE owner_id=? AND operation_key=?", (owner, key)).fetchone()
             if existing is not None:
@@ -342,6 +388,7 @@ class TaskAssociations:
 
         This discards any pending output hash/size; it does not undo external
         work or confirm payment. Exhausted/cancelled queue history is retained.
+        Managed queued pairs may also be abandoned before their deadline.
         """
         if confirmed is not True:
             raise AssociationError("Explicit abandonment confirmation is required.")
@@ -359,17 +406,18 @@ class TaskAssociations:
                 raise AssociationError("Completed pairs cannot be abandoned.")
             deadline_expired = (queue["status"] == "queued" and queue["deadline_at"] != 0
                                 and now >= queue["deadline_at"])
-            if (queue["status"] not in ("exhausted", "cancelled") and not deadline_expired
+            cancel_queued = deadline_expired or (queue["status"] == "queued" and _is_managed_pair(conn, owner, association_id=ident))
+            if (queue["status"] not in ("exhausted", "cancelled") and not cancel_queued
                     or workflow["status"] not in ("planned", "in_progress", "pending_review")):
-                raise AssociationError("An unfinished, no-longer-schedulable pair is required.")
+                raise AssociationError("An unfinished managed queued or unschedulable pair is required.")
             workflow_key = _pair_child_key()
-            queue_key = _pair_child_key() if deadline_expired else None
+            queue_key = _pair_child_key() if cancel_queued else None
             keys = [workflow_key] + ([queue_key] if queue_key is not None else [])
             if (key in keys or len(set(keys)) != len(keys)
                     or any(conn.execute("SELECT 1 FROM state_operations WHERE owner_id=? AND operation_key=?", (owner, child)).fetchone() is not None for child in keys)):
                 raise StateStorageError("Internal operation key collision.")
             queue_id, workflow_id = association["queue_id"], association["workflow_id"]
-            if deadline_expired:
+            if cancel_queued:
                 conn.execute("UPDATE task_queue SET status='cancelled', updated_at=? WHERE id=? AND owner_id=?",
                              (now, queue_id, owner))
                 _queue_audit(conn, now, owner, "queue_cancelled", queue_id)
@@ -387,8 +435,8 @@ class TaskAssociations:
     def cancel_pair(self, token: str, record_id: str, *, operation_key: str) -> str:
         """Cancel a queued item and planned workflow together, not external work.
 
-        Only this operation is coordinated. Existing parent services can still
-        mutate independently; no worker, external effect or review is fenced.
+        Legacy parents can still mutate independently; managed parents require
+        paired APIs. No worker, external effect or review is fenced.
         """
         ident = _input(_record_id, record_id)
         key = _input(_key, operation_key)

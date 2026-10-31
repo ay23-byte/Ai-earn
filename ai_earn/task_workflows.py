@@ -13,7 +13,7 @@ import unicodedata
 from .auth import AccessDenied, AuthService
 from .opportunity_drafts import DraftError, _digest, _key, _record_id, _title
 from .state_authorization import _authorized_transaction
-from .state_storage import StateStorage, StateStorageError, _has_paired_completion
+from .state_storage import StateStorage, StateStorageError, _has_paired_completion, _is_managed_pair
 
 
 _RESOURCE = "task_workflow"
@@ -47,8 +47,8 @@ def _request(action, values):
 
 
 def _version(conn):
-    if conn.execute("PRAGMA user_version").fetchone()[0] not in (8, 9, 10, 11):
-        raise StateStorageError("State schema version 8, 9, 10 or 11 is required for task workflows.")
+    if conn.execute("PRAGMA user_version").fetchone()[0] not in (8, 9, 10, 11, 12):
+        raise StateStorageError("State schema version 8, 9, 10, 11 or 12 is required for task workflows.")
 
 
 def _owned(conn, owner, ident):
@@ -59,6 +59,7 @@ def _owned(conn, owner, ident):
         association = conn.execute("SELECT queue_id FROM task_associations WHERE owner_id=? AND workflow_id=?", (owner, ident)).fetchone()
         if association is not None:
             _has_paired_completion(conn, owner, association["queue_id"])
+    _is_managed_pair(conn, owner, workflow_id=ident)
     return row
 
 
@@ -158,6 +159,8 @@ class TaskWorkflows:
             existing = _retry(conn, owner, key, digest)
             if existing is not None:
                 return existing
+            if _is_managed_pair(conn, owner, workflow_id=ident):
+                raise WorkflowError("Managed workflows require paired operations.")
             if action == "start" and row["status"] == "planned":
                 status, event = "in_progress", "workflow_started"
             elif action == "cancel" and row["status"] in ("planned", "in_progress", "pending_review"):
@@ -180,6 +183,8 @@ class TaskWorkflows:
             existing = _retry(conn, owner, key, digest)
             if existing is not None:
                 return existing
+            if _is_managed_pair(conn, owner, workflow_id=ident):
+                raise WorkflowError("Managed workflows require paired operations.")
             return _submit_in_transaction(conn, owner, now, row, output_hash, size, key, digest)
 
     def review(self, token: str, record_id: str, output: str, *, approved: bool,
@@ -195,4 +200,6 @@ class TaskWorkflows:
             existing = _retry(conn, owner, key, digest)
             if existing is not None:
                 return existing
+            if _is_managed_pair(conn, owner, workflow_id=ident):
+                raise WorkflowError("Managed workflows require paired operations.")
             return _review_in_transaction(conn, owner, now, row, output_hash, size, approved, key, digest)
