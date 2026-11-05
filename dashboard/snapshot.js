@@ -28,8 +28,6 @@ function render(s) {
   $("snapshotSchema").textContent=count(m.schema_version);
   $("snapshotMode").textContent="Authenticated, account-scoped, read-only";
   $("snapshotStatus").textContent="Snapshot loaded";
-  $("connectionLabel").textContent="Snapshot loaded";
-  $("connectionDetail").textContent="Read-only aggregate data";
   $("dashboardFootnote").textContent="Snapshot data only; no live connection.";
   document.querySelector(".status").textContent="READ-ONLY SNAPSHOT";
 }
@@ -50,8 +48,6 @@ $("clearSnapshot").addEventListener("click", () => {
   ["snapshotGenerated","snapshotSchema"].forEach(id => $(id).textContent="Not loaded");
   $("snapshotMode").textContent="Waiting for a snapshot";
   $("snapshotStatus").textContent="No snapshot loaded";
-  $("connectionLabel").textContent="No snapshot loaded";
-  $("connectionDetail").textContent="Dashboard is offline and read-only";
   $("dashboardFootnote").textContent="No account data loaded.";
   document.querySelector(".status").textContent="NO DATA LOADED";
   $("snapshotFile").value="";
