@@ -28,6 +28,13 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Diagnose Windows test identity
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          whoami /user
+          python -c "from ai_earn.windows_security import current_user_sid; print('Python token SID:', current_user_sid())"
+
       - name: Compile application and tests
         run: python -m compileall -q ai_earn tests tools
 
