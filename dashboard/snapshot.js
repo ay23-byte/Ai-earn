@@ -31,7 +31,7 @@ function render(s) {
   $("connectionLabel").textContent="Snapshot loaded";
   $("connectionDetail").textContent="Read-only aggregate data";
   $("dashboardFootnote").textContent="Snapshot data only; no live connection.";
-  document.querySelector(".demo").textContent="READ-ONLY SNAPSHOT";
+  document.querySelector(".status").textContent="READ-ONLY SNAPSHOT";
 }
 $("snapshotFile").addEventListener("change", async (event) => {
   const file=event.target.files && event.target.files[0];
@@ -53,6 +53,6 @@ $("clearSnapshot").addEventListener("click", () => {
   $("connectionLabel").textContent="No snapshot loaded";
   $("connectionDetail").textContent="Dashboard is offline and read-only";
   $("dashboardFootnote").textContent="No account data loaded.";
-  document.querySelector(".demo").textContent="NO DATA LOADED";
+  document.querySelector(".status").textContent="NO DATA LOADED";
   $("snapshotFile").value="";
 });
