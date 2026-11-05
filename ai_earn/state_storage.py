@@ -54,11 +54,18 @@ class _PrivateFiles(AuthStorage):
                 except FileNotFoundError:
                     continue
                 raise StateStorageError("Existing SQLite sidecars require investigation; no file was created.")
-            flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
-            if hasattr(os, "O_NOFOLLOW"):
-                flags |= os.O_NOFOLLOW
-            descriptor = os.open(self.path, flags, 0o600)
-            os.close(descriptor)
+            if os.name == "nt":
+                # Use the Win32 creator so the database owner and DACL are
+                # established explicitly. os.open(mode=0o600) does not set
+                # Windows ownership and can inherit an elevated runner owner.
+                from .windows_security import create_private_file
+                create_private_file(self.path)
+            else:
+                flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+                if hasattr(os, "O_NOFOLLOW"):
+                    flags |= os.O_NOFOLLOW
+                descriptor = os.open(self.path, flags, 0o600)
+                os.close(descriptor)
             self._ensure_file()
         except (OSError, StorageError) as exc:
             # A file created before a later error is left for inspection.
