@@ -16,6 +16,11 @@ class WindowsSecurityError(Exception):
 
 
 SYSTEM_SID = "S-1-5-18"
+# Elevated Windows processes can assign BUILTIN\\Administrators as the
+# default owner of OS-created files such as SQLite rollback journals. This
+# owner is accepted only for files inside a separately verified private,
+# user-owned directory.
+BUILTIN_ADMINISTRATORS_SID = "S-1-5-32-544"
 FULL_ACCESS = 0x001F01FF
 OBJECT_INHERIT = 0x01
 CONTAINER_INHERIT = 0x02
@@ -37,28 +42,36 @@ class SecuritySnapshot:
     entries: tuple[AccessEntry, ...]
 
 
-def validate_snapshot(snapshot: SecuritySnapshot, user_sid: str, *, directory: bool) -> None:
-    """Reject anything except full access for the current user and SYSTEM."""
-    if not re.fullmatch(r"S-1-(?:\d+-)*\d+", user_sid) or user_sid == SYSTEM_SID:
+def validate_snapshot(
+    snapshot: SecuritySnapshot,
+    user_sid: str,
+    *,
+    directory: bool,
+    allow_admin_owner: bool = False,
+) -> None:
+    """Validate the exact user/SYSTEM ACL, with a narrow sidecar-owner exception."""
+    if not re.fullmatch(r"S-1-(?:\\d+-)*\\d+", user_sid) or user_sid == SYSTEM_SID:
         raise WindowsSecurityError("A non-SYSTEM current user is required.")
-    if snapshot.owner != user_sid or (directory and not snapshot.protected):
+    owner_ok = snapshot.owner == user_sid or (
+        allow_admin_owner and not directory
+        and snapshot.owner == BUILTIN_ADMINISTRATORS_SID
+    )
+    if not owner_ok or (directory and not snapshot.protected):
         raise WindowsSecurityError("Windows ownership or ACL protection is unsafe.")
     allowed = {user_sid, SYSTEM_SID}
     seen: set[str] = set()
     for entry in snapshot.entries:
         if entry.ace_type != 0 or entry.sid not in allowed or entry.sid in seen:
             raise WindowsSecurityError("Unexpected Windows ACL entry.")
-        # Disallow inherit-only, no-propagate, audit, and unknown flags.
         if entry.flags & ~(OBJECT_INHERIT | CONTAINER_INHERIT | INHERITED):
             raise WindowsSecurityError("Unsupported Windows ACL flags.")
-        if directory and (entry.flags != (OBJECT_INHERIT | CONTAINER_INHERIT)):
+        if directory and entry.flags != (OBJECT_INHERIT | CONTAINER_INHERIT):
             raise WindowsSecurityError("Directory entries must be explicit and inheritable.")
         if entry.mask != FULL_ACCESS:
             raise WindowsSecurityError("Unexpected Windows ACL permissions.")
         seen.add(entry.sid)
     if seen != allowed:
         raise WindowsSecurityError("Windows ACL is incomplete.")
-
 
 def _api():
     if os.name != "nt":
@@ -201,8 +214,26 @@ def inspect_path(path: Path, *, directory: bool) -> SecuritySnapshot:
 
 
 def verify_private_path(path: Path, *, directory: bool) -> None:
-    validate_snapshot(inspect_path(path, directory=directory), current_user_sid(), directory=directory)
+    user_sid = current_user_sid()
+    if directory:
+        validate_snapshot(inspect_path(path, directory=True), user_sid, directory=True)
+        return
 
+    # SQLite creates rollback journals itself. With an elevated Windows token,
+    # Windows may assign BUILTIN\\Administrators as their owner. Accept this
+    # only when the containing directory independently passes the strict
+    # current-user ownership and protected-DACL checks.
+    validate_snapshot(
+        inspect_path(path.parent, directory=True),
+        user_sid,
+        directory=True,
+    )
+    validate_snapshot(
+        inspect_path(path, directory=False),
+        user_sid,
+        directory=False,
+        allow_admin_owner=True,
+    )
 
 def create_private_directory(path: Path) -> None:
     """Create a new protected directory; never modify or replace an existing one."""
