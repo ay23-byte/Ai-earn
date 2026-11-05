@@ -50,7 +50,7 @@ def validate_snapshot(
     allow_admin_owner: bool = False,
 ) -> None:
     """Validate the exact user/SYSTEM ACL, with a narrow sidecar-owner exception."""
-    if not re.fullmatch(r"S-1-(?:\\d+-)*\\d+", user_sid) or user_sid == SYSTEM_SID:
+    if not re.fullmatch(r"S-1-(?:\d+-)*\d+", user_sid) or user_sid == SYSTEM_SID:
         raise WindowsSecurityError("A non-SYSTEM current user is required.")
     owner_ok = snapshot.owner == user_sid or (
         allow_admin_owner and not directory
