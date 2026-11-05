@@ -227,7 +227,7 @@ def create_private_directory(path: Path) -> None:
 
 
 def create_private_file(path: Path) -> None:
-    """Create a new file with inherited parent DACL and an explicit current-user owner.
+    """Create a new file with an explicit owner and a protected user/SYSTEM DACL.
 
     The containing directory must already have the exact protected user/SYSTEM
     ACL established by create_private_directory(). CREATE_NEW prevents
@@ -235,54 +235,50 @@ def create_private_file(path: Path) -> None:
     """
     ctypes, wintypes, advapi, kernel = _api()
     _check_local_ancestors(path, ctypes, wintypes, kernel)
-    sid_text = current_user_sid()
-    if not re.fullmatch(r"S-1-(?:\d+-)*\d+", sid_text) or sid_text == SYSTEM_SID:
+    sid = current_user_sid()
+    if not re.fullmatch(r"S-1-(?:\d+-)*\d+", sid) or sid == SYSTEM_SID:
         raise WindowsSecurityError("A non-SYSTEM current user is required.")
 
-    # Passing no security descriptor lets Windows inherit the protected DACL
-    # from the already-verified parent directory. Set the owner explicitly
-    # through the still-open handle: elevated Windows tokens can otherwise
-    # assign the Administrators group as the default owner.
+    # Supply owner and DACL together at creation time. This avoids a later
+    # SetSecurityInfo owner change, which may be denied to non-privileged
+    # processes even when the requested owner is the current user.
+    sddl = f"O:{sid}D:P(A;;FA;;;{sid})(A;;FA;;;SY)"
+    descriptor = ctypes.c_void_p()
+    if not advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+        sddl, 1, ctypes.byref(descriptor), None
+    ):
+        raise WindowsSecurityError("Cannot construct a private Windows file descriptor.")
+
+    class SecurityAttributes(ctypes.Structure):
+        _fields_ = [
+            ("length", wintypes.DWORD),
+            ("descriptor", ctypes.c_void_p),
+            ("inherit_handle", wintypes.BOOL),
+        ]
+
+    attrs = SecurityAttributes(ctypes.sizeof(SecurityAttributes), descriptor, False)
     kernel.CreateFileW.argtypes = [
         wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
-        ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+        ctypes.POINTER(SecurityAttributes), wintypes.DWORD,
+        wintypes.DWORD, wintypes.HANDLE,
     ]
     kernel.CreateFileW.restype = wintypes.HANDLE
-    advapi.ConvertStringSidToSidW.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(ctypes.c_void_p)]
-    advapi.ConvertStringSidToSidW.restype = wintypes.BOOL
-    advapi.SetSecurityInfo.argtypes = [
-        wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD,
-        ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,
-    ]
-    advapi.SetSecurityInfo.restype = wintypes.DWORD
-
-    handle = kernel.CreateFileW(
-        str(path), 0xC0000000, 0x00000007, None,
-        1, 0x00000080, None,
-    )
-    invalid_handle = ctypes.c_void_p(-1).value
-    if handle == invalid_handle:
-        error = ctypes.get_last_error()
-        if error in (80, 183):
-            raise FileExistsError(error, "File already exists", str(path))
-        raise WindowsSecurityError(
-            f"Cannot create a new private Windows file (Windows error {error})."
-        )
-
-    sid = ctypes.c_void_p()
     try:
-        if not advapi.ConvertStringSidToSidW(sid_text, ctypes.byref(sid)):
-            raise WindowsSecurityError("Cannot convert current Windows identity to a SID.")
-        # SE_FILE_OBJECT = 1; OWNER_SECURITY_INFORMATION = 0x1.
-        error = advapi.SetSecurityInfo(handle, 1, 0x1, sid, None, None, None)
-        if error != 0:
+        handle = kernel.CreateFileW(
+            str(path), 0xC0000000, 0x00000007, ctypes.byref(attrs),
+            1, 0x00000080, None,
+        )
+        invalid_handle = ctypes.c_void_p(-1).value
+        if handle == invalid_handle:
+            error = ctypes.get_last_error()
+            if error in (80, 183):
+                raise FileExistsError(error, "File already exists", str(path))
             raise WindowsSecurityError(
-                f"Cannot set the Windows file owner (Windows error {error})."
+                f"Cannot create a new private Windows file (Windows error {error})."
             )
-    finally:
-        if sid:
-            kernel.LocalFree(sid)
         if not kernel.CloseHandle(handle):
             raise WindowsSecurityError("Cannot close newly created Windows file handle.")
+    finally:
+        kernel.LocalFree(descriptor)
 
     verify_private_path(path, directory=False)
