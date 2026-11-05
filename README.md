@@ -24,6 +24,10 @@ Registration requests a hidden password and displays a one-time recovery code: s
 
 On POSIX use a newly created owner-only directory (`mkdir -m 700`), export the same two absolute paths, and run `python3 -m ai_earn auth register`, `python3 -m ai_earn tracker init`, then `python3 -m ai_earn tracker open`. Never replace an existing database. Windows verification of this new interface is pending.
 
+## Dashboard visual prototype
+
+A first responsive dark/neon command-center UI is available at `dashboard/index.html`. Open that file directly in a browser (or serve the repository root with `python -m http.server 8000` and visit `http://localhost:8000/dashboard/`). It is currently a **visual interaction prototype**: the figures are illustrative sample data, action buttons do not persist records, and there is no API or database connection to the dashboard yet. Do not enter real customer, credential or financial information. The next implementation stage is to connect read-only views to tested application services, then add authenticated write workflows with server-side validation and approvals.
+
 ## Setup and tests
 
 Python 3.11+ is required; no third-party packages are used. From the repository root:
