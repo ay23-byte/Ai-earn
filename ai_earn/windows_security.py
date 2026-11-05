@@ -236,7 +236,7 @@ def create_private_file(path: Path) -> None:
     ctypes, wintypes, advapi, kernel = _api()
     _check_local_ancestors(path, ctypes, wintypes, kernel)
     sid_text = current_user_sid()
-    if not re.fullmatch(r"S-1-(?:\\d+-)*\\d+", sid_text) or sid_text == SYSTEM_SID:
+    if not re.fullmatch(r"S-1-(?:\d+-)*\d+", sid_text) or sid_text == SYSTEM_SID:
         raise WindowsSecurityError("A non-SYSTEM current user is required.")
 
     # Passing no security descriptor lets Windows inherit the protected DACL
