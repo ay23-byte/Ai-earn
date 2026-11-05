@@ -144,6 +144,26 @@ class WindowsAuthenticationTests(unittest.TestCase):
             conn.execute("INSERT INTO auth_audit(occurred_at,event) VALUES(?,?)", (123, "test_event"))
             journal = self.path.with_name(self.path.name + "-journal")
             self.assertTrue(journal.is_file(), "SQLite rollback journal was not observed")
+            # Emit policy-safe diagnostics for the isolated CI sidecar failure.
+            from ai_earn.windows_security import current_user_sid, inspect_path
+            snapshot = inspect_path(journal, directory=False)
+            print(
+                "SQLite journal ACL diagnostic:",
+                {
+                    "owner_matches_current_user": snapshot.owner == current_user_sid(),
+                    "protected": snapshot.protected,
+                    "entries": [
+                        {
+                            "is_current_user": entry.sid == current_user_sid(),
+                            "is_system": entry.sid == "S-1-5-18",
+                            "flags": entry.flags,
+                            "mask": entry.mask,
+                            "ace_type": entry.ace_type,
+                        }
+                        for entry in snapshot.entries
+                    ],
+                },
+            )
             verify_private_path(journal, directory=False)
         backup = self.directory / "backup.sqlite3"
         with closing(sqlite3.connect(self.path)) as src, closing(sqlite3.connect(backup)) as dst:
