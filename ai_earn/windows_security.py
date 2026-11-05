@@ -224,3 +224,59 @@ def create_private_directory(path: Path) -> None:
     finally:
         kernel.LocalFree(descriptor)
     verify_private_path(path, directory=True)
+
+
+def create_private_file(path: Path) -> None:
+    """Create a new file whose owner is the current user and whose DACL is inherited.
+
+    The containing directory must already have the exact protected user/SYSTEM
+    ACL established by create_private_directory(). CREATE_NEW prevents
+    overwriting an existing file or following an existing final path.
+    """
+    ctypes, wintypes, advapi, kernel = _api()
+    _check_local_ancestors(path, ctypes, wintypes, kernel)
+    sid = current_user_sid()
+    if not re.fullmatch(r"S-1-(?:\\d+-)*\\d+", sid) or sid == SYSTEM_SID:
+        raise WindowsSecurityError("A non-SYSTEM current user is required.")
+
+    # Set only the owner in the creation descriptor. With no DACL present in
+    # that descriptor, Windows inherits the parent's inheritable DACL.
+    descriptor = ctypes.c_void_p()
+    if not advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+        f"O:{sid}", 1, ctypes.byref(descriptor), None
+    ):
+        raise WindowsSecurityError("Cannot construct a Windows file owner descriptor.")
+
+    class SecurityAttributes(ctypes.Structure):
+        _fields_ = [
+            ("length", wintypes.DWORD),
+            ("descriptor", ctypes.c_void_p),
+            ("inherit_handle", wintypes.BOOL),
+        ]
+
+    attrs = SecurityAttributes(ctypes.sizeof(SecurityAttributes), descriptor, False)
+    kernel.CreateFileW.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+        ctypes.POINTER(SecurityAttributes), wintypes.DWORD,
+        wintypes.DWORD, wintypes.HANDLE,
+    ]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    try:
+        handle = kernel.CreateFileW(
+            str(path), 0xC0000000, 0x00000007, ctypes.byref(attrs),
+            1, 0x00000080, None,
+        )
+        invalid_handle = ctypes.c_void_p(-1).value
+        if handle == invalid_handle:
+            error = ctypes.get_last_error()
+            if error in (80, 183):  # ERROR_FILE_EXISTS / ERROR_ALREADY_EXISTS
+                raise FileExistsError(error, "File already exists", str(path))
+            raise WindowsSecurityError(
+                f"Cannot create a new private Windows file (Windows error {error})."
+            )
+        if not kernel.CloseHandle(handle):
+            raise WindowsSecurityError("Cannot close newly created Windows file handle.")
+    finally:
+        kernel.LocalFree(descriptor)
+
+    verify_private_path(path, directory=False)
