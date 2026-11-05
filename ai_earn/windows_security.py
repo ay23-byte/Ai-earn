@@ -16,6 +16,11 @@ class WindowsSecurityError(Exception):
 
 
 SYSTEM_SID = "S-1-5-18"
+# Elevated Windows processes can assign BUILTIN\\Administrators as the
+# default owner of OS-created files such as SQLite rollback journals. This
+# owner is accepted only for files inside a separately verified private,
+# user-owned directory.
+BUILTIN_ADMINISTRATORS_SID = "S-1-5-32-544"
 FULL_ACCESS = 0x001F01FF
 OBJECT_INHERIT = 0x01
 CONTAINER_INHERIT = 0x02
@@ -37,28 +42,36 @@ class SecuritySnapshot:
     entries: tuple[AccessEntry, ...]
 
 
-def validate_snapshot(snapshot: SecuritySnapshot, user_sid: str, *, directory: bool) -> None:
-    """Reject anything except full access for the current user and SYSTEM."""
+def validate_snapshot(
+    snapshot: SecuritySnapshot,
+    user_sid: str,
+    *,
+    directory: bool,
+    allow_admin_owner: bool = False,
+) -> None:
+    """Validate the exact user/SYSTEM ACL, with a narrow sidecar-owner exception."""
     if not re.fullmatch(r"S-1-(?:\d+-)*\d+", user_sid) or user_sid == SYSTEM_SID:
         raise WindowsSecurityError("A non-SYSTEM current user is required.")
-    if snapshot.owner != user_sid or (directory and not snapshot.protected):
+    owner_ok = snapshot.owner == user_sid or (
+        allow_admin_owner and not directory
+        and snapshot.owner == BUILTIN_ADMINISTRATORS_SID
+    )
+    if not owner_ok or (directory and not snapshot.protected):
         raise WindowsSecurityError("Windows ownership or ACL protection is unsafe.")
     allowed = {user_sid, SYSTEM_SID}
     seen: set[str] = set()
     for entry in snapshot.entries:
         if entry.ace_type != 0 or entry.sid not in allowed or entry.sid in seen:
             raise WindowsSecurityError("Unexpected Windows ACL entry.")
-        # Disallow inherit-only, no-propagate, audit, and unknown flags.
         if entry.flags & ~(OBJECT_INHERIT | CONTAINER_INHERIT | INHERITED):
             raise WindowsSecurityError("Unsupported Windows ACL flags.")
-        if directory and (entry.flags != (OBJECT_INHERIT | CONTAINER_INHERIT)):
+        if directory and entry.flags != (OBJECT_INHERIT | CONTAINER_INHERIT):
             raise WindowsSecurityError("Directory entries must be explicit and inheritable.")
         if entry.mask != FULL_ACCESS:
             raise WindowsSecurityError("Unexpected Windows ACL permissions.")
         seen.add(entry.sid)
     if seen != allowed:
         raise WindowsSecurityError("Windows ACL is incomplete.")
-
 
 def _api():
     if os.name != "nt":
@@ -201,8 +214,26 @@ def inspect_path(path: Path, *, directory: bool) -> SecuritySnapshot:
 
 
 def verify_private_path(path: Path, *, directory: bool) -> None:
-    validate_snapshot(inspect_path(path, directory=directory), current_user_sid(), directory=directory)
+    user_sid = current_user_sid()
+    if directory:
+        validate_snapshot(inspect_path(path, directory=True), user_sid, directory=True)
+        return
 
+    # SQLite creates rollback journals itself. With an elevated Windows token,
+    # Windows may assign BUILTIN\\Administrators as their owner. Accept this
+    # only when the containing directory independently passes the strict
+    # current-user ownership and protected-DACL checks.
+    validate_snapshot(
+        inspect_path(path.parent, directory=True),
+        user_sid,
+        directory=True,
+    )
+    validate_snapshot(
+        inspect_path(path, directory=False),
+        user_sid,
+        directory=False,
+        allow_admin_owner=True,
+    )
 
 def create_private_directory(path: Path) -> None:
     """Create a new protected directory; never modify or replace an existing one."""
@@ -224,3 +255,61 @@ def create_private_directory(path: Path) -> None:
     finally:
         kernel.LocalFree(descriptor)
     verify_private_path(path, directory=True)
+
+
+def create_private_file(path: Path) -> None:
+    """Create a new file with an explicit owner and a protected user/SYSTEM DACL.
+
+    The containing directory must already have the exact protected user/SYSTEM
+    ACL established by create_private_directory(). CREATE_NEW prevents
+    overwriting an existing file or following an existing final path.
+    """
+    ctypes, wintypes, advapi, kernel = _api()
+    _check_local_ancestors(path, ctypes, wintypes, kernel)
+    sid = current_user_sid()
+    if not re.fullmatch(r"S-1-(?:\d+-)*\d+", sid) or sid == SYSTEM_SID:
+        raise WindowsSecurityError("A non-SYSTEM current user is required.")
+
+    # Supply owner and DACL together at creation time. This avoids a later
+    # SetSecurityInfo owner change, which may be denied to non-privileged
+    # processes even when the requested owner is the current user.
+    sddl = f"O:{sid}D:P(A;;FA;;;{sid})(A;;FA;;;SY)"
+    descriptor = ctypes.c_void_p()
+    if not advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+        sddl, 1, ctypes.byref(descriptor), None
+    ):
+        raise WindowsSecurityError("Cannot construct a private Windows file descriptor.")
+
+    class SecurityAttributes(ctypes.Structure):
+        _fields_ = [
+            ("length", wintypes.DWORD),
+            ("descriptor", ctypes.c_void_p),
+            ("inherit_handle", wintypes.BOOL),
+        ]
+
+    attrs = SecurityAttributes(ctypes.sizeof(SecurityAttributes), descriptor, False)
+    kernel.CreateFileW.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+        ctypes.POINTER(SecurityAttributes), wintypes.DWORD,
+        wintypes.DWORD, wintypes.HANDLE,
+    ]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    try:
+        handle = kernel.CreateFileW(
+            str(path), 0xC0000000, 0x00000007, ctypes.byref(attrs),
+            1, 0x00000080, None,
+        )
+        invalid_handle = ctypes.c_void_p(-1).value
+        if handle == invalid_handle:
+            error = ctypes.get_last_error()
+            if error in (80, 183):
+                raise FileExistsError(error, "File already exists", str(path))
+            raise WindowsSecurityError(
+                f"Cannot create a new private Windows file (Windows error {error})."
+            )
+        if not kernel.CloseHandle(handle):
+            raise WindowsSecurityError("Cannot close newly created Windows file handle.")
+    finally:
+        kernel.LocalFree(descriptor)
+
+    verify_private_path(path, directory=False)

@@ -88,15 +88,24 @@ class AuthStorage:
         self._check_parent()
         try:
             if create:
-                flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
-                if hasattr(os, "O_NOFOLLOW"):
-                    flags |= os.O_NOFOLLOW
-                try:
-                    fd = os.open(self.path, flags, 0o600)
-                except FileExistsError:
-                    pass
+                if os.name == "nt":
+                    from .windows_security import create_private_file
+                    try:
+                        create_private_file(self.path)
+                    except FileExistsError:
+                        # Existing files are never trusted based on existence;
+                        # the lstat/type and ACL checks below still run.
+                        pass
                 else:
-                    os.close(fd)
+                    flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+                    if hasattr(os, "O_NOFOLLOW"):
+                        flags |= os.O_NOFOLLOW
+                    try:
+                        fd = os.open(self.path, flags, 0o600)
+                    except FileExistsError:
+                        pass
+                    else:
+                        os.close(fd)
             info = self.path.lstat()
             if not stat.S_ISREG(info.st_mode):
                 raise StorageError("Authentication database must be a regular file, not a link.")

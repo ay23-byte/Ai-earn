@@ -1,0 +1,42 @@
+name: Python tests
+
+on:
+  push:
+    branches: ["main", "earn-os/**"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Python ${{ matrix.python-version }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.11", "3.13"]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Diagnose Windows test identity
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          whoami /user
+          python -c "from ai_earn.windows_security import current_user_sid; print('Python token SID:', current_user_sid())"
+
+      - name: Compile application and tests
+        run: python -m compileall -q ai_earn tests tools
+
+      - name: Run unit tests
+        run: python -m unittest discover -v
