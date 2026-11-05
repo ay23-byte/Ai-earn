@@ -1,0 +1,1 @@
+Earn OS local dashboard snapshot UI implementation placeholder.
