@@ -24,9 +24,28 @@ Registration requests a hidden password and displays a one-time recovery code: s
 
 On POSIX use a newly created owner-only directory (`mkdir -m 700`), export the same two absolute paths, and run `python3 -m ai_earn auth register`, `python3 -m ai_earn tracker init`, then `python3 -m ai_earn tracker open`. Never replace an existing database. Windows verification of this new interface is pending.
 
-## Dashboard visual prototype
+## Local authenticated dashboard snapshot
 
-A first responsive dark/neon command-center UI is available at `dashboard/index.html`. Open that file directly in a browser (or serve the repository root with `python -m http.server 8000` and visit `http://localhost:8000/dashboard/`). It is currently a **visual interaction prototype**: the figures are illustrative sample data, action buttons do not persist records, and there is no API or database connection to the dashboard yet. Do not enter real customer, credential or financial information. The next implementation stage is to connect read-only views to tested application services, then add authenticated write workflows with server-side validation and approvals.
+The dashboard now has a read-only local view at `dashboard/connected.html`. It displays real, account-scoped aggregate metrics from the existing state database. It does **not** run an HTTP API or send authentication tokens to the browser.
+
+On Windows PowerShell, first set the same private database paths you use for the tracker, then export a snapshot:
+
+```powershell
+python -m ai_earn dashboard snapshot
+```
+
+The command requires an interactive terminal, asks for the account username and hidden password, opens existing databases only, and signs out after export. It creates a new, non-overwriting `dashboard-snapshot-*.json` file beside the state database, inside that database's already-protected private directory. The snapshot contains aggregate counts and amounts only; it contains no login token, username, record titles or customer details. Treat it as private financial information and do not share it.
+
+To open the dashboard, from the repository root run a static server bound to loopback only:
+
+```powershell
+python -m http.server 8000 --bind 127.0.0.1
+```
+
+Open `http://127.0.0.1:8000/dashboard/` and choose **Load snapshot**. Select the JSON file created by the export command. The page reads the file locally in the browser; it makes no API request and does not upload the file. Select **Clear data** to remove the displayed snapshot from browser memory. Export a new snapshot when you want refreshed metrics; older exports are never overwritten.
+
+The page deliberately labels financial assertions, invoice drafts, payment observations and sandbox events separately. Verified income remains **Not available** because there is no verified payment ledger. This remains an experimental local-only workflow for disposable data, not a production or multi-user deployment. Do not expose the authentication component over a network or enter real customer/financial data.
+
 
 ## Setup and tests
 
