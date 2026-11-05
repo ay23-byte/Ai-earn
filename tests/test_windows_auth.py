@@ -150,7 +150,9 @@ class WindowsAuthenticationTests(unittest.TestCase):
             print(
                 "SQLite journal ACL diagnostic:",
                 {
-                    "owner_matches_current_user": snapshot.owner == current_user_sid(),
+                    "owner": snapshot.owner,
+                    "current_user_sid": current_user_sid(),
+                    "parent_owner": inspect_path(journal.parent, directory=True).owner,
                     "protected": snapshot.protected,
                     "entries": [
                         {
