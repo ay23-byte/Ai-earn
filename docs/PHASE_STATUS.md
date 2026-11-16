@@ -293,6 +293,13 @@ The user approved an offline manual tracker as a smaller goal. This is a separat
 - **A11y/perf:** `skip → #main`, `nav aria-label`, `aria-current="page"`, `role="status" aria-live="polite"`, `tabindex="-1"` on main, `focus-visible`, `meta viewport`, `meta color-scheme`, no external font/CDN, responsive grids collapse on 1100/820/560.
 - **Tests:** New `tests/test_frontend_spa.py` 16 tests (files exist, viewport+color-scheme, 17 nav `data-route` + 17 `data-view`, themeToggle+snapshotFile+snapshotStatus, skip+aria-current, app.css/js refs, no hardcoded mock amounts via `ai-earn-dashboard-snapshot` check, js router+theme+localStorage+prefers-color-scheme+ROUTES, 1 MB + read_only validation, no `fetch(http`/`localhost`, dark/light CSS + responsive, index redirects to app.html + legacy, empty/error/loading, tabindex + aria-labelledby). All **823 tests OK / 17 skipped** Linux Python 3.11.2, `compileall OK`. Gate updated to require `test_frontend_spa` (now 41 focused cases).
 
+## M15 — Prod hardening & deploy v22 (health, secrets, CI, restore drill, `production_ready:false`) (2026-11-16)
+
+- **Branch/state:** `arena/c6693e06-ai-earn` at this commit (origin `v22 hardening`), `LATEST 22` (no new DB tables, hardening is static checks + docs).
+- **Health:** New `ai_earn/health.py` `check(environ)` / `check_with_backups(environ)` read-only (reuses `doctor._classify`, checks `config` via `load_settings`, `auth`/`state` via `_classify` private parent + `immutable=1` + `integrity_check` + `application_id` + `SUPPORTED_STATE_VERSIONS`, `version` `LATEST 22`, optional `backups` 21 expected `before-v2..v22`), always `production_ready:false`, `ok` only when `auth==ok && state==ok`; `ai_earn/health_cli.py` `health [--json] [--with-backups]` (exit 0 ok /1 not ok /2 config invalid, no secrets), wired into `__main__.py` (`Usage: … | health [--json] [--with-backups]`). `docs/DEPLOYMENT.md` now documents health, secrets (`AI_EARN_*` env, `validate_api_key` 32..128, `redact_config`, no repo secrets, vault), CI, and rollback (never `REPLACE`). `docs/BACKUP_AND_RECOVERY.md` now documents `health --with-backups` and disposable restore drill (`mktemp -d`, `cp` to new private path, `health --with-backups` + `doctor --json`, `backup_to` to `.bak2`, verify `before-v*.sqlite3` 21 chain, stale hazard). `.github/workflows/tests.yml` now runs `compileall` + `git diff --check` + secret grep (`BEGIN PRIVATE KEY`, `sk-`) + `unittest discover -v` 832/17 + `health --json`/`doctor --json` (expected non-ok on runner) on `ubuntu+windows × 3.11/3.13`.
+- **Tests:** New `tests/test_health.py` 9 tests disposable (missing→not ok, invalid env, ok after `register` + `migrate_to_v22` 21 backups, `with_backups` 21, `cli --json` ok, `cli` exit 1 missing, `cli --with-backups` json, no secrets in payload, `production_ready` always false). All **832 tests OK / 17 skipped** Linux Python 3.11.2, `compileall OK`. Gate updated to require `test_health` (now 42 focused cases).
+- **Exit evidence:** Restore drill on disposable copy passes (`health --with-backups` + `backup_to` to new path), `health`/`doctor` read-only, `production_ready:false` until sign-off; no live deployment.
+
 
 ## Remaining phases
 
@@ -357,7 +364,7 @@ Each phase depends on the immediately previous phase passing (including document
 | 13 | Controlled autonomy | DONE (experimental v22 ToolRegistry/ApprovalQueue, shipped) | ToolRegistry 8 tools read/draft/consequential, TTL virtual expiry + emergency stop + injection isolation, 786/17 | 14 |
 | 14 | Revenue analytics and optimization | DONE (experimental v22 Analytics, shipped) | funnel/MRR/conversion/workload/time-range/CSV read-only, UTC buckets, 796/17 | 15 |
 | 15 | Frontend & UX (Production SPA) | DONE (experimental v22 Vanilla SPA, shipped) | 17 hash views, dark/light responsive a11y, no mock, snapshot-only, 823/17 | 16 |
-| 16 | Production hardening and deployment | NOT_STARTED | Security, backups, monitoring and verified rollback; `production_ready:false` until sign-off | 17 |
+| 16 | Production hardening and deployment | DONE (experimental v22 health `health [--json] [--with-backups]`, shipped) | Read-only health checks `config`/`auth`/`state`/`version`/`backups` (21 expected), secrets never in repo, CI `compileall`+`git diff --check`+secret grep+`unittest` 832/17, restore drill on disposable copy, `production_ready:false` until sign-off | 17 |
 | 17 | Continuous improvement | NOT_STARTED | Measured operational reviews and gated changes | Subsequent gated improvements |
 
 ## Handoff / resume
