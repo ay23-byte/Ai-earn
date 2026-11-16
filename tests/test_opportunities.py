@@ -309,10 +309,19 @@ class OpportunityTests(unittest.TestCase):
                 priv = alt_dir / "priv"
             except Exception:
                 priv = Path(tempfile.mkdtemp())
-                priv.mkdir(mode=0o700, exist_ok=True)
+                if os.name == "nt":
+                    from ai_earn.windows_security import create_private_directory
+                    if not priv.exists():
+                        create_private_directory(priv)
+                else:
+                    priv.mkdir(mode=0o700, exist_ok=True)
         else:
             priv = alt_dir / "priv"
-            priv.mkdir(mode=0o700)
+            if os.name == "nt":
+                from ai_earn.windows_security import create_private_directory
+                create_private_directory(priv)
+            else:
+                priv.mkdir(mode=0o700)
         alt_auth = priv / "auth.sqlite3"
         alt_state = priv / "state.sqlite3"
         alt_auth_s = AuthStorage(alt_auth)
@@ -353,7 +362,11 @@ class OpportunityTests(unittest.TestCase):
         alt_dir = Path(tempfile.mkdtemp())
         self.addCleanup(lambda: __import__("shutil").rmtree(alt_dir, ignore_errors=True))
         priv = alt_dir / "priv"
-        priv.mkdir(mode=0o700)
+        if os.name == "nt":
+            from ai_earn.windows_security import create_private_directory
+            create_private_directory(priv)
+        else:
+            priv.mkdir(mode=0o700)
         alt_auth = priv / "auth.sqlite3"
         alt_state = priv / "state.sqlite3"
         alt_auth_s = AuthStorage(alt_auth)

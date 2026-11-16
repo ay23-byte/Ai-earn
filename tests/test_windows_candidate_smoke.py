@@ -22,7 +22,11 @@ class CandidateSmokeTests(unittest.TestCase):
         directories = []
         def create(path):
             directories.append(path)
-            path.mkdir(mode=0o700)
+            if os.name == "nt":
+                from ai_earn.windows_security import create_private_directory
+                create_private_directory(path)
+            else:
+                path.mkdir(mode=0o700)
         out, err = io.StringIO(), io.StringIO()
         # These substitutions are for the POSIX rehearsal only. The Windows
         # candidate run makes no gate or storage override.

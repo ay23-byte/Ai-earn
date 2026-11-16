@@ -140,7 +140,11 @@ class ProductTests(unittest.TestCase):
         tmp2 = tempfile.TemporaryDirectory()
         self.addCleanup(tmp2.cleanup)
         dir2 = Path(tmp2.name) / "priv"
-        dir2.mkdir(mode=0o700)
+        if os.name == "nt":
+            from ai_earn.windows_security import create_private_directory
+            create_private_directory(dir2)
+        else:
+            dir2.mkdir(mode=0o700)
         auth_path2 = dir2 / "auth.sqlite3"
         state_path2 = dir2 / "state.sqlite3"
         auth2 = AuthService(AuthStorage(auth_path2))
@@ -163,7 +167,11 @@ class ProductTests(unittest.TestCase):
         tmp2 = tempfile.TemporaryDirectory()
         self.addCleanup(tmp2.cleanup)
         dir2 = Path(tmp2.name) / "priv"
-        dir2.mkdir(mode=0o700)
+        if os.name == "nt":
+            from ai_earn.windows_security import create_private_directory
+            create_private_directory(dir2)
+        else:
+            dir2.mkdir(mode=0o700)
         auth_path2 = dir2 / "auth.sqlite3"
         state_path2 = dir2 / "state.sqlite3"
         auth2 = AuthService(AuthStorage(auth_path2))
