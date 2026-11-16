@@ -19,7 +19,7 @@ from .auth_storage import AuthStorage, StorageError, _windows_auth_verified
 
 APPLICATION_ID = 0x41494533  # AIE3, distinct from the auth-only database.
 SCHEMA_VERSION = 1  # New files still bootstrap as version 1; upgrades are explicit.
-LATEST_SCHEMA_VERSION = 25
+LATEST_SCHEMA_VERSION = 26
 SUPPORTED_STATE_VERSIONS = frozenset(range(1, LATEST_SCHEMA_VERSION + 1))
 
 
@@ -575,6 +575,115 @@ _V25_SCHEMA = {
 )""",
 }
 
+
+_V26_IDEA_INDEX = "CREATE UNIQUE INDEX product_ideas_id_owner_idx ON product_ideas(id, owner_id)"
+_V26_VALIDATION_INDEX = "CREATE INDEX product_validations_product_idx ON product_validations(product_id, owner_id)"
+_V26_RESEARCH_INDEX = "CREATE INDEX market_research_product_idx ON market_research(product_id, owner_id)"
+_V26_PRICING_INDEX = "CREATE INDEX pricing_suggestions_product_idx ON pricing_suggestions(product_id, owner_id)"
+_V26_VERSION_INDEX = "CREATE INDEX product_versions_product_idx ON product_versions(product_id, owner_id)"
+_V26_FILE_INDEX = "CREATE INDEX product_files_product_idx ON product_files(product_id, owner_id)"
+_V26_SALES_INDEX = "CREATE INDEX product_sales_product_idx ON product_sales(product_id, owner_id)"
+_V26_DELIVERABLE_INDEX = "CREATE INDEX product_deliverables_product_idx ON product_deliverables(product_id, owner_id)"
+_V26_DOCS_INDEX = "CREATE INDEX product_documentation_product_idx ON product_documentation(product_id, owner_id)"
+_V26_SCHEMA = {
+    "product_ideas": """CREATE TABLE product_ideas (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 200 AND length(trim(title)) > 0),
+    description TEXT NOT NULL CHECK(length(description) BETWEEN 0 AND 2000),
+    status TEXT NOT NULL CHECK(status IN ('idea','validated','rejected','archived')),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at)
+)""",
+    "product_validations": """CREATE TABLE product_validations (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    product_id TEXT NOT NULL CHECK(length(product_id)=32 AND product_id NOT GLOB '*[^0-9a-f]*'),
+    criteria TEXT NOT NULL CHECK(length(criteria) BETWEEN 1 AND 500),
+    result TEXT NOT NULL CHECK(result IN ('pass','fail','pending')),
+    evidence TEXT NOT NULL CHECK(length(evidence) BETWEEN 0 AND 1000),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    FOREIGN KEY(product_id, owner_id) REFERENCES products(id, owner_id)
+)""",
+    "market_research": """CREATE TABLE market_research (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    product_id TEXT NOT NULL CHECK(length(product_id)=32 AND product_id NOT GLOB '*[^0-9a-f]*'),
+    query TEXT NOT NULL CHECK(length(query) BETWEEN 1 AND 500),
+    findings TEXT NOT NULL CHECK(length(findings) BETWEEN 1 AND 5000),
+    evidence_url TEXT NOT NULL CHECK(length(evidence_url) BETWEEN 0 AND 2048 AND (evidence_url='' OR evidence_url GLOB 'http://*' OR evidence_url GLOB 'https://*')),
+    ai_generated INTEGER NOT NULL CHECK(ai_generated IN (0,1)),
+    verification TEXT NOT NULL CHECK(verification IN ('unverified','verified')),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    FOREIGN KEY(product_id, owner_id) REFERENCES products(id, owner_id)
+)""",
+    "pricing_suggestions": """CREATE TABLE pricing_suggestions (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    product_id TEXT NOT NULL CHECK(length(product_id)=32 AND product_id NOT GLOB '*[^0-9a-f]*'),
+    price_paise INTEGER NOT NULL CHECK(typeof(price_paise)='integer' AND price_paise BETWEEN 0 AND 1000000000000),
+    rationale TEXT NOT NULL CHECK(length(rationale) BETWEEN 1 AND 2000),
+    ai_generated INTEGER NOT NULL CHECK(ai_generated IN (0,1)),
+    evidence TEXT NOT NULL CHECK(length(evidence) BETWEEN 0 AND 1000),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    FOREIGN KEY(product_id, owner_id) REFERENCES products(id, owner_id)
+)""",
+    "product_versions": """CREATE TABLE product_versions (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    product_id TEXT NOT NULL CHECK(length(product_id)=32 AND product_id NOT GLOB '*[^0-9a-f]*'),
+    version TEXT NOT NULL CHECK(length(version) BETWEEN 1 AND 20 AND version NOT GLOB '*[^A-Za-z0-9._-]*'),
+    notes TEXT NOT NULL CHECK(length(notes) BETWEEN 0 AND 2000),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    FOREIGN KEY(product_id, owner_id) REFERENCES products(id, owner_id)
+)""",
+    "product_files": """CREATE TABLE product_files (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    product_id TEXT NOT NULL CHECK(length(product_id)=32 AND product_id NOT GLOB '*[^0-9a-f]*'),
+    file_name TEXT NOT NULL CHECK(length(file_name) BETWEEN 1 AND 200 AND length(trim(file_name)) > 0),
+    file_hash BLOB CHECK(file_hash IS NULL OR (typeof(file_hash)='blob' AND length(file_hash)=32)),
+    file_size INTEGER NOT NULL CHECK(typeof(file_size)='integer' AND file_size BETWEEN 0 AND 104857600),
+    mime_type TEXT NOT NULL CHECK(length(mime_type) BETWEEN 1 AND 100),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    FOREIGN KEY(product_id, owner_id) REFERENCES products(id, owner_id)
+)""",
+    "product_sales": """CREATE TABLE product_sales (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    product_id TEXT NOT NULL CHECK(length(product_id)=32 AND product_id NOT GLOB '*[^0-9a-f]*'),
+    quantity INTEGER NOT NULL CHECK(typeof(quantity)='integer' AND quantity BETWEEN 1 AND 1000000),
+    amount_paise INTEGER NOT NULL CHECK(typeof(amount_paise)='integer' AND amount_paise BETWEEN 0 AND 1000000000000),
+    currency TEXT NOT NULL CHECK(currency='INR'),
+    sale_at INTEGER NOT NULL CHECK(typeof(sale_at)='integer' AND sale_at >= 0),
+    evidence_url TEXT NOT NULL CHECK(length(evidence_url) BETWEEN 0 AND 2048 AND (evidence_url='' OR evidence_url GLOB 'http://*' OR evidence_url GLOB 'https://*')),
+    verification TEXT NOT NULL CHECK(verification IN ('unverified','verified')),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    FOREIGN KEY(product_id, owner_id) REFERENCES products(id, owner_id)
+)""",
+    "product_deliverables": """CREATE TABLE product_deliverables (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    product_id TEXT NOT NULL CHECK(length(product_id)=32 AND product_id NOT GLOB '*[^0-9a-f]*'),
+    file_name TEXT NOT NULL CHECK(length(file_name) BETWEEN 1 AND 200 AND length(trim(file_name)) > 0),
+    file_hash BLOB CHECK(file_hash IS NULL OR (typeof(file_hash)='blob' AND length(file_hash)=32)),
+    file_size INTEGER NOT NULL CHECK(typeof(file_size)='integer' AND file_size BETWEEN 0 AND 104857600),
+    mime_type TEXT NOT NULL CHECK(length(mime_type) BETWEEN 1 AND 100),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    FOREIGN KEY(product_id, owner_id) REFERENCES products(id, owner_id)
+)""",
+    "product_documentation": """CREATE TABLE product_documentation (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    product_id TEXT NOT NULL CHECK(length(product_id)=32 AND product_id NOT GLOB '*[^0-9a-f]*'),
+    title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 200 AND length(trim(title)) > 0),
+    content TEXT NOT NULL CHECK(length(content) BETWEEN 1 AND 10000),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at),
+    FOREIGN KEY(product_id, owner_id) REFERENCES products(id, owner_id)
+)""",
+}
+
 _V20_SCHEMA = {
     "invoices": """CREATE TABLE invoices (
     id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
@@ -840,6 +949,34 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
             ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("service_id", "TEXT", 1, 0), ("customer_id", "TEXT", 1, 0),
             ("message", "TEXT", 1, 0), ("status", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
         ]
+    if version >= 26:
+        expected_columns["product_ideas"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("title", "TEXT", 1, 0), ("description", "TEXT", 1, 0), ("status", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["product_validations"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("product_id", "TEXT", 1, 0), ("criteria", "TEXT", 1, 0), ("result", "TEXT", 1, 0), ("evidence", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["market_research"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("product_id", "TEXT", 1, 0), ("query", "TEXT", 1, 0), ("findings", "TEXT", 1, 0), ("evidence_url", "TEXT", 1, 0), ("ai_generated", "INTEGER", 1, 0), ("verification", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["pricing_suggestions"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("product_id", "TEXT", 1, 0), ("price_paise", "INTEGER", 1, 0), ("rationale", "TEXT", 1, 0), ("ai_generated", "INTEGER", 1, 0), ("evidence", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["product_versions"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("product_id", "TEXT", 1, 0), ("version", "TEXT", 1, 0), ("notes", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["product_files"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("product_id", "TEXT", 1, 0), ("file_name", "TEXT", 1, 0), ("file_hash", "BLOB", 0, 0), ("file_size", "INTEGER", 1, 0), ("mime_type", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["product_sales"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("product_id", "TEXT", 1, 0), ("quantity", "INTEGER", 1, 0), ("amount_paise", "INTEGER", 1, 0), ("currency", "TEXT", 1, 0), ("sale_at", "INTEGER", 1, 0), ("evidence_url", "TEXT", 1, 0), ("verification", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["product_deliverables"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("product_id", "TEXT", 1, 0), ("file_name", "TEXT", 1, 0), ("file_hash", "BLOB", 0, 0), ("file_size", "INTEGER", 1, 0), ("mime_type", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["product_documentation"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("product_id", "TEXT", 1, 0), ("title", "TEXT", 1, 0), ("content", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+        ]
     if version >= 20:
         expected_columns["invoices"] = [
             ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("order_id", "TEXT", 1, 0),
@@ -885,6 +1022,16 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         expected_objects.append(("index", "service_attachments_service_idx"))
         expected_objects.append(("index", "proposals_id_owner_idx"))
         expected_objects.append(("index", "customer_requests_id_owner_idx"))
+    if version >= 26:
+        expected_objects.append(("index", "product_ideas_id_owner_idx"))
+        expected_objects.append(("index", "product_validations_product_idx"))
+        expected_objects.append(("index", "market_research_product_idx"))
+        expected_objects.append(("index", "pricing_suggestions_product_idx"))
+        expected_objects.append(("index", "product_versions_product_idx"))
+        expected_objects.append(("index", "product_files_product_idx"))
+        expected_objects.append(("index", "product_sales_product_idx"))
+        expected_objects.append(("index", "product_deliverables_product_idx"))
+        expected_objects.append(("index", "product_documentation_product_idx"))
     if version >= 20:
         expected_objects.append(("index", "invoices_id_owner_idx"))
         expected_objects.append(("index", "invoices_number_owner_idx"))
@@ -968,6 +1115,34 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='customer_requests_id_owner_idx'").fetchone()
         if row is None or row[0] != _V25_REQUEST_INDEX:
             raise StateStorageError("State database schema constraints are incompatible.")
+    if version >= 26:
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='product_ideas_id_owner_idx'").fetchone()
+        if row is None or row[0] != _V26_IDEA_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='product_validations_product_idx'").fetchone()
+        if row is None or row[0] != _V26_VALIDATION_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='market_research_product_idx'").fetchone()
+        if row is None or row[0] != _V26_RESEARCH_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='pricing_suggestions_product_idx'").fetchone()
+        if row is None or row[0] != _V26_PRICING_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='product_versions_product_idx'").fetchone()
+        if row is None or row[0] != _V26_VERSION_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='product_files_product_idx'").fetchone()
+        if row is None or row[0] != _V26_FILE_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='product_sales_product_idx'").fetchone()
+        if row is None or row[0] != _V26_SALES_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='product_deliverables_product_idx'").fetchone()
+        if row is None or row[0] != _V26_DELIVERABLE_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='product_documentation_product_idx'").fetchone()
+        if row is None or row[0] != _V26_DOCS_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
     if version >= 20:
         row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='invoices_id_owner_idx'").fetchone()
         if row is None or row[0] != _V20_INVOICE_INDEX:
@@ -1028,6 +1203,8 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         schemas.append(_V24_SCHEMA)
     if version >= 25:
         schemas.append(_V25_SCHEMA)
+    if version >= 26:
+        schemas.append(_V26_SCHEMA)
     for schema in schemas:
         for name, statement in schema.items():
             # v24 alters project_tasks via ALTER TABLE; sql formatting differs from CREATE literal, so rely on PRAGMA table_info instead
@@ -1240,6 +1417,22 @@ def _apply_v25(conn: sqlite3.Connection) -> None:
     conn.execute(_V25_REQUEST_INDEX)
     conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (25, int(time.time())))
     conn.execute("PRAGMA user_version = 25")
+
+
+def _apply_v26(conn: sqlite3.Connection) -> None:
+    for statement in _V26_SCHEMA.values():
+        conn.execute(statement)
+    conn.execute(_V26_IDEA_INDEX)
+    conn.execute(_V26_VALIDATION_INDEX)
+    conn.execute(_V26_RESEARCH_INDEX)
+    conn.execute(_V26_PRICING_INDEX)
+    conn.execute(_V26_VERSION_INDEX)
+    conn.execute(_V26_FILE_INDEX)
+    conn.execute(_V26_SALES_INDEX)
+    conn.execute(_V26_DELIVERABLE_INDEX)
+    conn.execute(_V26_DOCS_INDEX)
+    conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (26, int(time.time())))
+    conn.execute("PRAGMA user_version = 26")
 
 
 def _check_managed_pairs(conn: sqlite3.Connection, owner=None, queue_id=None, workflow_id=None, association_id=None) -> None:
@@ -2165,6 +2358,19 @@ class StateStorage:
             self.backup_to(backup, confirmed=True)
             _apply_v25(conn)
             if _validate_schema(conn) != 25:
+                raise StateStorageError("Migration produced an incompatible schema.")
+            _check_integrity(conn)
+
+    def migrate_to_v26(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 25 only after a checked non-overwriting backup."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 25:
+                raise StateStorageError("Only version 25 can be upgraded to version 26.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v26(conn)
+            if _validate_schema(conn) != 26:
                 raise StateStorageError("Migration produced an incompatible schema.")
             _check_integrity(conn)
 

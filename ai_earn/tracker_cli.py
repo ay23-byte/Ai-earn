@@ -2,10 +2,11 @@
 
 No payment is verified, received or processed. Use only disposable data.
 Now includes v15 opportunity discovery, v16 service catalog/portfolio,
-v17 product workspace & customers, v18 communications & ledger, v19 followups & CSV, v20 invoices & 11-concept hardening, and v22 AI assistant (ToolRegistry/ApprovalQueue) and v22 analytics (funnel/MRR/conversion/workload) and connectors (Gmail/Drive/GitHub stubs) and v25 service workspace (packages/requirements/attachments/proposals/AI drafts/requests/templates/portfolio presentation).
+v17 product workspace & customers, v18 communications & ledger, v19 followups & CSV, v20 invoices & 11-concept hardening, and v22 AI assistant (ToolRegistry/ApprovalQueue) and v22 analytics (funnel/MRR/conversion/workload) and connectors (Gmail/Drive/GitHub stubs) and v25 service workspace (packages/requirements/attachments/proposals/AI drafts/requests/templates/portfolio presentation) and v26 product workspace (ideas/validations/research/pricing/versions/files/sales/deliverables/docs).
 """
 
 import getpass
+import os
 import re
 import secrets
 import sqlite3
@@ -29,6 +30,7 @@ from ai_earn.connectors.gmail import GmailConnector
 from ai_earn.connectors.drive import DriveConnector
 from ai_earn.connectors.github import GitHubConnector
 from ai_earn.connectors.throttle import Throttle
+from .product_workspace import ProductIdeas, ProductValidations, MarketResearch, PricingSuggestions, ProductVersions, ProductFiles, ProductDeliverables, ProductSales, ProductDocumentation, ProductEditor, ProductWorkspaceError
 from .opportunities import Opportunities, OpportunityError
 from .ledger import Ledger, LedgerError
 from .products import Products, ProductError
@@ -131,11 +133,11 @@ def _key():
 
 def _initialize_state(path):
     # Only initialize a new file; never silently upgrade an existing database.
-    backups = [path.with_name(path.name + f".before-v{version}.sqlite3") for version in range(2, 26)]
+    backups = [path.with_name(path.name + f".before-v{version}.sqlite3") for version in range(2, 27)]
     if path.exists() or path.is_symlink() or any(p.exists() or p.is_symlink() for p in backups):
         raise StateStorageError("State or migration backup already exists; no initialization was attempted.")
     state = StateStorage(path, create=True, confirmed=True)
-    for version, backup in zip(range(2, 26), backups):
+    for version, backup in zip(range(2, 27), backups):
         getattr(state, f"migrate_to_v{version}")(backup, confirmed=True)
     return state
 
@@ -145,7 +147,7 @@ def _csv_preview(text: str, limit: int = 500) -> str:
     return sample + ("..." if len(text) > limit else "")
 
 
-def _menu(service, token, stdin, out, opportunities=None, services=None, portfolio=None, products=None, customers=None, communications=None, ledger=None, followups=None, invoices=None, provider_orders=None, ai_assistant=None, analytics=None, workspace_pkgs=None, workspace_reqs=None, workspace_atts=None, proposals=None, customer_requests=None, service_editor=None, service_templates=None, portfolio_pres=None):
+def _menu(service, token, stdin, out, opportunities=None, services=None, portfolio=None, products=None, customers=None, communications=None, ledger=None, followups=None, invoices=None, provider_orders=None, ai_assistant=None, analytics=None, workspace_pkgs=None, workspace_reqs=None, workspace_atts=None, proposals=None, customer_requests=None, service_editor=None, service_templates=None, portfolio_pres=None, product_ideas=None, product_validations=None, market_research=None, pricing_suggestions=None, product_versions=None, product_files=None, product_deliverables=None, product_sales=None, product_docs=None, product_editor=None):
     # service = FinancialAssertions, opportunities = Opportunities, services/portfolio = v16, products/customers = v17, comm/ledger = v18, followups = v19, invoices = v20, provider_orders = v21, ai=v22, analytics=v22 (no schema)
     out.write("Local tracker: all entries are UNVERIFIED. No payment processing or settlement.\n")
     has_opp = opportunities is not None
@@ -193,6 +195,9 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
     has_workspace = workspace_pkgs is not None
     if has_workspace:
         extras.append("Service Workspace v25 (49-61)")
+    has_prod_ws = product_ideas is not None
+    if has_prod_ws:
+        extras.append("Product Workspace v26 (62-75)")
     if extras:
         out.write("Financial (1-4), " + ", ".join(extras) + " available.\n")
     segments = ["1 Add financial  2 List financial  3 Advance financial  4 Withdraw financial"]
@@ -227,6 +232,11 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
         segments.append("49 Edit service  50 Packages  51 Requirements  52 Attachments")
         segments.append("53 Create proposal  54 AI draft proposal  55 List/Manage proposals")
         segments.append("56 Customer requests  57 Templates  58 Portfolio presentation")
+    if has_prod_ws:
+        segments.append("62 Ideas  63 Validations  64 Market research (AI)  65 Pricing (AI)")
+        segments.append("66 Versions  67 Files  68 Sales (verified)  69 Deliverables")
+        segments.append("70 Documentation (AI)  71 Edit product  72 Product status")
+
     prompt = "\n" + " | ".join(segments) + "  0 Sign out\nChoice: "
     # legacy no-opp/no-svc prompt (financial pipeline wording remains for v13-like fallback)
     legacy_prompt = "\n1 Add opportunity  2 List entries  3 Advance stage  4 Withdraw  0 Sign out\nChoice: "
@@ -1271,7 +1281,7 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                     elif sub=="3":
                         tid=_read(stdin, out, "Template ID: ").strip()
                         title=_read(stdin, out, "Custom title (empty to keep template title): ").strip() or None
-                        sid=service_templates.create_service_from_template(AuthService(AuthStorage(Path(environ.get('AI_EARN_AUTH_DB'))), create=False), StateStorage(Path(environ.get('AI_EARN_STATE_DB'))), token, tid, operation_key=_key(), title=title)
+                        sid=service_templates.create_service_from_template(AuthService(AuthStorage(Path(os.environ.get('AI_EARN_AUTH_DB'))), create=False), StateStorage(Path(os.environ.get('AI_EARN_STATE_DB'))), token, tid, operation_key=_key(), title=title)
                         out.write(f"Created service {sid} from template {tid} (editable)\n")
                 except Exception as e:
                     out.write(str(e) + "\n")
@@ -1290,6 +1300,274 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                 except Exception as e:
                     out.write(str(e) + "\n")
 
+            elif has_prod_ws and choice == "62":
+                out.write("Ideas: 1 Create  2 List  3 Validate/Reject/Archive\n")
+                sub=_read(stdin, out, "Choice (1-3): ").strip()
+                try:
+                    if sub=="1":
+                        title=_read(stdin, out, "Idea title (1..200): ")
+                        desc=_read(stdin, out, "Description (0..2000, empty for none): ")
+                        iid=product_ideas.create(token, title, desc, operation_key=_key())
+                        out.write(f"Created idea {iid} (idea)\n")
+                    elif sub=="2":
+                        status=_read(stdin, out, "Filter status [idea/validated/rejected/archived or empty]: ").strip() or None
+                        lst=product_ideas.list(token, status=status)
+                        for it in lst:
+                            out.write(f"{it['id']} | {it['title'][:40]} | {it['status']} | {it['description'][:40]}\n")
+                        if not lst:
+                            out.write("No ideas.\n")
+                    elif sub=="3":
+                        iid=_read(stdin, out, "Idea ID: ").strip()
+                        cur=product_ideas.get(token, iid)
+                        out.write(f"Current: {cur['title']} | {cur['status']}\nTransitions: 1 validated 2 rejected 3 archived\n")
+                        tc=_read(stdin, out, "Choice (1-3): ").strip()
+                        if tc=="1":
+                            product_ideas.validate(token, iid, operation_key=_key())
+                            out.write("Validated.\n")
+                        elif tc=="2":
+                            product_ideas.reject(token, iid, operation_key=_key())
+                            out.write("Rejected.\n")
+                        elif tc=="3":
+                            product_ideas.archive(token, iid, operation_key=_key())
+                            out.write("Archived.\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
+            elif has_prod_ws and choice == "63":
+                prod_id=_read(stdin, out, "Product ID: ").strip()
+                out.write("Validations: 1 Add  2 List\n")
+                sub=_read(stdin, out, "Choice (1-2): ").strip()
+                try:
+                    if sub=="1":
+                        crit=_read(stdin, out, "Criteria (1..500): ")
+                        res=_read(stdin, out, "Result [pass/fail/pending]: ").strip() or "pending"
+                        ev=_read(stdin, out, "Evidence (0..1000, empty for none): ")
+                        vid=product_validations.add(token, prod_id, crit, res, operation_key=_key(), evidence=ev)
+                        out.write(f"Added validation {vid} ({res})\n")
+                    elif sub=="2":
+                        lst=product_validations.list(token, prod_id)
+                        for r in lst:
+                            out.write(f"{r['id']} | {r['criteria'][:40]} | {r['result']} | {r['evidence'][:30]}\n")
+                        if not lst:
+                            out.write("No validations.\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
+            elif has_prod_ws and choice == "64":
+                prod_id=_read(stdin, out, "Product ID: ").strip()
+                out.write("Market research: 1 Add  2 AI draft  3 List\n")
+                sub=_read(stdin, out, "Choice (1-3): ").strip()
+                try:
+                    if sub=="1":
+                        q=_read(stdin, out, "Query (1..500): ")
+                        f=_read(stdin, out, "Findings (1..5000): ")
+                        ev=_read(stdin, out, "Evidence URL (https://, empty for none): ").strip()
+                        ver=_read(stdin, out, "Verification [unverified/verified, default unverified]: ").strip() or "unverified"
+                        rid=market_research.add(token, prod_id, q, f, operation_key=_key(), evidence_url=ev, verification=ver)
+                        out.write(f"Added research {rid} ({ver})\n")
+                        if ver=="unverified":
+                            out.write("Note: unverified drafts must not be presented as fact.\n")
+                    elif sub=="2":
+                        q=_read(stdin, out, "AI query (1..500): ")
+                        ev=_read(stdin, out, "Evidence URL (empty for none): ").strip()
+                        rid=market_research.generate_ai_draft(token, prod_id, q, operation_key=_key(), evidence_url=ev)
+                        out.write(f"AI draft research {rid} (ai_generated=1, unverified)\n")
+                    elif sub=="3":
+                        lst=market_research.list(token, prod_id)
+                        for r in lst:
+                            out.write(f"{r['id']} | q:{r['query'][:30]} | ai:{r['ai_generated']} {r['verification']} | {r['findings'][:60]}\n")
+                        if not lst:
+                            out.write("No research.\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
+            elif has_prod_ws and choice == "65":
+                prod_id=_read(stdin, out, "Product ID: ").strip()
+                out.write("Pricing: 1 Add  2 AI suggestion  3 List\n")
+                sub=_read(stdin, out, "Choice (1-3): ").strip()
+                try:
+                    if sub=="1":
+                        price=_paise(_read(stdin, out, "Price INR: ").strip())
+                        rat=_read(stdin, out, "Rationale (1..2000): ")
+                        ev=_read(stdin, out, "Evidence (0..1000, empty for none): ")
+                        pid=pricing_suggestions.add(token, prod_id, price, rat, operation_key=_key(), evidence=ev, ai_generated=False)
+                        out.write(f"Added pricing {pid}\n")
+                    elif sub=="2":
+                        pid=pricing_suggestions.generate_ai_suggestion(token, prod_id, operation_key=_key())
+                        out.write(f"AI pricing suggestion {pid} (unverified draft)\n")
+                    elif sub=="3":
+                        lst=pricing_suggestions.list(token, prod_id)
+                        for r in lst:
+                            out.write(f"{r['id']} | INR {r['price_paise']//100}.{r['price_paise']%100:02d} | ai:{r['ai_generated']} | {r['rationale'][:40]}\n")
+                        if not lst:
+                            out.write("No pricing.\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
+            elif has_prod_ws and choice == "66":
+                prod_id=_read(stdin, out, "Product ID: ").strip()
+                out.write("Versions: 1 Add  2 List\n")
+                sub=_read(stdin, out, "Choice (1-2): ").strip()
+                try:
+                    if sub=="1":
+                        ver=_read(stdin, out, "Version [A-Za-z0-9._- 1..20]: ").strip()
+                        notes=_read(stdin, out, "Notes (0..2000): ")
+                        vid=product_versions.add(token, prod_id, ver, notes, operation_key=_key())
+                        out.write(f"Added version {vid} -> product now v{ver}\n")
+                    elif sub=="2":
+                        lst=product_versions.list(token, prod_id)
+                        for r in lst:
+                            out.write(f"{r['id']} | v{r['version']} | {r['notes'][:40]}\n")
+                        if not lst:
+                            out.write("No versions.\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
+            elif has_prod_ws and choice == "67":
+                out.write("Files: 1 Add  2 List  3 Remove\n")
+                sub=_read(stdin, out, "Choice (1-3): ").strip()
+                try:
+                    if sub=="1":
+                        pid=_read(stdin, out, "Product ID: ").strip()
+                        fname=_read(stdin, out, "File name (1..200): ")
+                        fsize=int(_read(stdin, out, "File size 0..104857600: ").strip() or "0")
+                        mime=_read(stdin, out, "MIME (e.g. application/pdf): ").strip() or "application/octet-stream"
+                        fid=product_files.add(token, pid, fname, fsize, mime, operation_key=_key())
+                        out.write(f"Added file {fid}\n")
+                    elif sub=="2":
+                        pid=_read(stdin, out, "Product ID: ").strip()
+                        lst=product_files.list(token, pid)
+                        for r in lst:
+                            out.write(f"{r['id']} | {r['file_name']} | {r['file_size']}b | {r['mime_type']}\n")
+                        if not lst:
+                            out.write("No files.\n")
+                    elif sub=="3":
+                        fid=_read(stdin, out, "File ID: ").strip()
+                        product_files.remove(token, fid, operation_key=_key())
+                        out.write("File removed.\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
+            elif has_prod_ws and choice == "68":
+                prod_id=_read(stdin, out, "Product ID: ").strip()
+                out.write("Sales: 1 Record  2 List  3 Summary\n")
+                sub=_read(stdin, out, "Choice (1-3): ").strip()
+                try:
+                    if sub=="1":
+                        qty=int(_read(stdin, out, "Quantity 1..1000000: ").strip())
+                        amt=_paise(_read(stdin, out, "Amount INR total: ").strip())
+                        sale_at=int(_read(stdin, out, "Sale unix ts: ").strip())
+                        ev=_read(stdin, out, "Evidence URL (https://, required if verified): ").strip()
+                        ver=_read(stdin, out, "Verification [unverified/verified]: ").strip() or "unverified"
+                        sid=product_sales.record(token, prod_id, qty, amt, sale_at, operation_key=_key(), evidence_url=ev, verification=ver)
+                        out.write(f"Recorded sale {sid} ({ver}) qty {qty}\n")
+                        if ver=="unverified":
+                            out.write("Note: unverified, not claimed as received.\n")
+                    elif sub=="2":
+                        lst=product_sales.list(token, prod_id)
+                        for r in lst:
+                            out.write(f"{r['id']} | qty:{r['quantity']} INR {r['amount_paise']//100}.{r['amount_paise']%100:02d} | {r['verification']} | {r['sale_at']}\n")
+                        if not lst:
+                            out.write("No sales.\n")
+                    elif sub=="3":
+                        summ=product_sales.summary(token, prod_id)
+                        out.write(f"Sales summary: total qty {summ['total_quantity']} verified {summ['verified_quantity']} sales {summ['total_sales']} verified {summ['verified_sales']} verification:{summ['verification']}\n")
+                        out.write("Policy: verified requires evidence_url; unverified not claimed as received.\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
+            elif has_prod_ws and choice == "69":
+                out.write("Deliverables: 1 Add  2 List  3 Remove\n")
+                sub=_read(stdin, out, "Choice (1-3): ").strip()
+                try:
+                    if sub=="1":
+                        pid=_read(stdin, out, "Product ID: ").strip()
+                        fname=_read(stdin, out, "File name (1..200): ")
+                        fsize=int(_read(stdin, out, "File size: ").strip() or "0")
+                        mime=_read(stdin, out, "MIME: ").strip() or "application/octet-stream"
+                        did=product_deliverables.add(token, pid, fname, fsize, mime, operation_key=_key())
+                        out.write(f"Added deliverable {did}\n")
+                    elif sub=="2":
+                        pid=_read(stdin, out, "Product ID: ").strip()
+                        lst=product_deliverables.list(token, pid)
+                        for r in lst:
+                            out.write(f"{r['id']} | {r['file_name']} | {r['file_size']}b | {r['mime_type']}\n")
+                        if not lst:
+                            out.write("No deliverables.\n")
+                    elif sub=="3":
+                        did=_read(stdin, out, "Deliverable ID: ").strip()
+                        product_deliverables.remove(token, did, operation_key=_key())
+                        out.write("Deliverable removed.\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
+            elif has_prod_ws and choice == "70":
+                out.write("Documentation: 1 Create  2 AI draft  3 List  4 Update  5 Get\n")
+                sub=_read(stdin, out, "Choice (1-5): ").strip()
+                try:
+                    if sub=="1":
+                        pid=_read(stdin, out, "Product ID: ").strip()
+                        title=_read(stdin, out, "Title (1..200): ")
+                        content=_read(stdin, out, "Content (1..10000): ")
+                        did=product_docs.create(token, pid, title, content, operation_key=_key())
+                        out.write(f"Created doc {did}\n")
+                    elif sub=="2":
+                        pid=_read(stdin, out, "Product ID: ").strip()
+                        did=product_docs.generate_ai_draft(token, pid, operation_key=_key())
+                        out.write(f"AI draft doc {did} (ai_generated=1, unverified)\n")
+                    elif sub=="3":
+                        pid=_read(stdin, out, "Product ID: ").strip()
+                        lst=product_docs.list(token, pid)
+                        for r in lst:
+                            out.write(f"{r['id']} | {r['title'][:40]} | ai:{r['ai_generated']} {r['verification']}\n")
+                        if not lst:
+                            out.write("No docs.\n")
+                    elif sub=="4":
+                        did=_read(stdin, out, "Doc ID: ").strip()
+                        title=_read(stdin, out, "New title (empty keep): ").strip() or None
+                        content=_read(stdin, out, "New content (empty keep): ").strip() or None
+                        kwargs={}
+                        if title: kwargs["title"]=title
+                        if content: kwargs["content"]=content
+                        if kwargs:
+                            product_docs.update(token, did, operation_key=_key(), **kwargs)
+                            out.write("Doc updated.\n")
+                        else:
+                            out.write("No fields.\n")
+                    elif sub=="5":
+                        did=_read(stdin, out, "Doc ID: ").strip()
+                        doc=product_docs.get(token, did)
+                        out.write(f"{doc['title']}: {doc['content'][:200]} verification:{doc['verification']}\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
+            elif has_prod_ws and choice == "71":
+                pid=_read(stdin, out, "Product ID: ").strip()
+                try:
+                    cur=products.get(token, pid)
+                    out.write(f"Current: {cur['title']} | {cur['description'][:40]} | INR {cur['price_paise']//100}.{cur['price_paise']%100:02d} | v{cur['version']}\n")
+                    title=_read(stdin, out, "New title (empty keep): ").strip() or None
+                    desc=_read(stdin, out, "New description (empty keep): ").strip() or None
+                    price_raw=_read(stdin, out, "New price INR (empty keep): ").strip()
+                    price=_paise(price_raw) if price_raw else None
+                    ver=_read(stdin, out, "New version (empty keep): ").strip() or None
+                    kwargs={}
+                    if title: kwargs["title"]=title
+                    if desc: kwargs["description"]=desc
+                    if price is not None: kwargs["price_paise"]=price
+                    if ver: kwargs["version"]=ver
+                    if kwargs:
+                        product_editor.update(token, pid, operation_key=_key(), **kwargs)
+                        out.write("Product updated.\n")
+                    else:
+                        out.write("No fields.\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
+            elif has_prod_ws and choice == "72":
+                pid=_read(stdin, out, "Product ID: ").strip()
+                try:
+                    cur=products.get(token, pid)
+                    out.write(f"Current: {cur['status']} | {cur['title']}\nTransitions: 1 publish 2 archive\n")
+                    tc=_read(stdin, out, "Choice (1-2): ").strip()
+                    if tc=="1":
+                        products.publish(token, pid, operation_key=_key())
+                        out.write("Published.\n")
+                    elif tc=="2":
+                        products.archive(token, pid, operation_key=_key())
+                        out.write("Archived.\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
             else:
                 parts = ["0 Sign out", "1-4 financial"]
                 if has_opp:
@@ -1318,8 +1596,12 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                     parts.append("42-45 Analytics")
                 if has_conn:
                     parts.append("46-48 Connectors (stub)")
+                if has_workspace:
+                    parts.append("49-61 Service Workspace")
+                if has_prod_ws:
+                    parts.append("62-72 Product Workspace (v26)")
                 out.write("Choose " + ", ".join(parts) + ".\n")
-        except (FinancialAssertionError, OpportunityError, ServiceError, ProductError, CustomerError, CommunicationError, LedgerError, FollowupError, InvoiceError, ProviderError, ApprovalError, AssistantError, ToolError, AnalyticsError, ConnError, ValueError, StateStorageError, ServiceWorkspaceError) as exc:
+        except (FinancialAssertionError, OpportunityError, ServiceError, ProductError, CustomerError, CommunicationError, LedgerError, FollowupError, InvoiceError, ProviderError, ApprovalError, AssistantError, ToolError, AnalyticsError, ConnError, ValueError, StateStorageError, ServiceWorkspaceError, ProductWorkspaceError) as exc:
             out.write(str(exc) + "\n")
         except AccessDenied as exc:
             out.write(str(exc) + "\n")
@@ -1345,13 +1627,13 @@ def run(action, environ, stdin, out, err):
                 out.write("No files created.\n")
                 return 0
             _initialize_state(path)
-            out.write("New tracker state initialized (v25, 24 backups). Register an account with the auth command if needed.\n")
+            out.write("New tracker state initialized (v26, 25 backups). Register an account with the auth command if needed.\n")
             return 0
         # Open only; missing files are never created during login.
         state = StateStorage(path)
         with state.transaction() as conn:
             version = conn.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25):
+            if version not in (13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26):
                 raise StateStorageError("Tracker requires an existing version 13, 14, 15, 16, 17, 18, 19, 20, 21 or 22 state file; no upgrade was performed.")
         auth = AuthService(AuthStorage(Path(auth_path), create=False))
         username = _read(stdin, out, "Username: ")
@@ -1404,7 +1686,23 @@ def run(action, environ, stdin, out, err):
                 portfolio_pres = PortfolioPresentation(auth, state)
             except Exception:
                 workspace_pkgs = None
-        _menu(FinancialAssertions(auth, state), token, stdin, out, opp, svc, port, prod, cust, comm, ledg, foll, inv, prov, ai, an, workspace_pkgs, workspace_reqs, workspace_atts, proposals, customer_requests, service_editor, service_templates, portfolio_pres)
+        # Product workspace v26
+        product_ideas = product_validations = market_research = pricing_suggestions = product_versions = product_files = product_deliverables = product_sales = product_docs = product_editor = None
+        if version >= 26:
+            try:
+                product_ideas = ProductIdeas(auth, state)
+                product_validations = ProductValidations(auth, state)
+                market_research = MarketResearch(auth, state)
+                pricing_suggestions = PricingSuggestions(auth, state)
+                product_versions = ProductVersions(auth, state)
+                product_files = ProductFiles(auth, state)
+                product_deliverables = ProductDeliverables(auth, state)
+                product_sales = ProductSales(auth, state)
+                product_docs = ProductDocumentation(auth, state)
+                product_editor = ProductEditor(auth, state)
+            except Exception:
+                product_ideas = None
+        _menu(FinancialAssertions(auth, state), token, stdin, out, opp, svc, port, prod, cust, comm, ledg, foll, inv, prov, ai, an, workspace_pkgs, workspace_reqs, workspace_atts, proposals, customer_requests, service_editor, service_templates, portfolio_pres, product_ideas, product_validations, market_research, pricing_suggestions, product_versions, product_files, product_deliverables, product_sales, product_docs, product_editor)
         return 0
     except (AuthError, StorageError, StateStorageError, ConfigurationError):
         err.write("Tracker could not open or complete the operation. Check your account, private paths and state version; no automatic replacement is performed.\n")
