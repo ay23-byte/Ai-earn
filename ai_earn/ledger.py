@@ -1,4 +1,4 @@
-"""Experimental ledger (v18) — owner-scoped, session-authorized, net calculation."""
+"""Experimental ledger (v18) + 11-concept hardening (v20) — owner-scoped, session-authorized, net calculation separated from verified income."""
 
 from __future__ import annotations
 
@@ -165,7 +165,7 @@ class Ledger:
             return [dict(_owned(conn, owner, r["id"])) for r in rows]
 
     def net(self, token: str) -> dict:
-        """Return net = income - expense - refund - fee, all owner-scoped."""
+        """Return net = income - expense - refund - fee, all owner-scoped, unverified."""
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, _now):
             _version_check(conn)
             rows = conn.execute(
@@ -177,4 +177,78 @@ class Ledger:
                 totals[kind] = total
             net_paise = totals["income"] - totals["expense"] - totals["refund"] - totals["fee"]
             count = conn.execute("SELECT COUNT(*) FROM ledger_entries WHERE owner_id=?", (owner,)).fetchone()[0]
-            return {"totals": totals, "net_paise": net_paise, "count": count, "currency": "INR"}
+            return {"totals": totals, "net_paise": net_paise, "count": count, "currency": "INR", "verification": "unverified", "note": "Local ledger net, not verified settlement."}
+
+    def eleven_concepts(self, token: str) -> dict:
+        """Return 11-concept breakdown, clearly separating unverified vs not-implemented verified income.
+
+        Concepts (per PAYMENTS.md):
+        1 proposed (order_drafts draft)
+        2 quoted (financial_assertions quote_asserted)
+        3 contracted (contract_asserted)
+        4 invoiced (invoice_drafts + invoices draft/issued)
+        5 payment_initiated (initiated_asserted)
+        6 payment_received_verified (NOT_IMPLEMENTED → 0)
+        7 payment_settled (sandbox_payments settled – synthetic, not verified)
+        8 refunds (ledger refund)
+        9 expenses (ledger expense)
+        10 fees (ledger fee)
+        11 net_realized = settled - refunds - fees - expenses (here 0 or synthetic, not bank-verified)
+        All amounts are owner-scoped, unverified unless noted.
+        """
+        with _authorized_transaction(self._auth, self._state, token) as (conn, owner, _now):
+            _version_check(conn)
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+            # Helper to sum amount
+            def _sum(table, amount_col, where=""):
+                q = f"SELECT COUNT(*), COALESCE(SUM({amount_col}),0) FROM {table} WHERE owner_id=? {where}"
+                row = conn.execute(q, (owner,)).fetchone()
+                return {"count": row[0], "amount_paise": row[1]}
+            def _sum_stage(table, stage, amount_col="amount_paise"):
+                row = conn.execute(f"SELECT COUNT(*), COALESCE(SUM({amount_col}),0) FROM {table} WHERE owner_id=? AND stage=?", (owner, stage)).fetchone()
+                return {"count": row[0], "amount_paise": row[1]}
+            # 1 proposed: order_drafts draft
+            proposed = conn.execute("SELECT COUNT(*), COALESCE(SUM(proposed_amount_paise),0) FROM order_drafts WHERE owner_id=? AND status='draft'", (owner,)).fetchone()
+            # 2-5 financial_assertions
+            quoted = _sum_stage("financial_assertions", "quote_asserted")
+            contracted = _sum_stage("financial_assertions", "contract_asserted")
+            invoiced_asserted = _sum_stage("financial_assertions", "invoice_asserted")
+            initiated = _sum_stage("financial_assertions", "initiated_asserted")
+            # 4 also invoiced real: invoice_drafts + invoices issued
+            inv_drafts = conn.execute("SELECT COUNT(*), COALESCE(SUM(proposed_amount_paise),0) FROM invoice_drafts WHERE owner_id=? AND status='draft'", (owner,)).fetchone()
+            invoices_issued = {"count": 0, "amount_paise": 0}
+            if version >= 20:
+                row = conn.execute("SELECT COUNT(*), COALESCE(SUM(amount_paise),0) FROM invoices WHERE owner_id=? AND status IN ('issued','paid','overdue')", (owner,)).fetchone()
+                invoices_issued = {"count": row[0], "amount_paise": row[1]}
+            # 7 settled synthetic
+            settled = {"count": 0, "amount_paise": 0}
+            if version >= 14:
+                row = conn.execute("SELECT COUNT(*), COALESCE(SUM(amount_paise),0) FROM sandbox_payments WHERE owner_id=? AND stage='sandbox_settled'", (owner,)).fetchone()
+                settled = {"count": row[0], "amount_paise": row[1]}
+            # 8,9,10 ledger
+            ledger_rows = conn.execute("SELECT kind, COALESCE(SUM(amount_paise),0), COUNT(*) FROM ledger_entries WHERE owner_id=? GROUP BY kind", (owner,)).fetchall()
+            ledger_map = {k: {"amount_paise": 0, "count": 0} for k in _KINDS}
+            for kind, amt, cnt in ledger_rows:
+                ledger_map[kind] = {"amount_paise": amt, "count": cnt}
+            refunds = ledger_map["refund"]
+            expenses = ledger_map["expense"]
+            fees = ledger_map["fee"]
+            # 11 net_realized = settled synthetic - refunds - fees - expenses (but marked synthetic, not bank-verified)
+            net_realized_paise = settled["amount_paise"] - refunds["amount_paise"] - fees["amount_paise"] - expenses["amount_paise"]
+            ledger_net = conn.execute("SELECT COALESCE(SUM(CASE WHEN kind='income' THEN amount_paise WHEN kind IN ('expense','refund','fee') THEN -amount_paise ELSE 0 END),0) FROM ledger_entries WHERE owner_id=?", (owner,)).fetchone()[0]
+            return {
+                "proposed": {"count": proposed[0], "amount_paise": proposed[1], "verification": "unverified", "source": "order_drafts draft"},
+                "quoted": {**quoted, "verification": "unverified", "source": "financial_assertions quote_asserted"},
+                "contracted": {**contracted, "verification": "unverified", "source": "financial_assertions contract_asserted"},
+                "invoiced_asserted": {**invoiced_asserted, "verification": "unverified", "source": "financial_assertions invoice_asserted"},
+                "invoiced_drafts": {"count": inv_drafts[0], "amount_paise": inv_drafts[1], "verification": "unverified", "source": "invoice_drafts draft"},
+                "invoices_issued": {**invoices_issued, "verification": "unverified", "note": "PDF stub, not issued demand"},
+                "payment_initiated": {**initiated, "verification": "unverified", "source": "financial_assertions initiated_asserted"},
+                "payment_received_verified": {"count": 0, "amount_paise": 0, "verification": "not_implemented", "note": "No provider verification"},
+                "payment_settled": {**settled, "verification": "synthetic", "source": "sandbox_payments settled"},
+                "refunds": {**refunds, "verification": "unverified", "source": "ledger refund"},
+                "expenses": {**expenses, "verification": "unverified", "source": "ledger expense"},
+                "fees": {**fees, "verification": "unverified", "source": "ledger fee"},
+                "ledger_net_unverified": {"amount_paise": ledger_net, "verification": "unverified", "note": "income - expense - refund - fee"},
+                "net_realized_synthetic": {"amount_paise": net_realized_paise, "verification": "synthetic", "note": "settled(synthetic) - refunds - fees - expenses, not bank-verified"},
+            }

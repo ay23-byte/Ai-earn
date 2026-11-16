@@ -2,7 +2,7 @@
 
 No payment is verified, received or processed. Use only disposable data.
 Now includes v15 opportunity discovery, v16 service catalog/portfolio,
-v17 product workspace & customers, v18 communications & ledger, and v19 followups & CSV.
+v17 product workspace & customers, v18 communications & ledger, v19 followups & CSV, and v20 invoices & 11-concept hardening.
 """
 
 import getpass
@@ -19,6 +19,7 @@ from .communications import Communications, CommunicationError
 from .customers import Customers, CustomerError
 from .financial_assertions import FinancialAssertions, FinancialAssertionError
 from .followups import Followups, FollowupError
+from .invoices import Invoices, InvoiceError
 from .opportunities import Opportunities, OpportunityError
 from .ledger import Ledger, LedgerError
 from .products import Products, ProductError
@@ -72,6 +73,13 @@ _FOLLOWUP_STATUS_LABELS = {
     "completed": "completed",
     "cancelled": "cancelled",
 }
+_INVOICE_STATUS_LABELS = {
+    "draft": "draft (unverified)",
+    "issued": "issued (PDF stub)",
+    "paid": "paid (unverified)",
+    "overdue": "overdue (unverified)",
+    "void": "void",
+}
 
 
 def _read(stdin, out, prompt):
@@ -99,11 +107,11 @@ def _key():
 
 def _initialize_state(path):
     # Only initialize a new file; never silently upgrade an existing database.
-    backups = [path.with_name(path.name + f".before-v{version}.sqlite3") for version in range(2, 20)]
+    backups = [path.with_name(path.name + f".before-v{version}.sqlite3") for version in range(2, 21)]
     if path.exists() or path.is_symlink() or any(p.exists() or p.is_symlink() for p in backups):
         raise StateStorageError("State or migration backup already exists; no initialization was attempted.")
     state = StateStorage(path, create=True, confirmed=True)
-    for version, backup in zip(range(2, 20), backups):
+    for version, backup in zip(range(2, 21), backups):
         getattr(state, f"migrate_to_v{version}")(backup, confirmed=True)
     return state
 
@@ -113,8 +121,8 @@ def _csv_preview(text: str, limit: int = 500) -> str:
     return sample + ("..." if len(text) > limit else "")
 
 
-def _menu(service, token, stdin, out, opportunities=None, services=None, portfolio=None, products=None, customers=None, communications=None, ledger=None, followups=None):
-    # service = FinancialAssertions, opportunities = Opportunities, services/portfolio = v16, products/customers = v17, comm/ledger = v18, followups = v19
+def _menu(service, token, stdin, out, opportunities=None, services=None, portfolio=None, products=None, customers=None, communications=None, ledger=None, followups=None, invoices=None):
+    # service = FinancialAssertions, opportunities = Opportunities, services/portfolio = v16, products/customers = v17, comm/ledger = v18, followups = v19, invoices = v20
     out.write("Local tracker: all entries are UNVERIFIED. No payment processing or settlement.\n")
     has_opp = opportunities is not None
     has_svc = services is not None and portfolio is not None
@@ -123,6 +131,7 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
     has_comm = communications is not None
     has_ledger = ledger is not None
     has_follow = followups is not None
+    has_inv = invoices is not None
     extras = []
     if has_opp:
         extras.append("Opportunities v15 (5-8)")
@@ -142,6 +151,8 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
         extras.append("Ledger v18 (22)")
     if has_follow:
         extras.append("Followups v19 (23-25) + CSV 26-27" if has_cust else "Followups v19 (23-25)")
+    if has_inv:
+        extras.append("Invoices v20 (28-30)")
     if extras:
         out.write("Financial (1-4), " + ", ".join(extras) + " available.\n")
     segments = ["1 Add financial  2 List financial  3 Advance financial  4 Withdraw financial"]
@@ -161,11 +172,13 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
         segments.append("23 Add followup  24 List followups  25 Manage followup")
         if has_cust:
             segments.append("26 Import CSV  27 Export CSV")
+    if has_inv:
+        segments.append("28 Add invoice  29 List invoices  30 Manage invoice")
     prompt = "\n" + " | ".join(segments) + "  0 Sign out\nChoice: "
     # legacy no-opp/no-svc prompt (financial pipeline wording remains for v13-like fallback)
     legacy_prompt = "\n1 Add opportunity  2 List entries  3 Advance stage  4 Withdraw  0 Sign out\nChoice: "
     while True:
-        if not has_opp and not has_svc and not has_prod and not has_cust and not has_comm and not has_ledger and not has_follow:
+        if not has_opp and not has_svc and not has_prod and not has_cust and not has_comm and not has_ledger and not has_follow and not has_inv:
             choice = _read(stdin, out, legacy_prompt).strip()
         else:
             choice = _read(stdin, out, prompt).strip()
@@ -633,6 +646,78 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                 csv_text = customers.export_csv(token)
                 out.write("CSV export:\n")
                 out.write(csv_text + "\n")
+            elif has_inv and choice == "28":
+                oid = _read(stdin, out, "Order ID (order_drafts): ").strip()
+                ident = invoices.create(token, oid, operation_key=_key())
+                out.write(f"Created invoice draft: {ident}\n")
+            elif has_inv and choice == "29":
+                status_f = _read(stdin, out, "Filter status [draft/issued/paid/overdue/void or empty]: ").strip()
+                if status_f == "":
+                    status_f = None
+                oid_f = _read(stdin, out, "Filter order ID (empty for all): ").strip()
+                if oid_f == "":
+                    oid_f = None
+                cursor = None
+                while True:
+                    entries = invoices.list(token, after_id=cursor, limit=50, status=status_f, order_id=oid_f)
+                    for item in entries:
+                        pdf_note = "PDF" if item['pdf_hash'] is not None else "no PDF"
+                        out.write(f"{item['id']} | {item['invoice_number']} | order:{item['order_id'][:8]} | INR {item['amount_paise'] // 100}.{item['amount_paise'] % 100:02d} | {item['status']} | {pdf_note}\n")
+                    if len(entries) < 50:
+                        break
+                    if _read(stdin, out, "More? Type YES: ").strip() != "YES":
+                        break
+                    cursor = entries[-1]["id"]
+                if cursor is None and not entries:
+                    out.write("No invoices.\n")
+            elif has_inv and choice == "30":
+                ident = _read(stdin, out, "Invoice ID: ").strip()
+                item = invoices.get(token, ident)
+                pdf_note = "PDF stub available" if item['pdf_hash'] is not None else "no PDF (draft/void)"
+                out.write(f"Current: {item['invoice_number']} | order:{item['order_id'][:8]} | INR {item['amount_paise'] // 100}.{item['amount_paise'] % 100:02d} | {item['status']} | {pdf_note}\n")
+                out.write("Transitions: 1 issued  2 paid  3 overdue  4 void  5 pdf\n")
+                tchoice = _read(stdin, out, "Choose (1-5) or empty to cancel: ").strip()
+                if tchoice == "":
+                    out.write("No change.\n")
+                    continue
+                if tchoice == "1":
+                    out.write("Issue invoice? PDF stub hash will be stored.\n")
+                    if _read(stdin, out, "Type YES to confirm: ").strip() != "YES":
+                        out.write("No change.\n")
+                        continue
+                    invoices.issued(token, ident, operation_key=_key())
+                    out.write("Invoice issued (PDF stub).\n")
+                elif tchoice == "2":
+                    out.write("Mark paid?\n")
+                    if _read(stdin, out, "Type YES to confirm: ").strip() != "YES":
+                        out.write("No change.\n")
+                        continue
+                    invoices.paid(token, ident, operation_key=_key())
+                    out.write("Invoice paid.\n")
+                elif tchoice == "3":
+                    out.write("Mark overdue?\n")
+                    if _read(stdin, out, "Type YES to confirm: ").strip() != "YES":
+                        out.write("No change.\n")
+                        continue
+                    invoices.overdue(token, ident, operation_key=_key())
+                    out.write("Invoice overdue.\n")
+                elif tchoice == "4":
+                    out.write("Void invoice?\n")
+                    if _read(stdin, out, "Type YES to confirm: ").strip() != "YES":
+                        out.write("No change.\n")
+                        continue
+                    invoices.voided(token, ident, operation_key=_key())
+                    out.write("Invoice voided.\n")
+                elif tchoice == "5":
+                    try:
+                        stub = invoices.pdf_stub(token, ident)
+                        out.write(f"PDF stub ({len(stub)} bytes):\n")
+                        out.write(stub.decode('utf-8', errors='replace') + "\n")
+                        out.write(f"Hash {item['pdf_hash'].hex() if item['pdf_hash'] else 'none'}\n")
+                    except Exception as e:
+                        out.write(str(e) + "\n")
+                else:
+                    out.write("Invalid choice.\n")
             else:
                 parts = ["0 Sign out", "1-4 financial"]
                 if has_opp:
@@ -651,8 +736,10 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                     parts.append("23-25 followups")
                     if has_cust:
                         parts.append("26-27 CSV")
+                if has_inv:
+                    parts.append("28-30 invoices")
                 out.write("Choose " + ", ".join(parts) + ".\n")
-        except (FinancialAssertionError, OpportunityError, ServiceError, ProductError, CustomerError, CommunicationError, LedgerError, FollowupError, ValueError, StateStorageError) as exc:
+        except (FinancialAssertionError, OpportunityError, ServiceError, ProductError, CustomerError, CommunicationError, LedgerError, FollowupError, InvoiceError, ValueError, StateStorageError) as exc:
             out.write(str(exc) + "\n")
         except AccessDenied as exc:
             out.write(str(exc) + "\n")
@@ -678,19 +765,19 @@ def run(action, environ, stdin, out, err):
                 out.write("No files created.\n")
                 return 0
             _initialize_state(path)
-            out.write("New tracker state initialized (v19, 18 backups). Register an account with the auth command if needed.\n")
+            out.write("New tracker state initialized (v20, 19 backups). Register an account with the auth command if needed.\n")
             return 0
         # Open only; missing files are never created during login.
         state = StateStorage(path)
         with state.transaction() as conn:
             version = conn.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (13, 14, 15, 16, 17, 18, 19):
-                raise StateStorageError("Tracker requires an existing version 13, 14, 15, 16, 17, 18 or 19 state file; no upgrade was performed.")
+            if version not in (13, 14, 15, 16, 17, 18, 19, 20):
+                raise StateStorageError("Tracker requires an existing version 13, 14, 15, 16, 17, 18, 19 or 20 state file; no upgrade was performed.")
         auth = AuthService(AuthStorage(Path(auth_path), create=False))
         username = _read(stdin, out, "Username: ")
         password = _secret("Password: ", err)
         token = auth.login(username, password)
-        # Opportunities available on 15+, services/portfolio on 16+, products/customers on 17+, comm/ledger on 18+, followups on 19+
+        # Opportunities available on 15+, services/portfolio on 16+, products/customers on 17+, comm/ledger on 18+, followups on 19+, invoices on 20+
         opp = Opportunities(auth, state) if version >= 15 else None
         svc = Services(auth, state) if version >= 16 else None
         port = Portfolio(auth, state) if version >= 16 else None
@@ -699,7 +786,8 @@ def run(action, environ, stdin, out, err):
         comm = Communications(auth, state) if version >= 18 else None
         ledg = Ledger(auth, state) if version >= 18 else None
         foll = Followups(auth, state) if version >= 19 else None
-        _menu(FinancialAssertions(auth, state), token, stdin, out, opp, svc, port, prod, cust, comm, ledg, foll)
+        inv = Invoices(auth, state) if version >= 20 else None
+        _menu(FinancialAssertions(auth, state), token, stdin, out, opp, svc, port, prod, cust, comm, ledg, foll, inv)
         return 0
     except (AuthError, StorageError, StateStorageError, ConfigurationError):
         err.write("Tracker could not open or complete the operation. Check your account, private paths and state version; no automatic replacement is performed.\n")
