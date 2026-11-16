@@ -19,7 +19,7 @@ from .auth_storage import AuthStorage, StorageError, _windows_auth_verified
 
 APPLICATION_ID = 0x41494533  # AIE3, distinct from the auth-only database.
 SCHEMA_VERSION = 1  # New files still bootstrap as version 1; upgrades are explicit.
-LATEST_SCHEMA_VERSION = 16
+LATEST_SCHEMA_VERSION = 17
 SUPPORTED_STATE_VERSIONS = frozenset(range(1, LATEST_SCHEMA_VERSION + 1))
 
 
@@ -353,6 +353,33 @@ _V16_SCHEMA = {
 )""",
 }
 
+_V17_INDEX = "CREATE UNIQUE INDEX products_id_owner_idx ON products(id, owner_id)"
+
+_V17_SCHEMA = {
+    "products": """CREATE TABLE products (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 200 AND length(trim(title)) > 0),
+    description TEXT NOT NULL CHECK(length(description) BETWEEN 0 AND 2000),
+    version TEXT NOT NULL CHECK(length(version) BETWEEN 1 AND 20 AND version NOT GLOB '*[^A-Za-z0-9._-]*'),
+    price_paise INTEGER NOT NULL CHECK(typeof(price_paise)='integer' AND price_paise BETWEEN 0 AND 1000000000000),
+    currency TEXT NOT NULL CHECK(currency='INR'),
+    status TEXT NOT NULL CHECK(status IN ('draft','published','archived')),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at)
+)""",
+    "customers": """CREATE TABLE customers (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    name TEXT NOT NULL CHECK(length(name) BETWEEN 1 AND 200 AND length(trim(name)) > 0),
+    contact TEXT NOT NULL CHECK(length(contact) BETWEEN 1 AND 500),
+    source TEXT NOT NULL CHECK(length(source) BETWEEN 0 AND 500),
+    status TEXT NOT NULL CHECK(status IN ('lead','contacted','converted','rejected')),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at)
+)""",
+}
+
 def _validate_schema(conn: sqlite3.Connection) -> int:
     application_id = conn.execute("PRAGMA application_id").fetchone()[0]
     version = conn.execute("PRAGMA user_version").fetchone()[0]
@@ -475,6 +502,18 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
             ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("service_id", "TEXT", 1, 0),
             ("title", "TEXT", 1, 0), ("description", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
         ]
+    if version >= 17:
+        expected_columns["products"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("title", "TEXT", 1, 0),
+            ("description", "TEXT", 1, 0), ("version", "TEXT", 1, 0), ("price_paise", "INTEGER", 1, 0),
+            ("currency", "TEXT", 1, 0), ("status", "TEXT", 1, 0),
+            ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["customers"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("name", "TEXT", 1, 0),
+            ("contact", "TEXT", 1, 0), ("source", "TEXT", 1, 0), ("status", "TEXT", 1, 0),
+            ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+        ]
     objects = conn.execute(
         "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name"
     ).fetchall()
@@ -489,6 +528,8 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         expected_objects.append(("index", "task_associations_id_owner_idx"))
     if version >= 16:
         expected_objects.append(("index", "services_id_owner_idx"))
+    if version >= 17:
+        expected_objects.append(("index", "products_id_owner_idx"))
     if [tuple(row) for row in objects] != sorted(expected_objects, key=lambda item: item[1]):
         raise StateStorageError("State database schema is incompatible.")
     if version >= 6:
@@ -510,6 +551,10 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
     if version >= 16:
         row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='services_id_owner_idx'").fetchone()
         if row is None or row[0] != _V16_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+    if version >= 17:
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='products_id_owner_idx'").fetchone()
+        if row is None or row[0] != _V17_INDEX:
             raise StateStorageError("State database schema constraints are incompatible.")
     for table, expected in expected_columns.items():
         columns = conn.execute(f"PRAGMA table_info({table})").fetchall()
@@ -546,6 +591,8 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         schemas.append(_V15_SCHEMA)
     if version >= 16:
         schemas.append(_V16_SCHEMA)
+    if version >= 17:
+        schemas.append(_V17_SCHEMA)
     for schema in schemas:
         for name, statement in schema.items():
             row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()
@@ -669,6 +716,14 @@ def _apply_v16(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA user_version = 16")
 
 
+def _apply_v17(conn: sqlite3.Connection) -> None:
+    for statement in _V17_SCHEMA.values():
+        conn.execute(statement)
+    conn.execute(_V17_INDEX)
+    conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (17, int(time.time())))
+    conn.execute("PRAGMA user_version = 17")
+
+
 def _check_managed_pairs(conn: sqlite3.Connection, owner=None, queue_id=None, workflow_id=None, association_id=None) -> None:
     """Check managed-parent state combinations, not history authenticity."""
     invalid = conn.execute("""
@@ -765,6 +820,8 @@ _OPERATION_RESULTS = (
     (15, "opportunity", "opportunities"),
     (16, "service", "services"),
     (16, "portfolio_item", "portfolio_items"),
+    (17, "product", "products"),
+    (17, "customer", "customers"),
 )
 
 
@@ -831,6 +888,8 @@ _CREATION_EVENTS = (
     (15, "opportunities", "opportunity", "opportunity_created"),
     (16, "services", "service", "service_created"),
     (16, "portfolio_items", "portfolio_item", "portfolio_item_created"),
+    (17, "products", "product", "product_created"),
+    (17, "customers", "customer", "customer_created"),
 )
 
 
@@ -954,6 +1013,19 @@ _MULTI_STEP_HISTORIES = (
         ("draft", "service_published"): "published",
         ("draft", "service_archived"): "archived",
         ("published", "service_archived"): "archived",
+    }),
+    (17, "products", "product", {
+        (None, "product_created"): "draft",
+        ("draft", "product_published"): "published",
+        ("draft", "product_archived"): "archived",
+        ("published", "product_archived"): "archived",
+    }),
+    (17, "customers", "customer", {
+        (None, "customer_created"): "lead",
+        ("lead", "customer_contacted"): "contacted",
+        ("lead", "customer_rejected"): "rejected",
+        ("contacted", "customer_converted"): "converted",
+        ("contacted", "customer_rejected"): "rejected",
     }),
 )
 
@@ -1406,6 +1478,19 @@ class StateStorage:
             self.backup_to(backup, confirmed=True)
             _apply_v16(conn)
             if _validate_schema(conn) != 16:
+                raise StateStorageError("Migration produced an incompatible schema.")
+            _check_integrity(conn)
+
+    def migrate_to_v17(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 16 only after a checked non-overwriting backup."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 16:
+                raise StateStorageError("Only version 16 can be upgraded to version 17.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v17(conn)
+            if _validate_schema(conn) != 17:
                 raise StateStorageError("Migration produced an incompatible schema.")
             _check_integrity(conn)
 

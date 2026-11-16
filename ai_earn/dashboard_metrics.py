@@ -167,4 +167,27 @@ class DashboardMetrics:
                     "count": _count(conn, "portfolio_items", owner),
                     "verification": "unverified",
                 }
+            if version >= 17:
+                prod = _amount_summary(
+                    conn, "products", owner, "price_paise",
+                    status_column="status",
+                )
+                result["products"] = {
+                    "count": sum(item["count"] for item in prod.values()),
+                    "amount_paise": sum(item["amount_paise"] for item in prod.values()),
+                    "statuses": prod,
+                    "verification": "unverified",
+                    "note": "Local product workspace; draft/published are not verified.",
+                }
+                cust_rows = conn.execute(
+                    "SELECT status, COUNT(*) FROM customers WHERE owner_id=? GROUP BY status",
+                    (owner,),
+                ).fetchall()
+                cust_statuses = {row[0]: {"count": row[1]} for row in cust_rows}
+                result["customers"] = {
+                    "count": sum(item["count"] for item in cust_statuses.values()),
+                    "statuses": cust_statuses,
+                    "verification": "unverified",
+                    "note": "Local CRM leads; not verified customers.",
+                }
             return result

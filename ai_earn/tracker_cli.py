@@ -1,7 +1,8 @@
 """Experimental offline, manually asserted opportunity tracker.
 
 No payment is verified, received or processed. Use only disposable data.
-Now includes v15 opportunity discovery and v16 service catalog/portfolio.
+Now includes v15 opportunity discovery, v16 service catalog/portfolio,
+and v17 product workspace & customers.
 """
 
 import getpass
@@ -14,8 +15,10 @@ from .auth import AccessDenied, AuthError, AuthService
 from .auth_cli import _secret
 from .auth_storage import AuthStorage, StorageError
 from .config import ConfigurationError, load_settings
+from .customers import Customers, CustomerError
 from .financial_assertions import FinancialAssertions, FinancialAssertionError
 from .opportunities import Opportunities, OpportunityError
+from .products import Products, ProductError
 from .services import Services, Portfolio, ServiceError
 from .state_storage import StateStorage, StateStorageError
 
@@ -37,6 +40,23 @@ _OPP_TRANSITIONS = {
     "2": ("pursuing", "opportunity_pursuing"),
     "3": ("archived", "opportunity_archived"),
     "4": ("dismissed", "opportunity_dismissed"),
+}
+
+_PROD_STATUS_LABELS = {
+    "draft": "draft (unverified)",
+    "published": "published (unverified)",
+    "archived": "archived",
+}
+_CUST_STATUS_LABELS = {
+    "lead": "lead (unverified)",
+    "contacted": "contacted (unverified)",
+    "converted": "converted (unverified)",
+    "rejected": "rejected",
+}
+_CUST_TRANSITIONS = {
+    "1": ("contacted", "customer_contacted"),
+    "2": ("converted", "customer_converted"),
+    "3": ("rejected", "customer_rejected"),
 }
 
 
@@ -65,35 +85,52 @@ def _key():
 
 def _initialize_state(path):
     # Only initialize a new file; never silently upgrade an existing database.
-    backups = [path.with_name(path.name + f".before-v{version}.sqlite3") for version in range(2, 17)]
+    backups = [path.with_name(path.name + f".before-v{version}.sqlite3") for version in range(2, 18)]
     if path.exists() or path.is_symlink() or any(p.exists() or p.is_symlink() for p in backups):
         raise StateStorageError("State or migration backup already exists; no initialization was attempted.")
     state = StateStorage(path, create=True, confirmed=True)
-    for version, backup in zip(range(2, 17), backups):
+    for version, backup in zip(range(2, 18), backups):
         getattr(state, f"migrate_to_v{version}")(backup, confirmed=True)
     return state
 
 
-def _menu(service, token, stdin, out, opportunities=None, services=None, portfolio=None):
-    # service = FinancialAssertions, opportunities = Opportunities, services/portfolio = v16
+def _menu(service, token, stdin, out, opportunities=None, services=None, portfolio=None, products=None, customers=None):
+    # service = FinancialAssertions, opportunities = Opportunities, services/portfolio = v16, products/customers = v17
     out.write("Local tracker: all entries are UNVERIFIED. No payment processing or settlement.\n")
     has_opp = opportunities is not None
     has_svc = services is not None and portfolio is not None
-    if has_opp and has_svc:
-        out.write("Financial (1-4), Opportunities v15 (5-8), Services v16 (9-12) available.\n")
-    elif has_opp:
-        out.write("Financial pipeline (1-4) and Opportunities v15 (5-8) are both available.\n")
-    elif has_svc:
-        out.write("Financial pipeline (1-4) and Services v16 (9-12) are available.\n")
+    has_prod = products is not None
+    has_cust = customers is not None
+    extras = []
+    if has_opp:
+        extras.append("Opportunities v15 (5-8)")
+    if has_svc:
+        extras.append("Services v16 (9-12)")
+    if has_prod and has_cust:
+        extras.append("Products/Customers v17 (13-18)")
+    elif has_prod:
+        extras.append("Products v17 (13-15)")
+    elif has_cust:
+        extras.append("Customers v17 (16-18)")
+    if extras:
+        out.write("Financial (1-4), " + ", ".join(extras) + " available.\n")
+    segments = ["1 Add financial  2 List financial  3 Advance financial  4 Withdraw financial"]
+    if has_opp:
+        segments.append("5 Add opportunity  6 List opps  7 Manage opp  8 Ranked")
+    if has_svc:
+        segments.append("9 Add service  10 List services  11 Manage service  12 Portfolio")
+    if has_prod:
+        segments.append("13 Add product  14 List products  15 Manage product")
+    if has_cust:
+        segments.append("16 Add customer  17 List customers  18 Manage customer")
+    prompt = "\n" + " | ".join(segments) + "  0 Sign out\nChoice: "
+    # legacy no-opp/no-svc prompt (financial pipeline wording remains for v13-like fallback)
+    legacy_prompt = "\n1 Add opportunity  2 List entries  3 Advance stage  4 Withdraw  0 Sign out\nChoice: "
     while True:
-        if not has_opp and not has_svc:
-            choice = _read(stdin, out, "\n1 Add opportunity  2 List entries  3 Advance stage  4 Withdraw  0 Sign out\nChoice: ").strip()
-        elif has_opp and has_svc:
-            choice = _read(stdin, out, "\n1 Add financial  2 List financial  3 Advance financial  4 Withdraw financial | 5 Add opportunity  6 List opps  7 Manage opp  8 Ranked | 9 Add service  10 List services  11 Manage service  12 Portfolio  0 Sign out\nChoice: ").strip()
-        elif has_opp:
-            choice = _read(stdin, out, "\n1 Add financial  2 List financial  3 Advance financial  4 Withdraw financial | 5 Add opportunity  6 List opportunities  7 Manage opportunity  8 Ranked opportunities  0 Sign out\nChoice: ").strip()
+        if not has_opp and not has_svc and not has_prod and not has_cust:
+            choice = _read(stdin, out, legacy_prompt).strip()
         else:
-            choice = _read(stdin, out, "\n1 Add financial  2 List financial  3 Advance financial  4 Withdraw financial | 9 Add service  10 List services  11 Manage service  12 Portfolio  0 Sign out\nChoice: ").strip()
+            choice = _read(stdin, out, prompt).strip()
         try:
             if choice == "0":
                 return
@@ -303,18 +340,113 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                         out.write("No portfolio items.\n")
                 else:
                     out.write("Invalid portfolio choice.\n")
-            else:
-                has_opp = opportunities is not None
-                has_svc = services is not None and portfolio is not None
-                if not has_opp and not has_svc:
-                    out.write("Choose 0, 1, 2, 3 or 4.\n")
-                elif has_opp and has_svc:
-                    out.write("Choose 0-4 (financial), 5-8 (opps), 9-12 (services/portfolio).\n")
-                elif has_opp:
-                    out.write("Choose 0-4 (financial) or 5-8 (opportunities).\n")
+            elif products is not None and choice == "13":
+                title = _read(stdin, out, "Product title (1-200): ")
+                desc = _read(stdin, out, "Description (0-2000, empty for none): ")
+                version = _read(stdin, out, "Version [A-Za-z0-9._- 1-20]: ").strip()
+                price_raw = _read(stdin, out, "Price INR (e.g. 5000 or 2500.50): ").strip()
+                price = _paise(price_raw)
+                ident = products.create(token, title, desc, version, price, operation_key=_key())
+                out.write(f"Created product draft: {ident}\n")
+            elif products is not None and choice == "14":
+                status_f = _read(stdin, out, "Filter status [draft/published/archived or empty]: ").strip()
+                if status_f == "":
+                    status_f = None
+                cursor = None
+                while True:
+                    entries = products.list(token, after_id=cursor, limit=50, status=status_f)
+                    for item in entries:
+                        out.write(f"{item['id']} | {item['title']} | v{item['version']} | INR {item['price_paise'] // 100}.{item['price_paise'] % 100:02d} | {item['status']}\n")
+                    if len(entries) < 50:
+                        break
+                    if _read(stdin, out, "More? Type YES: ").strip() != "YES":
+                        break
+                    cursor = entries[-1]["id"]
+                if cursor is None and not entries:
+                    out.write("No products.\n")
+            elif products is not None and choice == "15":
+                ident = _read(stdin, out, "Product ID: ").strip()
+                item = products.get(token, ident)
+                out.write(f"Current: {item['title']} | {item['status']} | v{item['version']} | INR {item['price_paise'] // 100}.{item['price_paise'] % 100:02d}\n")
+                out.write("Transitions: 1 publish  2 archive\n")
+                tchoice = _read(stdin, out, "Choose (1-2) or empty to cancel: ").strip()
+                if tchoice == "":
+                    out.write("No change.\n")
+                    continue
+                if tchoice == "1":
+                    out.write("Publish product? This is unverified local draft.\n")
+                    if _read(stdin, out, "Type YES to confirm: ").strip() != "YES":
+                        out.write("No change.\n")
+                        continue
+                    products.publish(token, ident, operation_key=_key())
+                    out.write("Product published (unverified).\n")
+                elif tchoice == "2":
+                    out.write("Archive product? This is unverified.\n")
+                    if _read(stdin, out, "Type YES to confirm: ").strip() != "YES":
+                        out.write("No change.\n")
+                        continue
+                    products.archive(token, ident, operation_key=_key())
+                    out.write("Product archived.\n")
                 else:
-                    out.write("Choose 0-4 (financial) or 9-12 (services).\n")
-        except (FinancialAssertionError, OpportunityError, ServiceError, ValueError, StateStorageError) as exc:
+                    out.write("Invalid choice.\n")
+            elif customers is not None and choice == "16":
+                name = _read(stdin, out, "Customer name (1-200): ")
+                contact = _read(stdin, out, "Contact (1-500): ")
+                source = _read(stdin, out, "Source (0-500, empty for none): ")
+                ident = customers.create(token, name, contact, source, operation_key=_key())
+                out.write(f"Created customer lead: {ident}\n")
+            elif customers is not None and choice == "17":
+                status_f = _read(stdin, out, "Filter status [lead/contacted/converted/rejected or empty]: ").strip()
+                if status_f == "":
+                    status_f = None
+                cursor = None
+                while True:
+                    entries = customers.list(token, after_id=cursor, limit=50, status=status_f)
+                    for item in entries:
+                        out.write(f"{item['id']} | {item['name']} | {item['contact'][:40]} | {item['status']} | src:{item['source'][:30]}\n")
+                    if len(entries) < 50:
+                        break
+                    if _read(stdin, out, "More? Type YES: ").strip() != "YES":
+                        break
+                    cursor = entries[-1]["id"]
+                if cursor is None and not entries:
+                    out.write("No customers.\n")
+            elif customers is not None and choice == "18":
+                ident = _read(stdin, out, "Customer ID: ").strip()
+                item = customers.get(token, ident)
+                out.write(f"Current: {item['name']} | {item['status']} | {item['contact'][:40]}\n")
+                out.write("Transitions: 1 contacted  2 converted  3 rejected\n")
+                tchoice = _read(stdin, out, "Choose (1-3) or empty to cancel: ").strip()
+                if tchoice == "":
+                    out.write("No change.\n")
+                    continue
+                if tchoice not in _CUST_TRANSITIONS:
+                    out.write("Invalid transition choice.\n")
+                    continue
+                target, _evt = _CUST_TRANSITIONS[tchoice]
+                out.write(f"Change to {_CUST_STATUS_LABELS.get(target, target)}? This is unverified.\n")
+                if _read(stdin, out, "Type YES to confirm: ").strip() != "YES":
+                    out.write("No change.\n")
+                    continue
+                if target == "contacted":
+                    customers.contacted(token, ident, operation_key=_key())
+                elif target == "converted":
+                    customers.converted(token, ident, operation_key=_key())
+                elif target == "rejected":
+                    customers.rejected(token, ident, operation_key=_key())
+                out.write(f"Customer updated to {target} (unverified).\n")
+            else:
+                parts = ["0 Sign out", "1-4 financial"]
+                if has_opp:
+                    parts.append("5-8 opps")
+                if has_svc:
+                    parts.append("9-12 services/portfolio")
+                if has_prod:
+                    parts.append("13-15 products")
+                if has_cust:
+                    parts.append("16-18 customers")
+                out.write("Choose " + ", ".join(parts) + ".\n")
+        except (FinancialAssertionError, OpportunityError, ServiceError, ProductError, CustomerError, ValueError, StateStorageError) as exc:
             out.write(str(exc) + "\n")
         except AccessDenied as exc:
             out.write(str(exc) + "\n")
@@ -340,23 +472,25 @@ def run(action, environ, stdin, out, err):
                 out.write("No files created.\n")
                 return 0
             _initialize_state(path)
-            out.write("New tracker state initialized (v16, 15 backups). Register an account with the auth command if needed.\n")
+            out.write("New tracker state initialized (v17, 16 backups). Register an account with the auth command if needed.\n")
             return 0
         # Open only; missing files are never created during login.
         state = StateStorage(path)
         with state.transaction() as conn:
             version = conn.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (13, 14, 15, 16):
-                raise StateStorageError("Tracker requires an existing version 13, 14, 15 or 16 state file; no upgrade was performed.")
+            if version not in (13, 14, 15, 16, 17):
+                raise StateStorageError("Tracker requires an existing version 13, 14, 15, 16 or 17 state file; no upgrade was performed.")
         auth = AuthService(AuthStorage(Path(auth_path), create=False))
         username = _read(stdin, out, "Username: ")
         password = _secret("Password: ", err)
         token = auth.login(username, password)
-        # Opportunities available on 15+, services/portfolio on 16+
+        # Opportunities available on 15+, services/portfolio on 16+, products/customers on 17+
         opp = Opportunities(auth, state) if version >= 15 else None
         svc = Services(auth, state) if version >= 16 else None
         port = Portfolio(auth, state) if version >= 16 else None
-        _menu(FinancialAssertions(auth, state), token, stdin, out, opp, svc, port)
+        prod = Products(auth, state) if version >= 17 else None
+        cust = Customers(auth, state) if version >= 17 else None
+        _menu(FinancialAssertions(auth, state), token, stdin, out, opp, svc, port, prod, cust)
         return 0
     except (AuthError, StorageError, StateStorageError, ConfigurationError):
         err.write("Tracker could not open or complete the operation. Check your account, private paths and state version; no automatic replacement is performed.\n")
