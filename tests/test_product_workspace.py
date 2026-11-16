@@ -1,4 +1,5 @@
 """Phase 7 — digital product workspace (v26)."""
+import os
 import tempfile, unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -22,7 +23,11 @@ class ProductWorkspaceTests(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.priv=Path(self.tmp.name)/"priv"
-        self.priv.mkdir(mode=0o700)
+        if os.name == "nt":
+            from ai_earn.windows_security import create_private_directory
+            create_private_directory(self.priv)
+        else:
+            self.priv.mkdir(mode=0o700)
         self.clock=Clock()
         patcher=patch("ai_earn.auth.PASSWORD_ITERATIONS", 1000)
         patcher.start()
