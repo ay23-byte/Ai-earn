@@ -19,7 +19,7 @@ from .auth_storage import AuthStorage, StorageError, _windows_auth_verified
 
 APPLICATION_ID = 0x41494533  # AIE3, distinct from the auth-only database.
 SCHEMA_VERSION = 1  # New files still bootstrap as version 1; upgrades are explicit.
-LATEST_SCHEMA_VERSION = 24
+LATEST_SCHEMA_VERSION = 25
 SUPPORTED_STATE_VERSIONS = frozenset(range(1, LATEST_SCHEMA_VERSION + 1))
 
 
@@ -506,6 +506,75 @@ _V24_SCHEMA = {
 )""",
 }
 
+
+_V25_PACKAGE_INDEX = "CREATE UNIQUE INDEX service_packages_id_owner_idx ON service_packages(id, owner_id)"
+_V25_REQUIREMENT_INDEX = "CREATE INDEX service_requirements_service_idx ON service_requirements(service_id, owner_id)"
+_V25_ATTACHMENT_INDEX = "CREATE INDEX service_attachments_service_idx ON service_attachments(service_id, owner_id)"
+_V25_PROPOSAL_INDEX = "CREATE UNIQUE INDEX proposals_id_owner_idx ON proposals(id, owner_id)"
+_V25_REQUEST_INDEX = "CREATE UNIQUE INDEX customer_requests_id_owner_idx ON customer_requests(id, owner_id)"
+_V25_SCHEMA = {
+    "service_packages": """CREATE TABLE service_packages (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    service_id TEXT NOT NULL CHECK(length(service_id)=32 AND service_id NOT GLOB '*[^0-9a-f]*'),
+    title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 200 AND length(trim(title)) > 0),
+    description TEXT NOT NULL CHECK(length(description) BETWEEN 0 AND 2000),
+    price_paise INTEGER NOT NULL CHECK(typeof(price_paise)='integer' AND price_paise BETWEEN 0 AND 1000000000000),
+    delivery_days INTEGER NOT NULL CHECK(typeof(delivery_days)='integer' AND delivery_days BETWEEN 1 AND 365),
+    revisions INTEGER NOT NULL CHECK(typeof(revisions)='integer' AND revisions BETWEEN 0 AND 100),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at),
+    FOREIGN KEY(service_id, owner_id) REFERENCES services(id, owner_id)
+)""",
+    "service_requirements": """CREATE TABLE service_requirements (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    service_id TEXT NOT NULL CHECK(length(service_id)=32 AND service_id NOT GLOB '*[^0-9a-f]*'),
+    requirement TEXT NOT NULL CHECK(length(requirement) BETWEEN 1 AND 500 AND length(trim(requirement)) > 0),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    FOREIGN KEY(service_id, owner_id) REFERENCES services(id, owner_id)
+)""",
+    "service_attachments": """CREATE TABLE service_attachments (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    service_id TEXT CHECK(service_id IS NULL OR (length(service_id)=32 AND service_id NOT GLOB '*[^0-9a-f]*')),
+    portfolio_item_id TEXT CHECK(portfolio_item_id IS NULL OR (length(portfolio_item_id)=32 AND portfolio_item_id NOT GLOB '*[^0-9a-f]*')),
+    file_name TEXT NOT NULL CHECK(length(file_name) BETWEEN 1 AND 200 AND length(trim(file_name)) > 0),
+    file_hash BLOB CHECK(file_hash IS NULL OR (typeof(file_hash)='blob' AND length(file_hash)=32)),
+    file_size INTEGER NOT NULL CHECK(typeof(file_size)='integer' AND file_size BETWEEN 0 AND 104857600),
+    mime_type TEXT NOT NULL CHECK(length(mime_type) BETWEEN 1 AND 100),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    CHECK((service_id IS NOT NULL) OR (portfolio_item_id IS NOT NULL))
+)""",
+    "proposals": """CREATE TABLE proposals (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    service_id TEXT NOT NULL CHECK(length(service_id)=32 AND service_id NOT GLOB '*[^0-9a-f]*'),
+    customer_id TEXT CHECK(customer_id IS NULL OR (length(customer_id)=32 AND customer_id NOT GLOB '*[^0-9a-f]*')),
+    title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 200 AND length(trim(title)) > 0),
+    description TEXT NOT NULL CHECK(length(description) BETWEEN 0 AND 2000),
+    price_paise INTEGER NOT NULL CHECK(typeof(price_paise)='integer' AND price_paise BETWEEN 0 AND 1000000000000),
+    delivery_days INTEGER NOT NULL CHECK(typeof(delivery_days)='integer' AND delivery_days BETWEEN 1 AND 365),
+    status TEXT NOT NULL CHECK(status IN ('draft','sent','accepted','rejected','cancelled','archived')),
+    ai_generated INTEGER NOT NULL CHECK(ai_generated IN (0,1)),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at),
+    FOREIGN KEY(service_id, owner_id) REFERENCES services(id, owner_id)
+)""",
+    "customer_requests": """CREATE TABLE customer_requests (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    service_id TEXT NOT NULL CHECK(length(service_id)=32 AND service_id NOT GLOB '*[^0-9a-f]*'),
+    customer_id TEXT NOT NULL CHECK(length(customer_id)=32 AND customer_id NOT GLOB '*[^0-9a-f]*'),
+    message TEXT NOT NULL CHECK(length(message) BETWEEN 1 AND 2000),
+    status TEXT NOT NULL CHECK(status IN ('pending','accepted','rejected','completed','cancelled')),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at),
+    FOREIGN KEY(service_id, owner_id) REFERENCES services(id, owner_id),
+    FOREIGN KEY(customer_id, owner_id) REFERENCES customers(id, owner_id)
+)""",
+}
+
 _V20_SCHEMA = {
     "invoices": """CREATE TABLE invoices (
     id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
@@ -749,6 +818,28 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
             ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0), ("lease_id", "TEXT", 0, 0), ("lease_until", "INTEGER", 0, 0),
             ("attempts", "INTEGER", 1, 0), ("max_attempts", "INTEGER", 1, 0), ("backoff_seconds", "INTEGER", 1, 0), ("available_at", "INTEGER", 1, 0),
         ]
+    if version >= 25:
+        expected_columns["service_packages"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("service_id", "TEXT", 1, 0), ("title", "TEXT", 1, 0), ("description", "TEXT", 1, 0),
+            ("price_paise", "INTEGER", 1, 0), ("delivery_days", "INTEGER", 1, 0), ("revisions", "INTEGER", 1, 0),
+            ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["service_requirements"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("service_id", "TEXT", 1, 0), ("requirement", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["service_attachments"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("service_id", "TEXT", 0, 0), ("portfolio_item_id", "TEXT", 0, 0),
+            ("file_name", "TEXT", 1, 0), ("file_hash", "BLOB", 0, 0), ("file_size", "INTEGER", 1, 0), ("mime_type", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["proposals"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("service_id", "TEXT", 1, 0), ("customer_id", "TEXT", 0, 0),
+            ("title", "TEXT", 1, 0), ("description", "TEXT", 1, 0), ("price_paise", "INTEGER", 1, 0), ("delivery_days", "INTEGER", 1, 0),
+            ("status", "TEXT", 1, 0), ("ai_generated", "INTEGER", 1, 0), ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["customer_requests"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("service_id", "TEXT", 1, 0), ("customer_id", "TEXT", 1, 0),
+            ("message", "TEXT", 1, 0), ("status", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+        ]
     if version >= 20:
         expected_columns["invoices"] = [
             ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("order_id", "TEXT", 1, 0),
@@ -788,6 +879,12 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         expected_objects.append(("index", "project_tasks_id_owner_idx"))
         expected_objects.append(("index", "task_dependencies_task_idx"))
         expected_objects.append(("index", "task_execution_logs_task_idx"))
+    if version >= 25:
+        expected_objects.append(("index", "service_packages_id_owner_idx"))
+        expected_objects.append(("index", "service_requirements_service_idx"))
+        expected_objects.append(("index", "service_attachments_service_idx"))
+        expected_objects.append(("index", "proposals_id_owner_idx"))
+        expected_objects.append(("index", "customer_requests_id_owner_idx"))
     if version >= 20:
         expected_objects.append(("index", "invoices_id_owner_idx"))
         expected_objects.append(("index", "invoices_number_owner_idx"))
@@ -855,6 +952,22 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='task_execution_logs_task_idx'").fetchone()
         if row is None or row[0] != _V23_LOGS_INDEX:
             raise StateStorageError("State database schema constraints are incompatible.")
+    if version >= 25:
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='service_packages_id_owner_idx'").fetchone()
+        if row is None or row[0] != _V25_PACKAGE_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='service_requirements_service_idx'").fetchone()
+        if row is None or row[0] != _V25_REQUIREMENT_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='service_attachments_service_idx'").fetchone()
+        if row is None or row[0] != _V25_ATTACHMENT_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='proposals_id_owner_idx'").fetchone()
+        if row is None or row[0] != _V25_PROPOSAL_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='customer_requests_id_owner_idx'").fetchone()
+        if row is None or row[0] != _V25_REQUEST_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
     if version >= 20:
         row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='invoices_id_owner_idx'").fetchone()
         if row is None or row[0] != _V20_INVOICE_INDEX:
@@ -913,6 +1026,8 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         schemas.append(_V23_SCHEMA)
     if version >= 24:
         schemas.append(_V24_SCHEMA)
+    if version >= 25:
+        schemas.append(_V25_SCHEMA)
     for schema in schemas:
         for name, statement in schema.items():
             # v24 alters project_tasks via ALTER TABLE; sql formatting differs from CREATE literal, so rely on PRAGMA table_info instead
@@ -1113,6 +1228,18 @@ def _apply_v24(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE project_tasks ADD COLUMN available_at INTEGER NOT NULL DEFAULT 0 CHECK(available_at BETWEEN 0 AND 4102444800)")
     conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (24, int(time.time())))
     conn.execute("PRAGMA user_version = 24")
+
+
+def _apply_v25(conn: sqlite3.Connection) -> None:
+    for statement in _V25_SCHEMA.values():
+        conn.execute(statement)
+    conn.execute(_V25_PACKAGE_INDEX)
+    conn.execute(_V25_REQUIREMENT_INDEX)
+    conn.execute(_V25_ATTACHMENT_INDEX)
+    conn.execute(_V25_PROPOSAL_INDEX)
+    conn.execute(_V25_REQUEST_INDEX)
+    conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (25, int(time.time())))
+    conn.execute("PRAGMA user_version = 25")
 
 
 def _check_managed_pairs(conn: sqlite3.Connection, owner=None, queue_id=None, workflow_id=None, association_id=None) -> None:
@@ -2025,6 +2152,19 @@ class StateStorage:
             self.backup_to(backup, confirmed=True)
             _apply_v24(conn)
             if _validate_schema(conn) != 24:
+                raise StateStorageError("Migration produced an incompatible schema.")
+            _check_integrity(conn)
+
+    def migrate_to_v25(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 24 only after a checked non-overwriting backup."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 24:
+                raise StateStorageError("Only version 24 can be upgraded to version 25.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v25(conn)
+            if _validate_schema(conn) != 25:
                 raise StateStorageError("Migration produced an incompatible schema.")
             _check_integrity(conn)
 

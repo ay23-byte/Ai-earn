@@ -11,7 +11,7 @@ from ai_earn.auth import AuthService
 from ai_earn.auth_storage import AuthStorage
 from ai_earn.health import check, check_with_backups
 from ai_earn.health_cli import run as health_run
-from ai_earn.state_storage import StateStorage
+from ai_earn.state_storage import StateStorage, LATEST_SCHEMA_VERSION
 
 
 class Clock:
@@ -63,13 +63,12 @@ class HealthTests(unittest.TestCase):
         auth = AuthService(AuthStorage(self.auth_path, create=True), self.clock)
         auth.register("alice", "disposable test password")
         state = StateStorage(self.state_path, create=True, confirmed=True)
-        for v in range(2, 25):
+        for v in range(2, LATEST_SCHEMA_VERSION+1):
             getattr(state, f"migrate_to_v{v}")(self.directory / f"before-v{v}.sqlite3", confirmed=True)
         payload = check(self.environ)
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["checks"]["auth"]["status"], "ok")
         self.assertEqual(payload["checks"]["state"]["status"], "ok")
-        from ai_earn.state_storage import LATEST_SCHEMA_VERSION
         self.assertEqual(payload["checks"]["state"]["schema_version"], LATEST_SCHEMA_VERSION)
         self.assertEqual(payload["checks"]["version"]["latest"], LATEST_SCHEMA_VERSION)
         self.assertIn(LATEST_SCHEMA_VERSION, payload["checks"]["version"]["supported"])
@@ -78,12 +77,11 @@ class HealthTests(unittest.TestCase):
         auth = AuthService(AuthStorage(self.auth_path, create=True), self.clock)
         auth.register("alice", "disposable test password")
         state = StateStorage(self.state_path, create=True, confirmed=True)
-        for v in range(2, 25):
+        for v in range(2, LATEST_SCHEMA_VERSION+1):
             getattr(state, f"migrate_to_v{v}")(self.directory / f"before-v{v}.sqlite3", confirmed=True)
         payload = check_with_backups(self.environ)
         self.assertTrue(payload["ok"])
         self.assertIn("backups", payload["checks"])
-        from ai_earn.state_storage import LATEST_SCHEMA_VERSION
         self.assertEqual(payload["checks"]["backups"]["count"], LATEST_SCHEMA_VERSION-1)
         self.assertEqual(payload["checks"]["backups"]["expected"], LATEST_SCHEMA_VERSION-1)
         self.assertEqual(payload["checks"]["backups"]["status"], "ok")
@@ -92,7 +90,7 @@ class HealthTests(unittest.TestCase):
         auth = AuthService(AuthStorage(self.auth_path, create=True), self.clock)
         auth.register("alice", "disposable test password")
         state = StateStorage(self.state_path, create=True, confirmed=True)
-        for v in range(2, 25):
+        for v in range(2, LATEST_SCHEMA_VERSION+1):
             getattr(state, f"migrate_to_v{v}")(self.directory / f"before-v{v}.sqlite3", confirmed=True)
         out, err = io.StringIO(), io.StringIO()
         rc = health_run(["--json"], self.environ, out, err)
@@ -111,7 +109,7 @@ class HealthTests(unittest.TestCase):
         auth = AuthService(AuthStorage(self.auth_path, create=True), self.clock)
         auth.register("alice", "disposable test password")
         state = StateStorage(self.state_path, create=True, confirmed=True)
-        for v in range(2, 25):
+        for v in range(2, LATEST_SCHEMA_VERSION+1):
             getattr(state, f"migrate_to_v{v}")(self.directory / f"before-v{v}.sqlite3", confirmed=True)
         out, err = io.StringIO(), io.StringIO()
         rc = health_run(["--json", "--with-backups"], self.environ, out, err)
@@ -131,7 +129,7 @@ class HealthTests(unittest.TestCase):
         auth = AuthService(AuthStorage(self.auth_path, create=True), self.clock)
         auth.register("alice", "disposable test password")
         state = StateStorage(self.state_path, create=True, confirmed=True)
-        for v in range(2, 25):
+        for v in range(2, LATEST_SCHEMA_VERSION+1):
             getattr(state, f"migrate_to_v{v}")(self.directory / f"before-v{v}.sqlite3", confirmed=True)
         payload = check(dict(self.environ, AI_EARN_ENV="production"))
         self.assertFalse(payload["production_ready"])

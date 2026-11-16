@@ -268,10 +268,10 @@ class Phase5Tests(unittest.TestCase):
         self.assertEqual(claimed["id"], claimed_dup["id"])
 
     def test_transactional_migrations_and_integrity(self):
-        # Verify LATEST is 24 and backups count
-        self.assertEqual(LATEST_SCHEMA_VERSION, 24)
+        # Verify LATEST is 25 and backups count
+        self.assertEqual(LATEST_SCHEMA_VERSION, 25)
         with StateStorage(self.state_path).transaction() as conn:
-            self.assertEqual(_validate_schema(conn), 24)
+            self.assertEqual(_validate_schema(conn), LATEST_SCHEMA_VERSION)
             _check_integrity(conn)
         # Check backups exist
         count = len(list(self.priv.glob("before-v*.sqlite3")))

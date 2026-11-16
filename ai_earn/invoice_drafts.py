@@ -28,7 +28,7 @@ def _input(validator, value):
 
 
 def _check_version(conn: sqlite3.Connection) -> None:
-    if conn.execute("PRAGMA user_version").fetchone()[0] not in (6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24):
+    if conn.execute("PRAGMA user_version").fetchone()[0] not in (6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25):
         raise StateStorageError("State schema version 6, 7, 8, 9, 10, 11, 12, 13, 14 or 15 is required for invoice drafts.")
 
 
