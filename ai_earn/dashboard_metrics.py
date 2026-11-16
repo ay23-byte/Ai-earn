@@ -223,4 +223,16 @@ class DashboardMetrics:
                 }
                 result["income"]["verified_amount_paise"] = 0
                 # keep income status as not_available, but ledger net is separate
+            if version >= 19:
+                follow_rows = conn.execute(
+                    "SELECT status, COUNT(*) FROM followups WHERE owner_id=? GROUP BY status",
+                    (owner,),
+                ).fetchall()
+                follow_statuses = {row[0]: {"count": row[1]} for row in follow_rows}
+                result["followups"] = {
+                    "count": sum(item["count"] for item in follow_statuses.values()),
+                    "statuses": follow_statuses,
+                    "verification": "unverified",
+                    "note": "Local followups; pending/completed/cancelled unverified.",
+                }
             return result

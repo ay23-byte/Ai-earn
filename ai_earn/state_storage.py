@@ -19,7 +19,7 @@ from .auth_storage import AuthStorage, StorageError, _windows_auth_verified
 
 APPLICATION_ID = 0x41494533  # AIE3, distinct from the auth-only database.
 SCHEMA_VERSION = 1  # New files still bootstrap as version 1; upgrades are explicit.
-LATEST_SCHEMA_VERSION = 18
+LATEST_SCHEMA_VERSION = 19
 SUPPORTED_STATE_VERSIONS = frozenset(range(1, LATEST_SCHEMA_VERSION + 1))
 
 
@@ -382,6 +382,22 @@ _V17_SCHEMA = {
 
 _V18_INDEX = "CREATE UNIQUE INDEX communications_id_owner_idx ON communications(id, owner_id)"
 _V18_LEDGER_INDEX = "CREATE UNIQUE INDEX ledger_entries_id_owner_idx ON ledger_entries(id, owner_id)"
+_V19_CUSTOMER_INDEX = "CREATE UNIQUE INDEX customers_id_owner_idx ON customers(id, owner_id)"
+_V19_INDEX = "CREATE UNIQUE INDEX followups_id_owner_idx ON followups(id, owner_id)"
+
+_V19_SCHEMA = {
+    "followups": """CREATE TABLE followups (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    customer_id TEXT NOT NULL CHECK(length(customer_id)=32 AND customer_id NOT GLOB '*[^0-9a-f]*'),
+    due_at INTEGER NOT NULL CHECK(typeof(due_at)='integer' AND due_at BETWEEN 0 AND 4102444800),
+    note TEXT NOT NULL CHECK(length(note) BETWEEN 0 AND 500),
+    status TEXT NOT NULL CHECK(status IN ('pending','completed','cancelled')),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at),
+    FOREIGN KEY(customer_id, owner_id) REFERENCES customers(id, owner_id)
+)""",
+}
 
 _V18_SCHEMA = {
     "communications": """CREATE TABLE communications (
@@ -550,6 +566,12 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
             ("amount_paise", "INTEGER", 1, 0), ("currency", "TEXT", 1, 0), ("note", "TEXT", 1, 0),
             ("created_at", "INTEGER", 1, 0),
         ]
+    if version >= 19:
+        expected_columns["followups"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("customer_id", "TEXT", 1, 0),
+            ("due_at", "INTEGER", 1, 0), ("note", "TEXT", 1, 0), ("status", "TEXT", 1, 0),
+            ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+        ]
     objects = conn.execute(
         "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name"
     ).fetchall()
@@ -569,6 +591,9 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
     if version >= 18:
         expected_objects.append(("index", "communications_id_owner_idx"))
         expected_objects.append(("index", "ledger_entries_id_owner_idx"))
+    if version >= 19:
+        expected_objects.append(("index", "customers_id_owner_idx"))
+        expected_objects.append(("index", "followups_id_owner_idx"))
     if [tuple(row) for row in objects] != sorted(expected_objects, key=lambda item: item[1]):
         raise StateStorageError("State database schema is incompatible.")
     if version >= 6:
@@ -601,6 +626,13 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
             raise StateStorageError("State database schema constraints are incompatible.")
         row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='ledger_entries_id_owner_idx'").fetchone()
         if row is None or row[0] != _V18_LEDGER_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+    if version >= 19:
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='customers_id_owner_idx'").fetchone()
+        if row is None or row[0] != _V19_CUSTOMER_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='followups_id_owner_idx'").fetchone()
+        if row is None or row[0] != _V19_INDEX:
             raise StateStorageError("State database schema constraints are incompatible.")
     for table, expected in expected_columns.items():
         columns = conn.execute(f"PRAGMA table_info({table})").fetchall()
@@ -641,6 +673,8 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         schemas.append(_V17_SCHEMA)
     if version >= 18:
         schemas.append(_V18_SCHEMA)
+    if version >= 19:
+        schemas.append(_V19_SCHEMA)
     for schema in schemas:
         for name, statement in schema.items():
             row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()
@@ -781,6 +815,15 @@ def _apply_v18(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA user_version = 18")
 
 
+def _apply_v19(conn: sqlite3.Connection) -> None:
+    conn.execute(_V19_CUSTOMER_INDEX)
+    for statement in _V19_SCHEMA.values():
+        conn.execute(statement)
+    conn.execute(_V19_INDEX)
+    conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (19, int(time.time())))
+    conn.execute("PRAGMA user_version = 19")
+
+
 def _check_managed_pairs(conn: sqlite3.Connection, owner=None, queue_id=None, workflow_id=None, association_id=None) -> None:
     """Check managed-parent state combinations, not history authenticity."""
     invalid = conn.execute("""
@@ -881,6 +924,7 @@ _OPERATION_RESULTS = (
     (17, "customer", "customers"),
     (18, "communication", "communications"),
     (18, "ledger_entry", "ledger_entries"),
+    (19, "followup", "followups"),
 )
 
 
@@ -951,6 +995,7 @@ _CREATION_EVENTS = (
     (17, "customers", "customer", "customer_created"),
     (18, "communications", "communication", "communication_created"),
     (18, "ledger_entries", "ledger_entry", "ledger_entry_created"),
+    (19, "followups", "followup", "followup_created"),
 )
 
 
@@ -1093,6 +1138,11 @@ _MULTI_STEP_HISTORIES = (
         ("draft", "communication_sent"): "sent",
         ("draft", "communication_archived"): "archived",
         ("sent", "communication_archived"): "archived",
+    }),
+    (19, "followups", "followup", {
+        (None, "followup_created"): "pending",
+        ("pending", "followup_completed"): "completed",
+        ("pending", "followup_cancelled"): "cancelled",
     }),
 )
 
@@ -1571,6 +1621,19 @@ class StateStorage:
             self.backup_to(backup, confirmed=True)
             _apply_v18(conn)
             if _validate_schema(conn) != 18:
+                raise StateStorageError("Migration produced an incompatible schema.")
+            _check_integrity(conn)
+
+    def migrate_to_v19(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 18 only after a checked non-overwriting backup."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 18:
+                raise StateStorageError("Only version 18 can be upgraded to version 19.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v19(conn)
+            if _validate_schema(conn) != 19:
                 raise StateStorageError("Migration produced an incompatible schema.")
             _check_integrity(conn)
 

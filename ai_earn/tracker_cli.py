@@ -2,7 +2,7 @@
 
 No payment is verified, received or processed. Use only disposable data.
 Now includes v15 opportunity discovery, v16 service catalog/portfolio,
-v17 product workspace & customers, and v18 communications & ledger.
+v17 product workspace & customers, v18 communications & ledger, and v19 followups & CSV.
 """
 
 import getpass
@@ -18,6 +18,7 @@ from .config import ConfigurationError, load_settings
 from .communications import Communications, CommunicationError
 from .customers import Customers, CustomerError
 from .financial_assertions import FinancialAssertions, FinancialAssertionError
+from .followups import Followups, FollowupError
 from .opportunities import Opportunities, OpportunityError
 from .ledger import Ledger, LedgerError
 from .products import Products, ProductError
@@ -66,6 +67,11 @@ _COMM_STATUS_LABELS = {
     "archived": "archived",
 }
 _LEDGER_KINDS = {"income", "expense", "refund", "fee"}
+_FOLLOWUP_STATUS_LABELS = {
+    "pending": "pending",
+    "completed": "completed",
+    "cancelled": "cancelled",
+}
 
 
 def _read(stdin, out, prompt):
@@ -93,17 +99,22 @@ def _key():
 
 def _initialize_state(path):
     # Only initialize a new file; never silently upgrade an existing database.
-    backups = [path.with_name(path.name + f".before-v{version}.sqlite3") for version in range(2, 19)]
+    backups = [path.with_name(path.name + f".before-v{version}.sqlite3") for version in range(2, 20)]
     if path.exists() or path.is_symlink() or any(p.exists() or p.is_symlink() for p in backups):
         raise StateStorageError("State or migration backup already exists; no initialization was attempted.")
     state = StateStorage(path, create=True, confirmed=True)
-    for version, backup in zip(range(2, 19), backups):
+    for version, backup in zip(range(2, 20), backups):
         getattr(state, f"migrate_to_v{version}")(backup, confirmed=True)
     return state
 
 
-def _menu(service, token, stdin, out, opportunities=None, services=None, portfolio=None, products=None, customers=None, communications=None, ledger=None):
-    # service = FinancialAssertions, opportunities = Opportunities, services/portfolio = v16, products/customers = v17, comm/ledger = v18
+def _csv_preview(text: str, limit: int = 500) -> str:
+    sample = text.replace("\n", "\\n")[:limit]
+    return sample + ("..." if len(text) > limit else "")
+
+
+def _menu(service, token, stdin, out, opportunities=None, services=None, portfolio=None, products=None, customers=None, communications=None, ledger=None, followups=None):
+    # service = FinancialAssertions, opportunities = Opportunities, services/portfolio = v16, products/customers = v17, comm/ledger = v18, followups = v19
     out.write("Local tracker: all entries are UNVERIFIED. No payment processing or settlement.\n")
     has_opp = opportunities is not None
     has_svc = services is not None and portfolio is not None
@@ -111,6 +122,7 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
     has_cust = customers is not None
     has_comm = communications is not None
     has_ledger = ledger is not None
+    has_follow = followups is not None
     extras = []
     if has_opp:
         extras.append("Opportunities v15 (5-8)")
@@ -128,6 +140,8 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
         extras.append("Comms v18 (19-21)")
     elif has_ledger:
         extras.append("Ledger v18 (22)")
+    if has_follow:
+        extras.append("Followups v19 (23-25) + CSV 26-27" if has_cust else "Followups v19 (23-25)")
     if extras:
         out.write("Financial (1-4), " + ", ".join(extras) + " available.\n")
     segments = ["1 Add financial  2 List financial  3 Advance financial  4 Withdraw financial"]
@@ -143,11 +157,15 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
         segments.append("19 Add comm  20 List comms  21 Manage comm")
     if has_ledger:
         segments.append("22 Ledger")
+    if has_follow:
+        segments.append("23 Add followup  24 List followups  25 Manage followup")
+        if has_cust:
+            segments.append("26 Import CSV  27 Export CSV")
     prompt = "\n" + " | ".join(segments) + "  0 Sign out\nChoice: "
     # legacy no-opp/no-svc prompt (financial pipeline wording remains for v13-like fallback)
     legacy_prompt = "\n1 Add opportunity  2 List entries  3 Advance stage  4 Withdraw  0 Sign out\nChoice: "
     while True:
-        if not has_opp and not has_svc and not has_prod and not has_cust and not has_comm and not has_ledger:
+        if not has_opp and not has_svc and not has_prod and not has_cust and not has_comm and not has_ledger and not has_follow:
             choice = _read(stdin, out, legacy_prompt).strip()
         else:
             choice = _read(stdin, out, prompt).strip()
@@ -536,6 +554,85 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                     out.write(f"Ledger net: INR {result['net_paise'] // 100}.{result['net_paise'] % 100:02d} (income {result['totals']['income']//100}.{result['totals']['income']%100:02d} - expense {result['totals']['expense']//100}.{result['totals']['expense']%100:02d} - refund {result['totals']['refund']//100}.{result['totals']['refund']%100:02d} - fee {result['totals']['fee']//100}.{result['totals']['fee']%100:02d}) count:{result['count']}\n")
                 else:
                     out.write("Invalid ledger choice.\n")
+            elif has_follow and choice == "23":
+                cid = _read(stdin, out, "Customer ID: ").strip()
+                due_raw = _read(stdin, out, "Due at unix timestamp (0 for none): ").strip()
+                if due_raw == "":
+                    due_raw = "0"
+                try:
+                    due = int(due_raw)
+                except ValueError:
+                    raise ValueError("Due must be integer timestamp or 0.")
+                note = _read(stdin, out, "Note (0-500, empty for none): ")
+                ident = followups.create(token, cid, due, note, operation_key=_key())
+                out.write(f"Created followup pending: {ident}\n")
+            elif has_follow and choice == "24":
+                cid_f = _read(stdin, out, "Filter customer ID (empty for all): ").strip()
+                if cid_f == "":
+                    cid_f = None
+                status_f = _read(stdin, out, "Filter status [pending/completed/cancelled or empty]: ").strip()
+                if status_f == "":
+                    status_f = None
+                cursor = None
+                while True:
+                    entries = followups.list(token, after_id=cursor, limit=50, customer_id=cid_f, status=status_f)
+                    for item in entries:
+                        out.write(f"{item['id']} | cust:{item['customer_id'][:8]} | due:{item['due_at']} | {item['status']} | {item['note'][:40]}\n")
+                    if len(entries) < 50:
+                        break
+                    if _read(stdin, out, "More? Type YES: ").strip() != "YES":
+                        break
+                    cursor = entries[-1]["id"]
+                if cursor is None and not entries:
+                    out.write("No followups.\n")
+            elif has_follow and choice == "25":
+                ident = _read(stdin, out, "Followup ID: ").strip()
+                item = followups.get(token, ident)
+                out.write(f"Current: cust:{item['customer_id'][:8]} | due:{item['due_at']} | {item['status']} | {item['note'][:40]}\n")
+                out.write("Transitions: 1 completed  2 cancelled\n")
+                tchoice = _read(stdin, out, "Choose (1-2) or empty to cancel: ").strip()
+                if tchoice == "":
+                    out.write("No change.\n")
+                    continue
+                if tchoice == "1":
+                    out.write("Complete followup?\n")
+                    if _read(stdin, out, "Type YES to confirm: ").strip() != "YES":
+                        out.write("No change.\n")
+                        continue
+                    followups.completed(token, ident, operation_key=_key())
+                    out.write("Followup completed.\n")
+                elif tchoice == "2":
+                    out.write("Cancel followup?\n")
+                    if _read(stdin, out, "Type YES to confirm: ").strip() != "YES":
+                        out.write("No change.\n")
+                        continue
+                    followups.cancelled(token, ident, operation_key=_key())
+                    out.write("Followup cancelled.\n")
+                else:
+                    out.write("Invalid choice.\n")
+            elif has_follow and has_cust and choice == "26":
+                out.write("Paste CSV text (header name,contact,source). End with a line containing only '.'\n")
+                lines = []
+                while True:
+                    line = _read(stdin, out, "")
+                    if line == ".":
+                        break
+                    lines.append(line)
+                csv_text = "\n".join(lines)
+                if not csv_text.strip():
+                    out.write("No CSV provided.\n")
+                else:
+                    pref = _read(stdin, out, "Operation key prefix (1-64, for idempotency): ").strip()
+                    if pref == "":
+                        pref = "csv_import"
+                    result = customers.import_csv(token, csv_text, operation_key_prefix=pref)
+                    out.write(f"CSV import: {len(result['created'])} created\n")
+                    for ident in result["created"]:
+                        out.write(f"  {ident}\n")
+            elif has_follow and has_cust and choice == "27":
+                csv_text = customers.export_csv(token)
+                out.write("CSV export:\n")
+                out.write(csv_text + "\n")
             else:
                 parts = ["0 Sign out", "1-4 financial"]
                 if has_opp:
@@ -550,8 +647,12 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                     parts.append("19-21 comms")
                 if has_ledger:
                     parts.append("22 ledger")
+                if has_follow:
+                    parts.append("23-25 followups")
+                    if has_cust:
+                        parts.append("26-27 CSV")
                 out.write("Choose " + ", ".join(parts) + ".\n")
-        except (FinancialAssertionError, OpportunityError, ServiceError, ProductError, CustomerError, CommunicationError, LedgerError, ValueError, StateStorageError) as exc:
+        except (FinancialAssertionError, OpportunityError, ServiceError, ProductError, CustomerError, CommunicationError, LedgerError, FollowupError, ValueError, StateStorageError) as exc:
             out.write(str(exc) + "\n")
         except AccessDenied as exc:
             out.write(str(exc) + "\n")
@@ -577,19 +678,19 @@ def run(action, environ, stdin, out, err):
                 out.write("No files created.\n")
                 return 0
             _initialize_state(path)
-            out.write("New tracker state initialized (v18, 17 backups). Register an account with the auth command if needed.\n")
+            out.write("New tracker state initialized (v19, 18 backups). Register an account with the auth command if needed.\n")
             return 0
         # Open only; missing files are never created during login.
         state = StateStorage(path)
         with state.transaction() as conn:
             version = conn.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (13, 14, 15, 16, 17, 18):
-                raise StateStorageError("Tracker requires an existing version 13, 14, 15, 16, 17 or 18 state file; no upgrade was performed.")
+            if version not in (13, 14, 15, 16, 17, 18, 19):
+                raise StateStorageError("Tracker requires an existing version 13, 14, 15, 16, 17, 18 or 19 state file; no upgrade was performed.")
         auth = AuthService(AuthStorage(Path(auth_path), create=False))
         username = _read(stdin, out, "Username: ")
         password = _secret("Password: ", err)
         token = auth.login(username, password)
-        # Opportunities available on 15+, services/portfolio on 16+, products/customers on 17+, comm/ledger on 18+
+        # Opportunities available on 15+, services/portfolio on 16+, products/customers on 17+, comm/ledger on 18+, followups on 19+
         opp = Opportunities(auth, state) if version >= 15 else None
         svc = Services(auth, state) if version >= 16 else None
         port = Portfolio(auth, state) if version >= 16 else None
@@ -597,7 +698,8 @@ def run(action, environ, stdin, out, err):
         cust = Customers(auth, state) if version >= 17 else None
         comm = Communications(auth, state) if version >= 18 else None
         ledg = Ledger(auth, state) if version >= 18 else None
-        _menu(FinancialAssertions(auth, state), token, stdin, out, opp, svc, port, prod, cust, comm, ledg)
+        foll = Followups(auth, state) if version >= 19 else None
+        _menu(FinancialAssertions(auth, state), token, stdin, out, opp, svc, port, prod, cust, comm, ledg, foll)
         return 0
     except (AuthError, StorageError, StateStorageError, ConfigurationError):
         err.write("Tracker could not open or complete the operation. Check your account, private paths and state version; no automatic replacement is performed.\n")

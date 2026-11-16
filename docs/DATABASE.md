@@ -6,7 +6,7 @@
 
 - **Auth DB** (`AI_EARN_AUTH_DB`, `user_version 1`): `accounts(id, username UNIQUE, password_salt, password_hash, password_iterations, recovery_hash, created_at)`, `sessions(token_hash PK, account_id FK, expires_at, revoked_at)`, `auth_attempts(action, subject, occurred_at) + index`, `auth_audit(id PK, occurred_at, event, account_id FK)`. Private POSIX 0700/0600 or Windows ACL, `BEGIN IMMEDIATE`, `mode=rw` URI.
 
-- **State DB** (`AI_EARN_STATE_DB`, `APPLICATION_ID 0x41494533`, `user_version 1→16`): `state_meta`, `state_migrations(version PK, applied_at)`, plus versioned tables:
+- **State DB** (`AI_EARN_STATE_DB`, `APPLICATION_ID 0x41494533`, `user_version 1→19`): `state_meta`, `state_migrations(version PK, applied_at)`, plus versioned tables:
   - `v2` `state_audit`, `state_operations(owner_id, operation_key) PK, request_hash, resource_type, resource_id`
   - `v3` `opportunity_drafts`
   - `v4` `task_plans`
@@ -24,19 +24,20 @@
   - `v16` `services` (title, scope, deliverable, price_paise, revisions, status `draft→published→archived`) + `portfolio_items` (service FK, title, description) + `services_id_owner_idx`
   - `v17` `products` (title 1-200, description 0-2000, version 1-20 `[A-Za-z0-9._-]` , price_paise 0..1e12 INR, status `draft→published→archived`) + `customers` (name 1-200, contact 1-500, source 0-500, status `lead→contacted→converted/rejected`) + `products_id_owner_idx`
   - `v18` `communications` (customer_id FK, channel 1-30, body 1-2000, status `draft→sent→archived`) + `ledger_entries` (kind income/expense/refund/fee, amount 0..1e12 INR, note 0-500) + `communications_id_owner_idx` + `ledger_entries_id_owner_idx`
+  - `v19` `followups` (customer_id FK `(customer_id, owner_id)`, due_at 0..4102444800, note 0..500, status `pending→completed/cancelled`) + `customers_id_owner_idx` + `followups_id_owner_idx`
 
 All tables have `CHECK (length(owner_id)=32 AND hex)` except `state_*`, plus `CHECK (owner_id = hex)`, and foreign keys to `owner_id`. Amounts are `CHECK typeof='integer' AND BETWEEN 0 AND 1e12`.
 
 ## Migrations
 
-- Explicit, backup-first: `StateStorage.migrate_to_v2` … `migrate_to_v18`, each holds `transaction` write lock, calls `backup_to(verified_new_path, confirmed=True)`, applies DDL, inserts `state_migrations`, `PRAGMA user_version = N`, then `validate_schema` + `check_integrity`. `backup_to` verifies source integrity, `create_exclusive` on destination (fails if exists), `source.backup(destination)`, verifies destination.
+- Explicit, backup-first: `StateStorage.migrate_to_v2` … `migrate_to_v18, migrate_to_v19`, each holds `transaction` write lock, calls `backup_to(verified_new_path, confirmed=True)`, applies DDL, inserts `state_migrations`, `PRAGMA user_version = N`, then `validate_schema` + `check_integrity`. `backup_to` verifies source integrity, `create_exclusive` on destination (fails if exists), `source.backup(destination)`, verifies destination.
 - New files start at `v1`; no auto-upgrade; unknown `user_version` or missing `state_migrations` history → `StateStorageError`.
-- `tracker_cli._initialize_state` creates `state.sqlite3` (v1) then migrates `v2→v18` with 17 `before-v*.sqlite3` backups, never overwriting.
+- `tracker_cli._initialize_state` creates `state.sqlite3` (v1) then migrates `v2→v19` with 18 `before-v*.sqlite3` backups, never overwriting.
 
 ## Integrity & ownership
 
-- `validate_schema` checks `application_id`, `user_version` in 1..16, expected tables/columns/indexes/sql, migration history `1..N`.
-- `check_integrity` (`PRAGMA quick_check`, `foreign_key_check`, then versioned: `check_operation_results`, `check_audit_operation_balance`, `check_proposed_amount_snapshots`, `check_queue_integrity`, `check_creation_events`, `check_terminal_transition_events`, `check_multistep_histories` (now includes `opportunities` discovered→…→archived/dismissed and `services` draft→published→archived), `check_paired_completions`, `check_managed_pairs`, `check_financial_assertion_binding`, `check_sandbox_payment_integrity`).
+- `validate_schema` checks `application_id`, `user_version` in 1..19, expected tables/columns/indexes/sql, migration history `1..N`.
+- `check_integrity` (`PRAGMA quick_check`, `foreign_key_check`, then versioned: `check_operation_results`, `check_audit_operation_balance`, `check_proposed_amount_snapshots`, `check_queue_integrity`, `check_creation_events`, `check_terminal_transition_events`, `check_multistep_histories` (now includes `opportunities` discovered→…→archived/dismissed, `services` draft→published→archived, `followups` pending→completed/cancelled), `check_paired_completions`, `check_managed_pairs`, `check_financial_assertion_binding`, `check_sandbox_payment_integrity`).
 - All domain services use `state_authorization._authorized_transaction` (auth lock → state lock, derive actor from live session, recheck expiry before commit). Queries always `WHERE owner_id=?`.
 - `state_operations` idempotency is owner-scoped; coordinated deletion of marker+operation+audit can evade checks (not tamper-evident). Auth/state commits are separate → ambiguous on crash after state commit; caller must retry with same key and inspect `get_lease`/`inspect`.
 
@@ -54,6 +55,7 @@ All tables have `CHECK (length(owner_id)=32 AND hex)` except `state_*`, plus `CH
   - `products` (v17): `draft → published → archived`, plus `draft→archived`
   - `customers` (v17): `lead → contacted → converted`, `lead → rejected`, `contacted → rejected`
   - `communications` (v18): `draft → sent → archived`, plus `draft→archived`
+  - `followups` (v19): `pending → completed/cancelled` (plus `pending` creation)
   - `ledger_entries` (v18): append-only `ledger_entry_created`, net = income - expense - refund - fee (unverified)
 - `task_plans`: `planned → cancelled`
 - `order_drafts`: `draft → cancelled`
@@ -64,6 +66,6 @@ All tables have `CHECK (length(owner_id)=32 AND hex)` except `state_*`, plus `CH
 - `financial_assertions`: `potential → quote_asserted → contract_asserted → invoice_asserted → initiated_asserted → withdrawn`
 - `sandbox_payments`: `sandbox_awaiting → sandbox_confirmed → sandbox_settled → sandbox_refunded` plus `sandbox_failed` branch
 
-Disposal: all data is disposable, validated via `python -m unittest discover -v` (719/17, incl. v15 opportunity discovery + managed runner + v16 services/portfolio + v17 products/customers + v18 comms/ledger, Linux Python 3.11.2). No customer or payment data, no production use.
+Disposal: all data is disposable, validated via `python -m unittest discover -v` (732/17, incl. v15 opportunity discovery + managed runner + v16 services/portfolio + v17 products/customers + v18 comms/ledger + v19 followups/CSV, Linux Python 3.11.2). No customer or payment data, no production use.
 
 See `ARCHITECTURE.md`, `SECURITY_REVIEW.md`, `TESTING.md` for limits, and `PHASE_STATUS.md` for phase gates. Real-data recovery and production hardening are future milestones (M2, M15).

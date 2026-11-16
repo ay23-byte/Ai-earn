@@ -5,7 +5,7 @@ const count = (v) => Number.isSafeInteger(v) && v >= 0 ? String(v) : "0";
 const rupees = (v) => new Intl.NumberFormat("en-IN", {style:"currency",currency:"INR"}).format((Number.isSafeInteger(v) && v >= 0 ? v : 0) / 100);
 function render(s) {
   if (!s || s.format !== "ai-earn-dashboard-snapshot" || s.version !== 1 || !s.metrics || s.metrics.read_only !== true) throw Error("Unsupported snapshot.");
-  const m=s.metrics, w=m.work||{}, c=m.commercial||{}, p=m.asserted_pipeline||{}, o=m.payment_observations||{}, i=m.income||{}, opp=m.opportunities||{}, svc=m.services||{}, pf=m.portfolio||{}, prod=m.products||{}, cust=m.customers||{}, comm=m.communications||{}, led=m.ledger||{};
+  const m=s.metrics, w=m.work||{}, c=m.commercial||{}, p=m.asserted_pipeline||{}, o=m.payment_observations||{}, i=m.income||{}, opp=m.opportunities||{}, svc=m.services||{}, pf=m.portfolio||{}, prod=m.products||{}, cust=m.customers||{}, comm=m.communications||{}, led=m.ledger||{}, foll=m.followups||{};
   $("metricPipeline").textContent=rupees(p.amount_paise);
   $("metricPipelineNote").textContent=count(p.count)+" unverified assertion(s), not revenue";
   $("metricInvoices").textContent=rupees((c.invoice_drafts||{}).amount_paise);
@@ -29,6 +29,7 @@ function render(s) {
   $("workComms").textContent=count(comm.count);
   $("workLedger").textContent=count(led.count);
   $("workLedgerNet").textContent=rupees(led.net_paise !== undefined ? led.net_paise : 0);
+  $("workFollowups").textContent=count(foll.count);
   $("pipelineStatus").textContent=count(p.count)+" asserted record(s), not verified";
   $("paymentStatus").textContent=count(o.count)+" unverified observation(s)";
   $("sandboxStatus").textContent=count((m.sandbox_payments||{}).count)+" sandbox event(s) only";
@@ -38,6 +39,7 @@ function render(s) {
   $("customerStatus").textContent=count(cust.count)+" lead(s), unverified";
   $("commStatus").textContent=count(comm.count)+" comm(s), unverified";
   $("ledgerStatus").textContent=count(led.count)+" ledger entries, net "+rupees(led.net_paise !== undefined ? led.net_paise : 0);
+  $("followupStatus").textContent=count(foll.count)+" followup(s), unverified";
 
   $("incomeStatus").textContent=i.status==="not_available_no_verified_payment_ledger"?"No verified payment ledger":"Verification: "+(i.status||"unknown");
   $("snapshotGenerated").textContent=s.exported_at||"Timestamp unavailable";
@@ -59,9 +61,9 @@ $("snapshotFile").addEventListener("change", async (event) => {
   }
 });
 $("clearSnapshot").addEventListener("click", () => {
-  ["metricPipeline","metricInvoices","metricObservations","metricIncome","workOpportunities","workOpps","workPlans","workQueued","workWorkflows","workOrders","workInvoices","workServices","workPortfolio","workProducts","workCustomers","workComms","workLedger","workLedgerNet"].forEach(id => $(id).textContent="—");
+  ["metricPipeline","metricInvoices","metricObservations","metricIncome","workOpportunities","workOpps","workPlans","workQueued","workWorkflows","workOrders","workInvoices","workServices","workPortfolio","workProducts","workCustomers","workComms","workLedger","workLedgerNet","workFollowups"].forEach(id => $(id).textContent="—");
 
-  ["metricPipelineNote","metricInvoicesNote","metricObservationsNote","metricIncomeNote","pipelineStatus","paymentStatus","sandboxStatus","opportunityStatus","serviceStatus","productStatus","customerStatus","commStatus","ledgerStatus","incomeStatus"].forEach(id => $(id).textContent="No snapshot loaded");
+  ["metricPipelineNote","metricInvoicesNote","metricObservationsNote","metricIncomeNote","pipelineStatus","paymentStatus","sandboxStatus","opportunityStatus","serviceStatus","productStatus","customerStatus","commStatus","ledgerStatus","followupStatus","incomeStatus"].forEach(id => $(id).textContent="No snapshot loaded");
   ["snapshotGenerated","snapshotSchema"].forEach(id => $(id).textContent="Not loaded");
   $("snapshotMode").textContent="Waiting for a snapshot";
   $("snapshotStatus").textContent="No snapshot loaded";

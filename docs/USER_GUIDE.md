@@ -32,6 +32,8 @@ Windows: same via PowerShell `create_private_directory` (see `README.md`). The p
 - **Add customer (v17):** `16` → name → contact → source. Stored as `lead` (unverified). Then `15` manage product publish/archive, `18` manage customer contacted/converted/rejected. `14`/`17` list with filters.
 - **Add communication (v18):** `19` → customer ID → channel 1-30 → body 1-2000. Stored as `draft` (unverified). `20` list, `21` sent/archive.
 - **Ledger (v18):** `22` → 1 add (kind income/expense/refund/fee, amount INR, note 0-500), 2 list, 3 net (income - expense - refund - fee, unverified).
+- **Add followup (v19):** `23` → customer ID → due timestamp 0..4102444800 → note 0-500. Stored as `pending` (unverified). `24` list (customer/status filters, pages 50), `25` complete/cancel (1 completed, 2 cancelled, requires YES).
+- **CSV (v19):** `26` import (paste lines, end with `.`, prefix 1-64 for idempotency, header name,contact,source, 1000-row/1M limit), `27` export (CSV to terminal).
 - **List services:** `10` → optional status filter draft/published/archived → pages 50.
 - **Manage service:** `11` → ID → 1 publish / 2 archive → YES (transitions `draft→published→archived` etc, `draft→archived` allowed).
 - **Portfolio:** `12` → 1 add item (service ID + title + description) / 2 list items (service filter, pages 50). Items are demo only, linked via FK `service_id`.
@@ -63,7 +65,7 @@ Statuses: `not_configured` (set env), `relative_path`, `invalid_path`, `permissi
 ## What is not ready
 
 - Opportunity discovery is experimental local drafts only (v15 `opportunities`, manual/connector, unverified, draft ranking, stub AI helpers). No verified external source, no evidence scoring.
-- Service catalog & portfolio are experimental local drafts only (v16 `services` draft→published→archived, `portfolio_items` demo, unverified). Product workspace & customers are experimental local drafts only (v17 `products` draft→published→archived, `customers` lead→…→converted/rejected, unverified). Communications & ledger are experimental local drafts only (v18 `communications` draft→sent→archived, `ledger_entries` income/expense/refund/fee net unverified). No external send/settlement, no delivery proof, no external publish/sync.
-- No CRM, no invoicing PDF, no ledger net income, no Razorpay/Stripe live, no autonomous AI. Do not enter real customer/financial data.
+- Service catalog & portfolio are experimental local drafts only (v16 `services` draft→published→archived, `portfolio_items` demo, unverified). Product workspace & customers are experimental local drafts only (v17 `products` draft→published→archived, `customers` lead→…→converted/rejected, unverified). Communications & ledger are experimental local drafts only (v18 `communications` draft→sent→archived, `ledger_entries` income/expense/refund/fee net unverified). Followups & CSV are experimental local drafts only (v19 `followups` pending→completed/cancelled, customer CSV import/export 1M/1000-row limits, unverified). No external send/settlement, no delivery proof, no external publish/sync.
+- No verified CRM, no invoicing PDF, no verified ledger settlement, no Razorpay/Stripe live, no autonomous AI. `followups` pending→completed/cancelled and CSV import/export (v19) are local drafts only, not verified external tasks. Do not enter real customer/financial data.
 
 See `docs/ARCHITECTURE.md`, `DATABASE.md`, `PAYMENTS.md`, `SECURITY_REVIEW.md` for limits.

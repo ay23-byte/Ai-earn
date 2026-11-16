@@ -37,7 +37,7 @@ def _authorized_transaction(
     # Keep this order everywhere: auth before state, to avoid lock inversion.
     with auth.storage.transaction() as auth_conn:
         with state.transaction() as state_conn:
-            if state_conn.execute("PRAGMA user_version").fetchone()[0] not in (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18):
+            if state_conn.execute("PRAGMA user_version").fetchone()[0] not in (2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 19):
                 raise StateStorageError("State schema version 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 or 15 is required.")
             now = int(auth.clock())
             session = auth_conn.execute(
