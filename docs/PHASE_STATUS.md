@@ -284,6 +284,15 @@ The user approved an offline manual tracker as a smaller goal. This is a separat
 - **CLI:** `tracker_cli.py` now **48-choice** adds `Connectors v22 (46-48)` (46 list connectors, 47 fetch Gmail/Drive/GitHub stub bounded, 48 import via connector with prefix idempotency via `import_from_connector`), all `ConnError` handled. Manual fallback `ManualConnector` always available.
 - **Tests:** New `tests/test_connectors.py` 11 tests disposable (connector_id validation, auth 32..128 redaction, throttle per-owner isolation + reset, retry delays/should_retry, normalize extra-field/missing/invalid, Gmail stub throttle/revoke, Drive/GitHub stubs, manual fallback, integration import idempotency `gmail_sync` vs `gmail_sync2`, least-privilege capped 100 + no network). All **807 tests OK / 17 skipped** Linux Python 3.11.2, `compileall OK`. Gate updated to require `test_connectors` (now 40 focused cases).
 
+## M13 — Frontend SPA v22 (vanilla hash router, 17 views, dark/light, responsive, a11y) (2026-11-16)
+
+- **Branch/state:** `arena/c6693e06-ai-earn` at this commit (origin `v22 frontend SPA`), `LATEST 22` (no new DB tables, static frontend).
+- **Decision ADR-006:** Vanilla SPA — no React/Vue, no build, no CDN, no lockfile. Rationale: preserve stdlib-only backend, keep `production_ready:false`, avoid hardening a JS build pipeline before real-data recovery and live-payment gates pass. Revisit if HTTP API or SSR is introduced (M15).
+- **Files:** New `dashboard/app.html` (17 hash routes `#/overview`…`#/diagnostics`, `data-route`/`data-view`, skip link, `themeToggle`, `snapshotFile` 1 MB cap, `snapshotStatus` `aria-live`, `nav` + `main` focus), `dashboard/app.js` (hash router `normalizeRoute`, `localStorage earn_os_theme` + `prefers-color-scheme`, 1 MB + `read_only` + format `ai-earn-dashboard-snapshot` v1 validation, `FileReader` no fetch, `rupees`/`count` + per-view render from real metrics only, loading `Loading snapshot…` / error `Unsupported snapshot` / empty `No snapshot loaded` honest states, `aria-current`), `dashboard/app.css` (`:root` + `[data-theme="light"]` variables, `color-scheme: dark light`, responsive `820px` hamburger `navToggle` + `560px` grid collapse, `focus-visible`), `dashboard/index.html` now redirects to `app.html` with legacy `connected.html` link preserved. No network request, no hardcoded INR demo, no mockData.
+- **Views (17):** overview (pipeline/invoices/observations/income + streams funnel/services/products/customers/ledger/invoices/provider/AI, integrity), opportunities (count/budget/by_status), services (count/price/by_status), portfolio (count), products (count/price/by_status), customers (count/by_status), communications (count/by_status), followups (count/by_status), ledger (count/net/by_kind + 11-concept 13 rows), invoices (count/amount/by_status), provider (orders/events/by_status/by_provider), analytics (funnel/MRR/buckets UTC), ai-approvals (approvals/emergency/by_status + policy note), connectors (stubs note), queue (queued_tasks + workflows), workflows (managed/completions boundaries), diagnostics (generated/schema/mode/fileName, doctor/recovery notes, boundaries).
+- **A11y/perf:** `skip → #main`, `nav aria-label`, `aria-current="page"`, `role="status" aria-live="polite"`, `tabindex="-1"` on main, `focus-visible`, `meta viewport`, `meta color-scheme`, no external font/CDN, responsive grids collapse on 1100/820/560.
+- **Tests:** New `tests/test_frontend_spa.py` 16 tests (files exist, viewport+color-scheme, 17 nav `data-route` + 17 `data-view`, themeToggle+snapshotFile+snapshotStatus, skip+aria-current, app.css/js refs, no hardcoded mock amounts via `ai-earn-dashboard-snapshot` check, js router+theme+localStorage+prefers-color-scheme+ROUTES, 1 MB + read_only validation, no `fetch(http`/`localhost`, dark/light CSS + responsive, index redirects to app.html + legacy, empty/error/loading, tabindex + aria-labelledby). All **823 tests OK / 17 skipped** Linux Python 3.11.2, `compileall OK`. Gate updated to require `test_frontend_spa` (now 41 focused cases).
+
 
 ## Remaining phases
 
@@ -344,11 +353,12 @@ Each phase depends on the immediately previous phase passing (including document
 | 9 | Orders, invoicing and ledger | DONE (experimental v20 ledger hardening + invoices, shipped) | v20 11-concept ledger (proposed/quote/contract/invoice/initiated vs not_implemented verified vs synthetic settled, net = settled(synthetic) - refunds - fees - costs) + auditable `invoices` draft→issued→paid/overdue/void with PDF stub SHA-256, tracker 28-30, dashboard `invoices`/`ledger_11`, 748/17; invoicing is local stub, not issued demand | 10 |
 | 10 | Payment-provider sandbox | DONE (experimental v21 Razorpay/Stripe HMAC sandbox, shipped) | Verified provider sandbox (Razorpay HMAC hex, Stripe t=,v1=, raw-body before JSON, event_id idempotency, amount binding, 765/17) | Verified provider sandbox, events and reconciliation; credentials/eligibility needed | 11 |
 | 11 | Live payment readiness | NOT_STARTED | Merchant eligibility, explicit approval and verified readiness; no unauthorized live transactions | 12 |
-| 12 | External platform connectors | NOT_STARTED | Authorized APIs, least privilege and fallback; credentials may be needed | 13 |
-| 13 | Controlled autonomy | NOT_STARTED | Enforced permissions, scoped approvals, audit and emergency stop | 14 |
-| 14 | Revenue analytics and optimization | NOT_STARTED | Actual-data reporting, transparent estimates and budgets | 15 |
-| 15 | Production hardening and deployment | NOT_STARTED | Security, backups, monitoring and verified rollback | 16 |
-| 16 | Continuous improvement | NOT_STARTED | Measured operational reviews and gated changes | Subsequent gated improvements |
+| 12 | External platform connectors | DONE (experimental v22 stubs, shipped) | Gmail/Drive/GitHub stubs 10/min, normalize bounded, manual fallback, 807/17 | 13 |
+| 13 | Controlled autonomy | DONE (experimental v22 ToolRegistry/ApprovalQueue, shipped) | ToolRegistry 8 tools read/draft/consequential, TTL virtual expiry + emergency stop + injection isolation, 786/17 | 14 |
+| 14 | Revenue analytics and optimization | DONE (experimental v22 Analytics, shipped) | funnel/MRR/conversion/workload/time-range/CSV read-only, UTC buckets, 796/17 | 15 |
+| 15 | Frontend & UX (Production SPA) | DONE (experimental v22 Vanilla SPA, shipped) | 17 hash views, dark/light responsive a11y, no mock, snapshot-only, 823/17 | 16 |
+| 16 | Production hardening and deployment | NOT_STARTED | Security, backups, monitoring and verified rollback; `production_ready:false` until sign-off | 17 |
+| 17 | Continuous improvement | NOT_STARTED | Measured operational reviews and gated changes | Subsequent gated improvements |
 
 ## Handoff / resume
 
