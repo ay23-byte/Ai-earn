@@ -11,7 +11,7 @@ mkdir -m 700 ~/.ai-earn-private
 export AI_EARN_AUTH_DB=~/.ai-earn-private/auth.sqlite3
 export AI_EARN_STATE_DB=~/.ai-earn-private/state.sqlite3
 .venv/bin/python -m ai_earn auth register   # hidden password, save one-time code
-.venv/bin/python -m ai_earn tracker init    # type YES, creates state.sqlite3 + 16 before-v*.sqlite3 (v2→v17)
+.venv/bin/python -m ai_earn tracker init    # type YES, creates state.sqlite3 + 17 before-v*.sqlite3 (v2→v18)
 .venv/bin/python -m ai_earn tracker open    # login: 1-4 financial, 5-8 opportunities, 9-12 services/portfolio, 0=logout
 ```
 
@@ -30,6 +30,8 @@ Windows: same via PowerShell `create_private_directory` (see `README.md`). The p
 - **Add service (v16):** `9` → title → scope → deliverable → price INR → revisions 0-100. Stored as `draft` (unverified catalog, not verified offering).
 - **Add product (v17):** `13` → title → description → version `[A-Za-z0-9._-]` → price INR. Stored as `draft` (unverified).
 - **Add customer (v17):** `16` → name → contact → source. Stored as `lead` (unverified). Then `15` manage product publish/archive, `18` manage customer contacted/converted/rejected. `14`/`17` list with filters.
+- **Add communication (v18):** `19` → customer ID → channel 1-30 → body 1-2000. Stored as `draft` (unverified). `20` list, `21` sent/archive.
+- **Ledger (v18):** `22` → 1 add (kind income/expense/refund/fee, amount INR, note 0-500), 2 list, 3 net (income - expense - refund - fee, unverified).
 - **List services:** `10` → optional status filter draft/published/archived → pages 50.
 - **Manage service:** `11` → ID → 1 publish / 2 archive → YES (transitions `draft→published→archived` etc, `draft→archived` allowed).
 - **Portfolio:** `12` → 1 add item (service ID + title + description) / 2 list items (service filter, pages 50). Items are demo only, linked via FK `service_id`.
@@ -61,7 +63,7 @@ Statuses: `not_configured` (set env), `relative_path`, `invalid_path`, `permissi
 ## What is not ready
 
 - Opportunity discovery is experimental local drafts only (v15 `opportunities`, manual/connector, unverified, draft ranking, stub AI helpers). No verified external source, no evidence scoring.
-- Service catalog & portfolio are experimental local drafts only (v16 `services` draft→published→archived, `portfolio_items` demo, unverified). Product workspace & customers are experimental local drafts only (v17 `products` draft→published→archived, `customers` lead→…→converted/rejected, unverified). No customer contract, no delivery proof, no external publish/sync.
+- Service catalog & portfolio are experimental local drafts only (v16 `services` draft→published→archived, `portfolio_items` demo, unverified). Product workspace & customers are experimental local drafts only (v17 `products` draft→published→archived, `customers` lead→…→converted/rejected, unverified). Communications & ledger are experimental local drafts only (v18 `communications` draft→sent→archived, `ledger_entries` income/expense/refund/fee net unverified). No external send/settlement, no delivery proof, no external publish/sync.
 - No CRM, no invoicing PDF, no ledger net income, no Razorpay/Stripe live, no autonomous AI. Do not enter real customer/financial data.
 
 See `docs/ARCHITECTURE.md`, `DATABASE.md`, `PAYMENTS.md`, `SECURITY_REVIEW.md` for limits.

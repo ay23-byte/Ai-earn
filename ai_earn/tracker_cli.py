@@ -2,7 +2,7 @@
 
 No payment is verified, received or processed. Use only disposable data.
 Now includes v15 opportunity discovery, v16 service catalog/portfolio,
-and v17 product workspace & customers.
+v17 product workspace & customers, and v18 communications & ledger.
 """
 
 import getpass
@@ -15,9 +15,11 @@ from .auth import AccessDenied, AuthError, AuthService
 from .auth_cli import _secret
 from .auth_storage import AuthStorage, StorageError
 from .config import ConfigurationError, load_settings
+from .communications import Communications, CommunicationError
 from .customers import Customers, CustomerError
 from .financial_assertions import FinancialAssertions, FinancialAssertionError
 from .opportunities import Opportunities, OpportunityError
+from .ledger import Ledger, LedgerError
 from .products import Products, ProductError
 from .services import Services, Portfolio, ServiceError
 from .state_storage import StateStorage, StateStorageError
@@ -58,6 +60,12 @@ _CUST_TRANSITIONS = {
     "2": ("converted", "customer_converted"),
     "3": ("rejected", "customer_rejected"),
 }
+_COMM_STATUS_LABELS = {
+    "draft": "draft (unverified)",
+    "sent": "sent (unverified)",
+    "archived": "archived",
+}
+_LEDGER_KINDS = {"income", "expense", "refund", "fee"}
 
 
 def _read(stdin, out, prompt):
@@ -85,22 +93,24 @@ def _key():
 
 def _initialize_state(path):
     # Only initialize a new file; never silently upgrade an existing database.
-    backups = [path.with_name(path.name + f".before-v{version}.sqlite3") for version in range(2, 18)]
+    backups = [path.with_name(path.name + f".before-v{version}.sqlite3") for version in range(2, 19)]
     if path.exists() or path.is_symlink() or any(p.exists() or p.is_symlink() for p in backups):
         raise StateStorageError("State or migration backup already exists; no initialization was attempted.")
     state = StateStorage(path, create=True, confirmed=True)
-    for version, backup in zip(range(2, 18), backups):
+    for version, backup in zip(range(2, 19), backups):
         getattr(state, f"migrate_to_v{version}")(backup, confirmed=True)
     return state
 
 
-def _menu(service, token, stdin, out, opportunities=None, services=None, portfolio=None, products=None, customers=None):
-    # service = FinancialAssertions, opportunities = Opportunities, services/portfolio = v16, products/customers = v17
+def _menu(service, token, stdin, out, opportunities=None, services=None, portfolio=None, products=None, customers=None, communications=None, ledger=None):
+    # service = FinancialAssertions, opportunities = Opportunities, services/portfolio = v16, products/customers = v17, comm/ledger = v18
     out.write("Local tracker: all entries are UNVERIFIED. No payment processing or settlement.\n")
     has_opp = opportunities is not None
     has_svc = services is not None and portfolio is not None
     has_prod = products is not None
     has_cust = customers is not None
+    has_comm = communications is not None
+    has_ledger = ledger is not None
     extras = []
     if has_opp:
         extras.append("Opportunities v15 (5-8)")
@@ -112,6 +122,12 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
         extras.append("Products v17 (13-15)")
     elif has_cust:
         extras.append("Customers v17 (16-18)")
+    if has_comm and has_ledger:
+        extras.append("Comms/Ledger v18 (19-22)")
+    elif has_comm:
+        extras.append("Comms v18 (19-21)")
+    elif has_ledger:
+        extras.append("Ledger v18 (22)")
     if extras:
         out.write("Financial (1-4), " + ", ".join(extras) + " available.\n")
     segments = ["1 Add financial  2 List financial  3 Advance financial  4 Withdraw financial"]
@@ -123,11 +139,15 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
         segments.append("13 Add product  14 List products  15 Manage product")
     if has_cust:
         segments.append("16 Add customer  17 List customers  18 Manage customer")
+    if has_comm:
+        segments.append("19 Add comm  20 List comms  21 Manage comm")
+    if has_ledger:
+        segments.append("22 Ledger")
     prompt = "\n" + " | ".join(segments) + "  0 Sign out\nChoice: "
     # legacy no-opp/no-svc prompt (financial pipeline wording remains for v13-like fallback)
     legacy_prompt = "\n1 Add opportunity  2 List entries  3 Advance stage  4 Withdraw  0 Sign out\nChoice: "
     while True:
-        if not has_opp and not has_svc and not has_prod and not has_cust:
+        if not has_opp and not has_svc and not has_prod and not has_cust and not has_comm and not has_ledger:
             choice = _read(stdin, out, legacy_prompt).strip()
         else:
             choice = _read(stdin, out, prompt).strip()
@@ -435,6 +455,87 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                 elif target == "rejected":
                     customers.rejected(token, ident, operation_key=_key())
                 out.write(f"Customer updated to {target} (unverified).\n")
+            elif has_comm and choice == "19":
+                cid = _read(stdin, out, "Customer ID: ").strip()
+                chan = _read(stdin, out, "Channel (1-30): ")
+                body = _read(stdin, out, "Body (1-2000): ")
+                ident = communications.create(token, cid, chan, body, operation_key=_key())
+                out.write(f"Created communication draft: {ident}\n")
+            elif has_comm and choice == "20":
+                cid_f = _read(stdin, out, "Filter customer ID (empty for all): ").strip()
+                if cid_f == "":
+                    cid_f = None
+                status_f = _read(stdin, out, "Filter status [draft/sent/archived or empty]: ").strip()
+                if status_f == "":
+                    status_f = None
+                cursor = None
+                while True:
+                    entries = communications.list(token, after_id=cursor, limit=50, customer_id=cid_f, status=status_f)
+                    for item in entries:
+                        out.write(f"{item['id']} | cust:{item['customer_id'][:8]} | {item['channel']} | {item['status']} | {item['body'][:40]}\n")
+                    if len(entries) < 50:
+                        break
+                    if _read(stdin, out, "More? Type YES: ").strip() != "YES":
+                        break
+                    cursor = entries[-1]["id"]
+                if cursor is None and not entries:
+                    out.write("No communications.\n")
+            elif has_comm and choice == "21":
+                ident = _read(stdin, out, "Communication ID: ").strip()
+                item = communications.get(token, ident)
+                out.write(f"Current: {item['channel']} | {item['status']} | cust:{item['customer_id'][:8]} | {item['body'][:40]}\n")
+                out.write("Transitions: 1 sent  2 archive\n")
+                tchoice = _read(stdin, out, "Choose (1-2) or empty to cancel: ").strip()
+                if tchoice == "":
+                    out.write("No change.\n")
+                    continue
+                if tchoice == "1":
+                    out.write("Send communication? Unverified local record.\n")
+                    if _read(stdin, out, "Type YES to confirm: ").strip() != "YES":
+                        out.write("No change.\n")
+                        continue
+                    communications.sent(token, ident, operation_key=_key())
+                    out.write("Communication sent (unverified).\n")
+                elif tchoice == "2":
+                    out.write("Archive communication? Unverified.\n")
+                    if _read(stdin, out, "Type YES to confirm: ").strip() != "YES":
+                        out.write("No change.\n")
+                        continue
+                    communications.archive(token, ident, operation_key=_key())
+                    out.write("Communication archived.\n")
+                else:
+                    out.write("Invalid choice.\n")
+            elif has_ledger and choice == "22":
+                out.write("Ledger: 1 Add entry  2 List entries  3 Net\n")
+                sub = _read(stdin, out, "Choice (1-3): ").strip()
+                if sub == "1":
+                    kind = _read(stdin, out, "Kind [income/expense/refund/fee]: ").strip()
+                    amt_raw = _read(stdin, out, "Amount INR (e.g. 5000 or 2500.50): ").strip()
+                    amt = _paise(amt_raw)
+                    note = _read(stdin, out, "Note (0-500, empty for none): ")
+                    ident = ledger.add(token, kind, amt, note, operation_key=_key())
+                    out.write(f"Created ledger entry: {ident}\n")
+                elif sub == "2":
+                    kind_f = _read(stdin, out, "Filter kind [income/expense/refund/fee or empty]: ").strip()
+                    if kind_f == "":
+                        kind_f = None
+                    cursor = None
+                    while True:
+                        entries = ledger.list(token, after_id=cursor, limit=50, kind=kind_f)
+                        for item in entries:
+                            out.write(f"{item['id']} | {item['kind']} | INR {item['amount_paise'] // 100}.{item['amount_paise'] % 100:02d} | {item['note'][:40]}\n")
+                        if len(entries) < 50:
+                            break
+                        if _read(stdin, out, "More? Type YES: ").strip() != "YES":
+                            break
+                        cursor = entries[-1]["id"]
+                    if cursor is None and not entries:
+                        out.write("No ledger entries.\n")
+                elif sub == "3":
+                    result = ledger.net(token)
+                    out.write(f"Ledger net: INR {result['net_paise'] // 100}.{result['net_paise'] % 100:02d} (income {result['totals']['income']//100}.{result['totals']['income']%100:02d} - expense {result['totals']['expense']//100}.{result['totals']['expense']%100:02d} - refund {result['totals']['refund']//100}.{result['totals']['refund']%100:02d} - fee {result['totals']['fee']//100}.{result['totals']['fee']%100:02d}) count:{result['count']}\n")
+                else:
+                    out.write("Invalid ledger choice.\n")
             else:
                 parts = ["0 Sign out", "1-4 financial"]
                 if has_opp:
@@ -445,8 +546,12 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                     parts.append("13-15 products")
                 if has_cust:
                     parts.append("16-18 customers")
+                if has_comm:
+                    parts.append("19-21 comms")
+                if has_ledger:
+                    parts.append("22 ledger")
                 out.write("Choose " + ", ".join(parts) + ".\n")
-        except (FinancialAssertionError, OpportunityError, ServiceError, ProductError, CustomerError, ValueError, StateStorageError) as exc:
+        except (FinancialAssertionError, OpportunityError, ServiceError, ProductError, CustomerError, CommunicationError, LedgerError, ValueError, StateStorageError) as exc:
             out.write(str(exc) + "\n")
         except AccessDenied as exc:
             out.write(str(exc) + "\n")
@@ -472,25 +577,27 @@ def run(action, environ, stdin, out, err):
                 out.write("No files created.\n")
                 return 0
             _initialize_state(path)
-            out.write("New tracker state initialized (v17, 16 backups). Register an account with the auth command if needed.\n")
+            out.write("New tracker state initialized (v18, 17 backups). Register an account with the auth command if needed.\n")
             return 0
         # Open only; missing files are never created during login.
         state = StateStorage(path)
         with state.transaction() as conn:
             version = conn.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (13, 14, 15, 16, 17):
-                raise StateStorageError("Tracker requires an existing version 13, 14, 15, 16 or 17 state file; no upgrade was performed.")
+            if version not in (13, 14, 15, 16, 17, 18):
+                raise StateStorageError("Tracker requires an existing version 13, 14, 15, 16, 17 or 18 state file; no upgrade was performed.")
         auth = AuthService(AuthStorage(Path(auth_path), create=False))
         username = _read(stdin, out, "Username: ")
         password = _secret("Password: ", err)
         token = auth.login(username, password)
-        # Opportunities available on 15+, services/portfolio on 16+, products/customers on 17+
+        # Opportunities available on 15+, services/portfolio on 16+, products/customers on 17+, comm/ledger on 18+
         opp = Opportunities(auth, state) if version >= 15 else None
         svc = Services(auth, state) if version >= 16 else None
         port = Portfolio(auth, state) if version >= 16 else None
         prod = Products(auth, state) if version >= 17 else None
         cust = Customers(auth, state) if version >= 17 else None
-        _menu(FinancialAssertions(auth, state), token, stdin, out, opp, svc, port, prod, cust)
+        comm = Communications(auth, state) if version >= 18 else None
+        ledg = Ledger(auth, state) if version >= 18 else None
+        _menu(FinancialAssertions(auth, state), token, stdin, out, opp, svc, port, prod, cust, comm, ledg)
         return 0
     except (AuthError, StorageError, StateStorageError, ConfigurationError):
         err.write("Tracker could not open or complete the operation. Check your account, private paths and state version; no automatic replacement is performed.\n")

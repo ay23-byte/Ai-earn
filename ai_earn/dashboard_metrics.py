@@ -190,4 +190,37 @@ class DashboardMetrics:
                     "verification": "unverified",
                     "note": "Local CRM leads; not verified customers.",
                 }
+            if version >= 18:
+                comm_rows = conn.execute(
+                    "SELECT status, COUNT(*) FROM communications WHERE owner_id=? GROUP BY status",
+                    (owner,),
+                ).fetchall()
+                comm_statuses = {row[0]: {"count": row[1]} for row in comm_rows}
+                result["communications"] = {
+                    "count": sum(item["count"] for item in comm_statuses.values()),
+                    "statuses": comm_statuses,
+                    "verification": "unverified",
+                    "note": "Local CRM communications; draft/sent are unverified.",
+                }
+                ledger = _amount_summary(
+                    conn, "ledger_entries", owner, "amount_paise",
+                    status_column="kind",
+                )
+                # ledger_entries uses kind, not status, but _amount_summary generic handles it
+                total_ledger = sum(item["amount_paise"] for item in ledger.values())
+                # net = income - expense - refund - fee
+                net_paise = (ledger.get("income", {}).get("amount_paise", 0)
+                             - ledger.get("expense", {}).get("amount_paise", 0)
+                             - ledger.get("refund", {}).get("amount_paise", 0)
+                             - ledger.get("fee", {}).get("amount_paise", 0))
+                result["ledger"] = {
+                    "count": sum(item["count"] for item in ledger.values()),
+                    "amount_paise": total_ledger,
+                    "net_paise": net_paise,
+                    "kinds": ledger,
+                    "verification": "unverified",
+                    "note": "Local ledger; net = income - expense - refund - fee, unverified.",
+                }
+                result["income"]["verified_amount_paise"] = 0
+                # keep income status as not_available, but ledger net is separate
             return result

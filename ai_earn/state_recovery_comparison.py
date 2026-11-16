@@ -46,7 +46,7 @@ def _compare_operations(current, candidate, owner):
 _RECORD_TABLES = (
     (3, "opportunity_drafts"), (4, "task_plans"), (5, "order_drafts"),
     (6, "invoice_drafts"), (7, "task_queue"), (7, "queue_leases"),
-    (8, "task_workflows"), (9, "payment_observations"), (10, "task_associations"), (11, "paired_completions"), (12, "managed_task_pairs"), (13, "financial_assertions"), (14, "sandbox_payments"), (15, "opportunities"), (16, "services"), (16, "portfolio_items"), (17, "products"), (17, "customers"),
+    (8, "task_workflows"), (9, "payment_observations"), (10, "task_associations"), (11, "paired_completions"), (12, "managed_task_pairs"), (13, "financial_assertions"), (14, "sandbox_payments"), (15, "opportunities"), (16, "services"), (16, "portfolio_items"), (17, "products"), (17, "customers"), (18, "communications"), (18, "ledger_entries"),
 )
 
 

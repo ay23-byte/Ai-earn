@@ -23,14 +23,15 @@
   - `v15` `opportunities` (title, source_url, source_type, connector_id, budget_paise, deadline_at, risk_level, skill_tags, status `discovered→vetted→pursuing→archived/dismissed`)
   - `v16` `services` (title, scope, deliverable, price_paise, revisions, status `draft→published→archived`) + `portfolio_items` (service FK, title, description) + `services_id_owner_idx`
   - `v17` `products` (title 1-200, description 0-2000, version 1-20 `[A-Za-z0-9._-]` , price_paise 0..1e12 INR, status `draft→published→archived`) + `customers` (name 1-200, contact 1-500, source 0-500, status `lead→contacted→converted/rejected`) + `products_id_owner_idx`
+  - `v18` `communications` (customer_id FK, channel 1-30, body 1-2000, status `draft→sent→archived`) + `ledger_entries` (kind income/expense/refund/fee, amount 0..1e12 INR, note 0-500) + `communications_id_owner_idx` + `ledger_entries_id_owner_idx`
 
 All tables have `CHECK (length(owner_id)=32 AND hex)` except `state_*`, plus `CHECK (owner_id = hex)`, and foreign keys to `owner_id`. Amounts are `CHECK typeof='integer' AND BETWEEN 0 AND 1e12`.
 
 ## Migrations
 
-- Explicit, backup-first: `StateStorage.migrate_to_v2` … `migrate_to_v17`, each holds `transaction` write lock, calls `backup_to(verified_new_path, confirmed=True)`, applies DDL, inserts `state_migrations`, `PRAGMA user_version = N`, then `validate_schema` + `check_integrity`. `backup_to` verifies source integrity, `create_exclusive` on destination (fails if exists), `source.backup(destination)`, verifies destination.
+- Explicit, backup-first: `StateStorage.migrate_to_v2` … `migrate_to_v18`, each holds `transaction` write lock, calls `backup_to(verified_new_path, confirmed=True)`, applies DDL, inserts `state_migrations`, `PRAGMA user_version = N`, then `validate_schema` + `check_integrity`. `backup_to` verifies source integrity, `create_exclusive` on destination (fails if exists), `source.backup(destination)`, verifies destination.
 - New files start at `v1`; no auto-upgrade; unknown `user_version` or missing `state_migrations` history → `StateStorageError`.
-- `tracker_cli._initialize_state` creates `state.sqlite3` (v1) then migrates `v2→v17` with 16 `before-v*.sqlite3` backups, never overwriting.
+- `tracker_cli._initialize_state` creates `state.sqlite3` (v1) then migrates `v2→v18` with 17 `before-v*.sqlite3` backups, never overwriting.
 
 ## Integrity & ownership
 
@@ -52,6 +53,8 @@ All tables have `CHECK (length(owner_id)=32 AND hex)` except `state_*`, plus `CH
 - `services` (v16): `draft → published → archived`, plus `draft→archived`
   - `products` (v17): `draft → published → archived`, plus `draft→archived`
   - `customers` (v17): `lead → contacted → converted`, `lead → rejected`, `contacted → rejected`
+  - `communications` (v18): `draft → sent → archived`, plus `draft→archived`
+  - `ledger_entries` (v18): append-only `ledger_entry_created`, net = income - expense - refund - fee (unverified)
 - `task_plans`: `planned → cancelled`
 - `order_drafts`: `draft → cancelled`
 - `invoice_drafts`: `draft → cancelled`
@@ -61,6 +64,6 @@ All tables have `CHECK (length(owner_id)=32 AND hex)` except `state_*`, plus `CH
 - `financial_assertions`: `potential → quote_asserted → contract_asserted → invoice_asserted → initiated_asserted → withdrawn`
 - `sandbox_payments`: `sandbox_awaiting → sandbox_confirmed → sandbox_settled → sandbox_refunded` plus `sandbox_failed` branch
 
-Disposal: all data is disposable, validated via `python -m unittest discover -v` (697/17, incl. v15 opportunity discovery + managed runner + v16 services/portfolio + v17 products/customers, Linux Python 3.11.2). No customer or payment data, no production use.
+Disposal: all data is disposable, validated via `python -m unittest discover -v` (719/17, incl. v15 opportunity discovery + managed runner + v16 services/portfolio + v17 products/customers + v18 comms/ledger, Linux Python 3.11.2). No customer or payment data, no production use.
 
 See `ARCHITECTURE.md`, `SECURITY_REVIEW.md`, `TESTING.md` for limits, and `PHASE_STATUS.md` for phase gates. Real-data recovery and production hardening are future milestones (M2, M15).
