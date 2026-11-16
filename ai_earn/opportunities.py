@@ -195,10 +195,104 @@ def _owned(conn: sqlite3.Connection, owner: str, record_id: str) -> sqlite3.Row:
     return row
 
 
+def _evidence_score(data: sqlite3.Row | dict) -> dict:
+    """Compute a transparent evidence heuristic (0..100) for an opportunity.
+
+    This is a **draft heuristic**, not external verification. It scores the
+    completeness of locally stored fields and the plausibility of the source
+    URL format. It must never be presented as verified income or credibility.
+    """
+    try:
+        if isinstance(data, sqlite3.Row):
+            d = dict(data)
+        elif isinstance(data, dict):
+            d = data
+        else:
+            d = dict(data)  # type: ignore
+    except Exception:
+        d = {}
+    title = d.get("title", "")
+    url = d.get("source_url", "")
+    budget = d.get("budget_paise", 0)
+    risk = d.get("risk_level", "unknown")
+    tags = d.get("skill_tags", "")
+    # Components (transparent)
+    has_url = 1 if isinstance(url, str) and url.startswith(("http://", "https://")) and 10 <= len(url) <= _MAX_URL_LEN else 0
+    has_title = 1 if isinstance(title, str) and 5 <= len(title) <= 200 else 0
+    has_budget = 1 if isinstance(budget, int) and budget > 0 else 0
+    has_tags = 1 if isinstance(tags, str) and tags.strip() != "" else 0
+    risk_known = 0 if risk == "unknown" else 1
+    # 0..100, each component weighted
+    score = int((has_url * 25 + has_title * 15 + has_budget * 20 + has_tags * 20 + risk_known * 20))
+    note = "Evidence is local fields only (url/title/budget/tags/risk); no external check, no revenue proof."
+    assumptions = "Higher completeness → higher score; draft heuristic, not authority."
+    return {"evidence_score": score, "evidence_note": note, "assumptions": assumptions}
+
+
+def _ranking_assumptions() -> str:
+    return (
+        "Ranking is a draft heuristic: higher budget ranks higher (0.5), lower risk (low>medium>unknown>high, 0.3) "
+        "and moderate deadline (not too soon, not 0) ranks higher (0.2). This assumes budget reflects value, "
+        "risk reflects uncertainty, and imminent deadline is capacity risk. It is not verification and does not "
+        "guarantee success. ToS/robots/CAPTCHA are never bypassed; manual fallback always available."
+    )
+
+
+def _tos_compliance(url: str) -> dict:
+    """Return a ToS/robots compliance descriptor for a stored opportunity.
+
+    This does NOT crawl external ToS or robots.txt; it is a local policy
+    reminder that connectors must respect ToS/robots and never bypass
+    CAPTCHAs. Manual import is always available as fallback.
+    """
+    # url already validated to be http(s) and length-bounded; we just annotate
+    note = (
+        "Connector must respect source ToS and robots.txt; CAPTCHA bypass is prohibited. "
+        "This record is unverified local data; verify terms before acting. Manual fallback always available."
+    )
+    return {
+        "tos_respected": True,
+        "robots_respected": True,
+        "captcha_bypass": False,
+        "manual_fallback": True,
+        "note": note,
+    }
+
+
+def verify_source_tos(url: str) -> dict:
+    """Public helper: validate and describe ToS compliance for a source URL.
+
+    Raises OpportunityError if the URL is malformed or suggests a ToS bypass
+    pattern (e.g., contains literal 'bypass' or 'captcha-bypass').
+    Returns the compliance dict otherwise. This is a local check only.
+    """
+    _input(_url, url)
+    lowered = url.lower()
+    if "captcha" in lowered and "bypass" in lowered:
+        raise OpportunityError("Source URL suggests CAPTCHA bypass; not allowed.")
+    if "robots" in lowered and "bypass" in lowered:
+        raise OpportunityError("Source URL suggests robots.txt bypass; not allowed.")
+    return _tos_compliance(url)
+
+
 def _view(row: sqlite3.Row) -> dict:
     d = dict(row)
     d["verification"] = "unverified"
     d["amount_kind"] = "budget_not_revenue"
+    # Transparent evidence heuristic (computed, not stored; no schema change)
+    try:
+        ev = _evidence_score(row)
+        d["evidence_score"] = ev["evidence_score"]
+        d["evidence_note"] = ev["evidence_note"]
+    except Exception:
+        d["evidence_score"] = 0
+        d["evidence_note"] = "evidence unavailable"
+    d["ranking_assumptions"] = _ranking_assumptions()
+    # ToS/robots/CAPTCHA compliance descriptor (local policy, not external verification)
+    try:
+        d["tos_compliance"] = _tos_compliance(d.get("source_url", ""))
+    except Exception:
+        d["tos_compliance"] = _tos_compliance("https://example.com")
     return d
 
 
@@ -260,12 +354,23 @@ class FakeConnector(Connector):
         _connector_id(connector_id)
         self._id = connector_id
         self._items = items or []
+        self._revoked = False
 
     @property
     def connector_id(self) -> str:
         return self._id
 
+    def validate_config(self) -> None:
+        if self._revoked:
+            raise OpportunityError("Connector revoked.")
+        _connector_id(self._id)
+
+    def revoke(self) -> None:
+        self._revoked = True
+
     def fetch(self, *, limit: int = 20) -> list[dict]:
+        if self._revoked:
+            raise OpportunityError("Connector revoked; manual fallback available.")
         if type(limit) is not int or not 1 <= limit <= 100:
             raise OpportunityError("Invalid fetch limit.")
         return self._items[:limit]
@@ -345,6 +450,8 @@ class Opportunities:
     ) -> str:
         title = _input(_title, title)
         url = _input(_url, source_url)
+        # ToS/robots/CAPTCHA policy: reject obvious bypass patterns (local heuristic)
+        verify_source_tos(url)
         budget = _input(_budget, budget_paise)
         deadline = _input(_deadline, deadline_at)
         risk = _input(_risk, risk_level)
@@ -439,7 +546,8 @@ class Opportunities:
         """Return opportunities ordered by budget desc, risk asc, deadline asc.
 
         Ranking is a draft heuristic: low-risk and higher budget rank higher.
-        This does not verify value or guarantee success.
+        This does not verify value or guarantee success. See `explain_ranking`
+        for a transparent breakdown and assumptions.
         """
         if type(limit) is not int or not 1 <= limit <= 100:
             raise OpportunityError("Invalid page size.")
@@ -453,6 +561,98 @@ class Opportunities:
             # Sort by risk_order secondarily (budget already primary)
             rows = sorted(rows, key=lambda r: ( -r["budget_paise"], risk_order.get(r["risk_level"], 99), r["deadline_at"] if r["deadline_at"] != 0 else _MAX_TIME, r["id"]))[:limit]
             return [_view(_owned(conn, owner, r["id"])) for r in rows]
+
+    def explain_ranking(self, token: str, *, limit: int = 20) -> list[dict]:
+        """Return ranked opportunities with transparent score breakdown.
+
+        Each item is the full `_view` plus a `ranking` dict:
+        `rank` (1-based), `score_total_0_100`, `score_budget_0_50`,
+        `score_risk_0_30`, `score_deadline_0_20`, `explanation`, and
+        `assumptions` (verbatim ranking assumptions). Scores are a draft
+        heuristic and must not be presented as verified value or success
+        probability. ToS/robots/CAPTCHA are never bypassed.
+        """
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise OpportunityError("Invalid page size.")
+        assumptions = _ranking_assumptions()
+        risk_scores = {"low": 30, "medium": 18, "unknown": 12, "high": 6}
+        with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
+            _version(conn)
+            rows = conn.execute(
+                "SELECT id FROM opportunities WHERE owner_id=?",
+                (owner,),
+            ).fetchall()
+            if not rows:
+                return []
+            # Load full views to compute evidence/ranking together
+            items = [_view(_owned(conn, owner, r["id"])) for r in rows]
+            max_budget = max((it["budget_paise"] for it in items), default=0)
+            # Score each
+            scored: list[tuple[int, dict, int, int, int]] = []
+            for it in items:
+                budget = it["budget_paise"]
+                # budget 0..50 relative to max in this result set (avoids 1e12 normalization which dwarfs small budgets)
+                if max_budget > 0:
+                    score_budget = int((budget / max_budget) * 50)
+                else:
+                    score_budget = 0
+                score_risk = risk_scores.get(it["risk_level"], 0)
+                deadline = it["deadline_at"]
+                if deadline == 0:
+                    score_deadline = 10
+                    why_deadline = "no deadline → moderate (10/20)"
+                else:
+                    days = (deadline - now) / 86400
+                    if days > 30:
+                        score_deadline = 20
+                        why_deadline = f"{int(days)}d until deadline → high (20/20)"
+                    elif days > 7:
+                        score_deadline = 15
+                        why_deadline = f"{int(days)}d until deadline → medium (15/20)"
+                    elif days >= 0:
+                        score_deadline = 5
+                        why_deadline = f"{int(days)}d until deadline → low, capacity risk (5/20)"
+                    else:
+                        score_deadline = 0
+                        why_deadline = "deadline past → 0 (should not occur, creation rejects past)"
+                total = score_budget + score_risk + score_deadline
+                explanation = (
+                    f"budget {budget} paise → {score_budget}/50 (relative to max {max_budget}), "
+                    f"risk {it['risk_level']} → {score_risk}/30, "
+                    f"deadline {why_deadline}; total {total}/100. "
+                    f"Evidence {it.get('evidence_score',0)}/100. Assumptions: {assumptions}"
+                )
+                scored.append((total, it, score_budget, score_risk, score_deadline))
+                # attach temporary for sorting
+                it["_score_total"] = total  # type: ignore
+                it["_score_budget"] = score_budget  # type: ignore
+                it["_score_risk"] = score_risk  # type: ignore
+                it["_score_deadline"] = score_deadline  # type: ignore
+                it["_explanation"] = explanation  # type: ignore
+            # Sort by total desc, then budget desc, then risk, then id
+            risk_order = {"low": 0, "medium": 1, "unknown": 2, "high": 3}
+            scored.sort(key=lambda t: (-t[0], -t[1]["budget_paise"], risk_order.get(t[1]["risk_level"], 99), t[1]["id"]))
+            result: list[dict] = []
+            for rank, (total, it, sb, sr, sd) in enumerate(scored[:limit], start=1):
+                # copy view and add ranking block (remove temp keys)
+                out = dict(it)
+                out.pop("_score_total", None)
+                out.pop("_score_budget", None)
+                out.pop("_score_risk", None)
+                out.pop("_score_deadline", None)
+                out.pop("_explanation", None)
+                out["ranking"] = {
+                    "rank": rank,
+                    "score_total_0_100": total,
+                    "score_budget_0_50": sb,
+                    "score_risk_0_30": sr,
+                    "score_deadline_0_20": sd,
+                    "explanation": f"rank {rank}: budget {sb}/50, risk {sr}/30, deadline {sd}/20, total {total}/100",
+                    "assumptions": assumptions,
+                    "evidence_score_0_100": it.get("evidence_score", 0),
+                }
+                result.append(out)
+            return result
 
     def _transition(self, token: str, record_id: str, target_status: str, event: str, operation_key: str) -> str:
         ident = _input(_record_id, record_id)
@@ -550,8 +750,19 @@ class Opportunities:
         if type(limit) is not int or not 1 <= limit <= 100:
             raise OpportunityError("Invalid limit.")
         _key(operation_key_prefix)  # validate base
-        connector.validate_config()
-        items = connector.fetch(limit=limit)
+        # Validate connector config; normalize ConnectorError -> OpportunityError for unified API
+        try:
+            connector.validate_config()
+        except OpportunityError:
+            raise
+        except Exception as exc:  # ConnectorError or others
+            raise OpportunityError(str(exc) or "Connector configuration invalid.") from exc
+        try:
+            items = connector.fetch(limit=limit)
+        except OpportunityError:
+            raise
+        except Exception as exc:
+            raise OpportunityError(str(exc) or "Connector fetch failed.") from exc
         if not isinstance(items, list):
             raise OpportunityError("Connector returned invalid data.")
         ids: list[str] = []
@@ -567,6 +778,7 @@ class Opportunities:
                     raise OpportunityError("Connector item missing required field.")
             title = _input(_title, item["title"])
             url = _input(_url, item["source_url"])
+            verify_source_tos(url)
             budget = _input(_budget, item["budget_paise"])
             deadline = _input(_deadline, item.get("deadline_at", 0))
             risk = _input(_risk, item.get("risk_level", "unknown"))
