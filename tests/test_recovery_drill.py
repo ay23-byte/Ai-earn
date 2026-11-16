@@ -178,6 +178,7 @@ class RecoveryDrillTests(unittest.TestCase):
         with restored.transaction() as conn:
             self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 1)
 
+    @unittest.skipUnless(os.name == "posix", "POSIX chmod permission test")
     def test_permission_error_on_unsafe_parent(self):
         # Make parent world-readable and ensure doctor reports permission_error, not missing
         # Create a new private file then chmod parent to 777

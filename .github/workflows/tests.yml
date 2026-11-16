@@ -81,15 +81,20 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "Posting failure snippet to PR..."
-          # Extract last 120 lines or failed tests
-          FAIL_SNIP=$(grep -E "^(FAIL|ERROR|test_)" unittest.log | tail -n 120 || tail -n 120 unittest.log)
-          BODY="❌ \`\`python -m unittest\`\` failed on \`\`${{ matrix.os }} / ${{ matrix.python-version }}\`\`
+          TAIL=$(tail -n 500 unittest.log | head -c 7000)
+          FAILS=$(grep -A 40 -E "^FAIL:|^ERROR:" unittest.log | head -n 700 | head -c 7000 || true)
+          BODY="❌ python -m unittest failed on \`${{ matrix.os }} / ${{ matrix.python-version }}\`
+          tail:
           \`\`\`
-          $FAIL_SNIP
+          $TAIL
           \`\`\`
-          Full log available as artifact (not fetchable in this env due to blob block)."
-          # Use gh api to comment
+          fails:
+          \`\`\`
+          $FAILS
+          \`\`\`"
+          echo "$BODY" | head -c 10000 > /tmp/out.txt
           gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments -f body="$BODY" || echo "comment failed"
+          cat /tmp/out.txt | head -n 100
 
       - name: Health and doctor (read-only, no DBs expected on runner)
         run: |
