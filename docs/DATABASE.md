@@ -73,6 +73,6 @@ All tables have `CHECK (length(owner_id)=32 AND hex)` except `state_*`, plus `CH
 - `financial_assertions`: `potential → quote_asserted → contract_asserted → invoice_asserted → initiated_asserted → withdrawn`
 - `sandbox_payments`: `sandbox_awaiting → sandbox_confirmed → sandbox_settled → sandbox_refunded` plus `sandbox_failed` branch
 
-Disposal: all data is disposable, validated via `python -m unittest discover -v` (786/17, incl. v15 opportunity discovery + managed runner + v16 services/portfolio + v17 products/customers + v18 comms/ledger + v19 followups/CSV + v20 invoices/11-concept + v21 provider sandbox HMAC + v22 AI ToolRegistry/ApprovalQueue, Linux Python 3.11.2). No customer or payment data, no production use.
+Disposal: all data is disposable, validated via `python -m unittest discover -v` (796/17, incl. v15 opportunity discovery + managed runner + v16 services/portfolio + v17 products/customers + v18 comms/ledger + v19 followups/CSV + v20 invoices/11-concept + v21 provider sandbox HMAC + v22 AI ToolRegistry/ApprovalQueue, Linux Python 3.11.2). No customer or payment data, no production use.
 
 See `ARCHITECTURE.md`, `SECURITY_REVIEW.md`, `TESTING.md` for limits, and `PHASE_STATUS.md` for phase gates. Real-data recovery and production hardening are future milestones (M2, M15).

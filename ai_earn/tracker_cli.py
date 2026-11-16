@@ -2,7 +2,7 @@
 
 No payment is verified, received or processed. Use only disposable data.
 Now includes v15 opportunity discovery, v16 service catalog/portfolio,
-v17 product workspace & customers, v18 communications & ledger, v19 followups & CSV, v20 invoices & 11-concept hardening, and v22 AI assistant (ToolRegistry/ApprovalQueue).
+v17 product workspace & customers, v18 communications & ledger, v19 followups & CSV, v20 invoices & 11-concept hardening, and v22 AI assistant (ToolRegistry/ApprovalQueue) and v22 analytics (funnel/MRR/conversion/workload).
 """
 
 import getpass
@@ -22,6 +22,7 @@ from .followups import Followups, FollowupError
 from .invoices import Invoices, InvoiceError
 from .payment_providers import PaymentProviders, ProviderConfig, ProviderError
 from .ai_assistant import AIAssistant, ToolRegistry, ApprovalError, AssistantError, ToolError
+from .analytics import Analytics, AnalyticsError
 from .opportunities import Opportunities, OpportunityError
 from .ledger import Ledger, LedgerError
 from .products import Products, ProductError
@@ -138,8 +139,8 @@ def _csv_preview(text: str, limit: int = 500) -> str:
     return sample + ("..." if len(text) > limit else "")
 
 
-def _menu(service, token, stdin, out, opportunities=None, services=None, portfolio=None, products=None, customers=None, communications=None, ledger=None, followups=None, invoices=None, provider_orders=None, ai_assistant=None):
-    # service = FinancialAssertions, opportunities = Opportunities, services/portfolio = v16, products/customers = v17, comm/ledger = v18, followups = v19, invoices = v20, provider_orders = v21, ai=v22
+def _menu(service, token, stdin, out, opportunities=None, services=None, portfolio=None, products=None, customers=None, communications=None, ledger=None, followups=None, invoices=None, provider_orders=None, ai_assistant=None, analytics=None):
+    # service = FinancialAssertions, opportunities = Opportunities, services/portfolio = v16, products/customers = v17, comm/ledger = v18, followups = v19, invoices = v20, provider_orders = v21, ai=v22, analytics=v22 (no schema)
     out.write("Local tracker: all entries are UNVERIFIED. No payment processing or settlement.\n")
     has_opp = opportunities is not None
     has_svc = services is not None and portfolio is not None
@@ -176,6 +177,9 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
     has_ai = ai_assistant is not None
     if has_ai:
         extras.append("AI v22 (34-41)")
+    has_an = analytics is not None
+    if has_an:
+        extras.append("Analytics v22 (42-45)")
     if extras:
         out.write("Financial (1-4), " + ", ".join(extras) + " available.\n")
     segments = ["1 Add financial  2 List financial  3 Advance financial  4 Withdraw financial"]
@@ -202,6 +206,8 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
     if has_ai:
         segments.append("34 List tools  35 Request approval  36 List approvals  37 Decide approval")
         segments.append("38 Revoke approval  39 AI chat (draft)  40 Emergency stop/clear  41 Execute tool")
+    if has_an:
+        segments.append("42 Analytics summary  43 Funnel  44 MRR monthly  45 Export CSV")
     prompt = "\n" + " | ".join(segments) + "  0 Sign out\nChoice: "
     # legacy no-opp/no-svc prompt (financial pipeline wording remains for v13-like fallback)
     legacy_prompt = "\n1 Add opportunity  2 List entries  3 Advance stage  4 Withdraw  0 Sign out\nChoice: "
@@ -888,6 +894,59 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                         out.write(result['note'] + "\n")
                 except Exception as e:
                     out.write(str(e) + "\n")
+            elif has_an and choice == "42":
+                from_ts = _read(stdin, out, "From unix ts (0 for all time): ").strip()
+                to_ts = _read(stdin, out, "To unix ts (empty for now): ").strip()
+                try:
+                    fts = int(from_ts) if from_ts else 0
+                    tts = int(to_ts) if to_ts else 4102444800
+                    summ = analytics.summary(token, from_ts=fts, to_ts=tts)
+                    out.write(f"Analytics summary {fts}->{tts} generated {summ['funnel']['generated_at']}\n")
+                    out.write(f"Funnel opp {summ['funnel'].get('opportunities', {}).get('total',0)} cust {summ['funnel'].get('customers', {}).get('total',0)} invoices {summ['funnel'].get('invoices', {}).get('total',0)}\n")
+                    out.write(f"Conversion opp vetted {summ['conversion'].get('opportunities', {}).get('vetted_rate',0):.2f} cust converted {summ['conversion'].get('customers', {}).get('converted_over_lead',0):.2f}\n")
+                    out.write(f"MRR total {summ['mrr']['total_paise']/100:.2f} INR over {summ['mrr']['months_with_income']} months avg {summ['mrr']['average_per_month_paise']/100:.2f}\n")
+                    out.write(f"Workload queued {summ['workload'].get('queued_tasks',0)} pending follow {summ['workload'].get('pending_followups',0)} net {summ['workload'].get('ledger_net_paise',0)/100:.2f}\n")
+                    out.write(f"Verification: {summ['funnel']['verification']} / {summ['mrr']['verification']} — no fabricated data.\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
+            elif has_an and choice == "43":
+                from_ts = _read(stdin, out, "From unix ts (0): ").strip()
+                to_ts = _read(stdin, out, "To unix ts (empty for max): ").strip()
+                try:
+                    fts = int(from_ts) if from_ts else 0
+                    tts = int(to_ts) if to_ts else 4102444800
+                    fun = analytics.funnel(token, from_ts=fts, to_ts=tts)
+                    out.write(f"Funnel {fts}->{tts}:\n")
+                    for k in ("opportunities","customers","invoices","provider_orders","services","communications"):
+                        if k in fun:
+                            out.write(f" {k}: {fun[k].get('total',0)} by {fun[k].get('by_status', fun[k].get('by_kind', {}))}\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
+            elif has_an and choice == "44":
+                from_ts = _read(stdin, out, "From unix ts (0): ").strip()
+                to_ts = _read(stdin, out, "To unix ts (empty for max): ").strip()
+                try:
+                    fts = int(from_ts) if from_ts else 0
+                    tts = int(to_ts) if to_ts else 4102444800
+                    mrr = analytics.mrr(token, from_ts=fts, to_ts=tts)
+                    out.write(f"MRR {fts}->{tts} total {mrr['total_paise']/100:.2f} INR months {mrr['months_with_income']} avg {mrr['average_per_month_paise']/100:.2f}\n")
+                    for mon, amt in sorted(mrr['monthly_buckets'].items()):
+                        out.write(f" {mon}: {amt/100:.2f}\n")
+                    out.write(mrr['note'] + "\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
+            elif has_an and choice == "45":
+                from_ts = _read(stdin, out, "From unix ts (0): ").strip()
+                to_ts = _read(stdin, out, "To unix ts (empty for max): ").strip()
+                try:
+                    fts = int(from_ts) if from_ts else 0
+                    tts = int(to_ts) if to_ts else 4102444800
+                    csv_text = analytics.export_csv(token, from_ts=fts, to_ts=tts)
+                    out.write("CSV export (first 2000 chars):\n")
+                    out.write(csv_text[:2000] + ("...\n" if len(csv_text)>2000 else "\n"))
+                    out.write(f"Total {len(csv_text)} chars, {csv_text.count(chr(10))} lines.\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
             else:
                 parts = ["0 Sign out", "1-4 financial"]
                 if has_opp:
@@ -912,8 +971,10 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                     parts.append("31-33 provider(sandbox)")
                 if has_ai:
                     parts.append("34-41 AI (sandbox)")
+                if has_an:
+                    parts.append("42-45 Analytics")
                 out.write("Choose " + ", ".join(parts) + ".\n")
-        except (FinancialAssertionError, OpportunityError, ServiceError, ProductError, CustomerError, CommunicationError, LedgerError, FollowupError, InvoiceError, ProviderError, ApprovalError, AssistantError, ToolError, ValueError, StateStorageError) as exc:
+        except (FinancialAssertionError, OpportunityError, ServiceError, ProductError, CustomerError, CommunicationError, LedgerError, FollowupError, InvoiceError, ProviderError, ApprovalError, AssistantError, ToolError, AnalyticsError, ValueError, StateStorageError) as exc:
             out.write(str(exc) + "\n")
         except AccessDenied as exc:
             out.write(str(exc) + "\n")
@@ -978,7 +1039,13 @@ def run(action, environ, stdin, out, err):
                 ai = AIAssistant(auth, state)
             except AssistantError:
                 ai = None
-        _menu(FinancialAssertions(auth, state), token, stdin, out, opp, svc, port, prod, cust, comm, ledg, foll, inv, prov, ai)
+        an = None
+        if version >= 22:
+            try:
+                an = Analytics(auth, state)
+            except AnalyticsError:
+                an = None
+        _menu(FinancialAssertions(auth, state), token, stdin, out, opp, svc, port, prod, cust, comm, ledg, foll, inv, prov, ai, an)
         return 0
     except (AuthError, StorageError, StateStorageError, ConfigurationError):
         err.write("Tracker could not open or complete the operation. Check your account, private paths and state version; no automatic replacement is performed.\n")

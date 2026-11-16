@@ -367,4 +367,31 @@ class DashboardMetrics:
                     "injection_isolation": "external content treated as data, never as instruction; consequential tools never auto-executed",
                     "verification": "draft_unverified or approved_consequential, not authority",
                 }
+                # Analytics read-only summary (no new tables, real ledger/invoice aggregates, time-bounded via created_at)
+                try:
+                    from .analytics import Analytics as _Analytics
+                    # Use same owner+now but avoid re-entering transaction; compute directly via current conn
+                    # Funnel quick counts (all time) for dashboard glance
+                    funnel_total_opp = conn.execute("SELECT COUNT(*) FROM opportunities WHERE owner_id=?", (owner,)).fetchone()[0] if version >=15 else 0
+                    funnel_total_cust = conn.execute("SELECT COUNT(*) FROM customers WHERE owner_id=?", (owner,)).fetchone()[0] if version >=17 else 0
+                    funnel_total_inv = conn.execute("SELECT COUNT(*) FROM invoices WHERE owner_id=?", (owner,)).fetchone()[0] if version >=20 else 0
+                    # MRR total income all time (unverified)
+                    mrr_total = conn.execute("SELECT COALESCE(SUM(amount_paise),0) FROM ledger_entries WHERE owner_id=? AND kind='income'", (owner,)).fetchone()[0] if version >=18 else 0
+                    # Monthly buckets for last display (recompute via same logic as Analytics.mrr but simplified)
+                    mrr_buckets = {}
+                    if version >=18:
+                        import datetime as _dt
+                        rows = conn.execute("SELECT created_at, amount_paise FROM ledger_entries WHERE owner_id=? AND kind='income' ORDER BY created_at", (owner,)).fetchall()
+                        for r in rows:
+                            dt = _dt.datetime.utcfromtimestamp(r["created_at"])
+                            key = f"{dt.year:04d}-{dt.month:02d}"
+                            mrr_buckets[key] = mrr_buckets.get(key, 0) + r["amount_paise"]
+                    result["analytics"] = {
+                        "funnel": {"opportunities": funnel_total_opp, "customers": funnel_total_cust, "invoices": funnel_total_inv},
+                        "mrr": {"total_paise": mrr_total, "monthly_buckets": mrr_buckets, "months_with_income": len(mrr_buckets), "verification": "unverified", "note": "Monthly ledger income buckets UTC (unverified, not recurring subscription)."},
+                        "verification": "unverified",
+                        "note": "Real-data analytics from persisted owned rows (inclusive time window handled by dedicated Analytics service for filtered queries; dashboard shows all-time glance).",
+                    }
+                except Exception:
+                    result["analytics"] = {"note": "analytics unavailable", "verification": "unverified"}
             return result
