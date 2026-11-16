@@ -151,4 +151,20 @@ class DashboardMetrics:
                     "verification": "unverified",
                     "note": "Manual/connector discovered; not verified or contacted.",
                 }
+            if version >= 16:
+                svc = _amount_summary(
+                    conn, "services", owner, "price_paise",
+                    status_column="status",
+                )
+                result["services"] = {
+                    "count": sum(item["count"] for item in svc.values()),
+                    "amount_paise": sum(item["amount_paise"] for item in svc.values()),
+                    "statuses": svc,
+                    "verification": "unverified",
+                    "note": "Local service catalog; draft/published are not verified offerings.",
+                }
+                result["portfolio"] = {
+                    "count": _count(conn, "portfolio_items", owner),
+                    "verification": "unverified",
+                }
             return result

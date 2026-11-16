@@ -43,6 +43,7 @@ _FOCUS = (
     "tests.test_opportunities",
     "tests.test_dashboard_metrics",
     "tests.test_task_runner",
+    "tests.test_services",
 )
 _WINDOWS_AUTH = "tests.test_windows_auth.WindowsAuthenticationTests."
 # Explicitly POSIX-specific tests; any newly skipped required test fails closed.

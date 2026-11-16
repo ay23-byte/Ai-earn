@@ -11,8 +11,8 @@ mkdir -m 700 ~/.ai-earn-private
 export AI_EARN_AUTH_DB=~/.ai-earn-private/auth.sqlite3
 export AI_EARN_STATE_DB=~/.ai-earn-private/state.sqlite3
 .venv/bin/python -m ai_earn auth register   # hidden password, save one-time code
-.venv/bin/python -m ai_earn tracker init    # type YES, creates state.sqlite3 + 14 before-v*.sqlite3 (v2→v15)
-.venv/bin/python -m ai_earn tracker open    # login: 1-4 financial, 5-8 opportunities (manual add/list/manage/ranked), 0=logout
+.venv/bin/python -m ai_earn tracker init    # type YES, creates state.sqlite3 + 15 before-v*.sqlite3 (v2→v16)
+.venv/bin/python -m ai_earn tracker open    # login: 1-4 financial, 5-8 opportunities, 9-12 services/portfolio, 0=logout
 ```
 
 Windows: same via PowerShell `create_private_directory` (see `README.md`). The private dir must be on a fixed NTFS drive, not a reparse point; never reuse an untrusted ancestor.
@@ -27,6 +27,10 @@ Windows: same via PowerShell `create_private_directory` (see `README.md`). The p
 - **List opportunities:** `6` → optional status/risk filters → pages 50.
 - **Manage opportunity:** `7` → ID → 1 vetted / 2 pursuing / 3 archived / 4 dismissed → YES (transitions `discovered→vetted→pursuing→archived/dismissed` etc).
 - **Ranked opportunities:** `8` → limit (default 20) → draft heuristic (budget desc, risk low→high, deadline asc), unverified.
+- **Add service (v16):** `9` → title → scope → deliverable → price INR → revisions 0-100. Stored as `draft` (unverified catalog, not verified offering).
+- **List services:** `10` → optional status filter draft/published/archived → pages 50.
+- **Manage service:** `11` → ID → 1 publish / 2 archive → YES (transitions `draft→published→archived` etc, `draft→archived` allowed).
+- **Portfolio:** `12` → 1 add item (service ID + title + description) / 2 list items (service filter, pages 50). Items are demo only, linked via FK `service_id`.
 - **Dashboard:** `python -m ai_earn dashboard snapshot` (needs login, interactive), then `python -m http.server 8000 --bind 127.0.0.1` and open `dashboard/connected.html` → `Load snapshot` → pick `dashboard-snapshot-*.json` beside state DB. `Verified income` is `Not available` (no ledger).
 
 ## Troubleshooting with doctor
@@ -54,6 +58,8 @@ Statuses: `not_configured` (set env), `relative_path`, `invalid_path`, `permissi
 
 ## What is not ready
 
-- Opportunity discovery is experimental local drafts only (v15 `opportunities`, manual/connector, unverified, draft ranking, stub AI helpers). No verified external source, no evidence scoring. No CRM, no invoicing PDF, no ledger net income, no Razorpay/Stripe live, no autonomous AI. Do not enter real customer/financial data.
+- Opportunity discovery is experimental local drafts only (v15 `opportunities`, manual/connector, unverified, draft ranking, stub AI helpers). No verified external source, no evidence scoring.
+- Service catalog & portfolio are experimental local drafts only (v16 `services` draft→published→archived, `portfolio_items` demo, unverified). No customer contract, no delivery proof, no external publish.
+- No CRM, no invoicing PDF, no ledger net income, no Razorpay/Stripe live, no autonomous AI. Do not enter real customer/financial data.
 
 See `docs/ARCHITECTURE.md`, `DATABASE.md`, `PAYMENTS.md`, `SECURITY_REVIEW.md` for limits.
