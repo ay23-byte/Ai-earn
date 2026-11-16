@@ -13,7 +13,7 @@ import stat
 from typing import Mapping
 
 from .config import load_settings
-from .state_storage import APPLICATION_ID
+from .state_storage import APPLICATION_ID, SUPPORTED_STATE_VERSIONS
 
 MISSING = "missing"
 NOT_CONFIGURED = "not_configured"
@@ -28,7 +28,8 @@ OK = "ok"
 
 AUTH_VARIABLE = "AI_EARN_AUTH_DB"
 STATE_VARIABLE = "AI_EARN_STATE_DB"
-SUPPORTED_STATE_VERSIONS = frozenset(range(1, 15))
+# Re-export canonical set from state_storage; keep local alias for tests that import from doctor.
+# SUPPORTED_STATE_VERSIONS is defined in state_storage as range(1, LATEST+1).
 
 
 @dataclass(frozen=True)
