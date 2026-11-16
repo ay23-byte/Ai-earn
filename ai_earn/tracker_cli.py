@@ -47,11 +47,11 @@ def _key():
 
 def _initialize_state(path):
     # Only initialize a new file; never silently upgrade an existing database.
-    backups = [path.with_name(path.name + f".before-v{version}.sqlite3") for version in range(2, 14)]
+    backups = [path.with_name(path.name + f".before-v{version}.sqlite3") for version in range(2, 15)]
     if path.exists() or path.is_symlink() or any(p.exists() or p.is_symlink() for p in backups):
         raise StateStorageError("State or migration backup already exists; no initialization was attempted.")
     state = StateStorage(path, create=True, confirmed=True)
-    for version, backup in zip(range(2, 14), backups):
+    for version, backup in zip(range(2, 15), backups):
         getattr(state, f"migrate_to_v{version}")(backup, confirmed=True)
     return state
 

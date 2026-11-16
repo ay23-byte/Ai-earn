@@ -9,3 +9,6 @@ __pycache__/
 *.sqlite3-*
 *.db
 *.db-*
+# Dashboard snapshots contain private local aggregates; never commit them.
+dashboard-snapshot-*.json
+dashboard/snapshot-*.json

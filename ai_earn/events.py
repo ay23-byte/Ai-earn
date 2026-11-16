@@ -14,6 +14,8 @@ class Event(Enum):
     INVALID_REQUEST = ("invalid_request", "WARNING")
     INVALID_CONFIGURATION = ("invalid_configuration", "ERROR")
     INTERNAL_ERROR = ("internal_error", "ERROR")
+    DOCTOR_REQUESTED = ("doctor_requested", "INFO")
+    DOCTOR_PLAN_REQUESTED = ("doctor_plan_requested", "INFO")
 
 
 _LEVELS = {"DEBUG": 10, "INFO": 20, "WARNING": 30, "ERROR": 40}
