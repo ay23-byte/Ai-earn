@@ -9,6 +9,8 @@ on:
 
 permissions:
   contents: read
+  issues: write
+  pull-requests: write
 
 jobs:
   test:
@@ -71,6 +73,23 @@ jobs:
           name: unittest-log-${{ matrix.os }}-${{ matrix.python-version }}
           path: unittest.log
           retention-days: 2
+
+      - name: Report failures to PR (bypass blob)
+        if: failure() && github.event_name == 'pull_request'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Posting failure snippet to PR..."
+          # Extract last 120 lines or failed tests
+          FAIL_SNIP=$(grep -E "^(FAIL|ERROR|test_)" unittest.log | tail -n 120 || tail -n 120 unittest.log)
+          BODY="❌ \`\`python -m unittest\`\` failed on \`\`${{ matrix.os }} / ${{ matrix.python-version }}\`\`
+          \`\`\`
+          $FAIL_SNIP
+          \`\`\`
+          Full log available as artifact (not fetchable in this env due to blob block)."
+          # Use gh api to comment
+          gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments -f body="$BODY" || echo "comment failed"
 
       - name: Health and doctor (read-only, no DBs expected on runner)
         run: |
