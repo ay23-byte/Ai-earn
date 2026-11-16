@@ -27,6 +27,7 @@
   - `v19` `followups` (customer_id FK `(customer_id, owner_id)`, due_at 0..4102444800, note 0..500, status `pending→completed/cancelled`) + `customers_id_owner_idx` + `followups_id_owner_idx`
   - `v20` `invoices` (order_id FK `(order_id, owner_id)` → `order_drafts`, invoice_number 1..32 `[A-Za-z0-9_-]`, amount 0..1e12 INR, status `draft→issued→paid/overdue/void`, pdf_hash BLOB 32 or NULL) + `invoices_id_owner_idx` + `invoices_number_owner_idx`
   - `v21` `payment_provider_orders` (provider razorpay/stripe, mode sandbox/live, amount 0..1e12 INR, status `created→authorized→captured→settled→refunded/failed`, provider_order_id 1..64) + `payment_provider_orders_id_owner_idx` + `payment_provider_orders_provider_order_idx` + `payment_provider_events` (event_id 1..64, order_id FK, event_type authorized/captured/settled/refunded/failed, raw_body_hash BLOB 32) + `payment_provider_events_id_owner_idx`
+  - `v22` `ai_approvals` (tool_name 1..64, args_json 2..4096 bounded JSON, status `pending→approved→rejected→expired→revoked` with virtual expiry `pending+now>expires_at → expired`, created_at/expires_at TTL 60..86400, decided_at, `ai_approvals_id_owner_idx`) + `ai_emergency` (owner_id PK, stopped 0/1, updated_at, reason 0..500) + 1 index `ai_approvals_id_owner_idx`
 
 All tables have `CHECK (length(owner_id)=32 AND hex)` except `state_*`, plus `CHECK (owner_id = hex)`, and foreign keys to `owner_id`. Amounts are `CHECK typeof='integer' AND BETWEEN 0 AND 1e12`.
 
@@ -34,7 +35,7 @@ All tables have `CHECK (length(owner_id)=32 AND hex)` except `state_*`, plus `CH
 
 - Explicit, backup-first: `StateStorage.migrate_to_v2` … `migrate_to_v18, migrate_to_v19, migrate_to_v20, migrate_to_v21`, each holds `transaction` write lock, calls `backup_to(verified_new_path, confirmed=True)`, applies DDL, inserts `state_migrations`, `PRAGMA user_version = N`, then `validate_schema` + `check_integrity`. `backup_to` verifies source integrity, `create_exclusive` on destination (fails if exists), `source.backup(destination)`, verifies destination.
 - New files start at `v1`; no auto-upgrade; unknown `user_version` or missing `state_migrations` history → `StateStorageError`.
-- `tracker_cli._initialize_state` creates `state.sqlite3` (v1) then migrates `v2→v21` with 20 `before-v*.sqlite3` backups, never overwriting.
+- `tracker_cli._initialize_state` creates `state.sqlite3` (v1) then migrates `v2→v22` with 21 `before-v*.sqlite3` backups, never overwriting.
 
 ## Integrity & ownership
 
@@ -60,6 +61,8 @@ All tables have `CHECK (length(owner_id)=32 AND hex)` except `state_*`, plus `CH
   - `followups` (v19): `pending → completed/cancelled` (plus `pending` creation)
   - `invoices` (v20): `draft → issued → paid/overdue/void` (plus draft→void, issued→void, overdue→paid/void, PDF stub SHA-256)
   - `payment_provider_orders` (v21): `created → authorized → captured → settled → refunded/failed` (HMAC verified webhook, idempotent event_id, owner-scoped)
+  - `ai_approvals` (v22): `pending→approved→rejected→expired(revoked)` (`pending` past TTL virtual expired, explicit confirmation, emergency stop, tool/args binding, bounded JSON, no auto-execution, `ai_approvals_id_owner_idx`)
+  - `ai_emergency` (v22): per-owner stopped flag, `emergency_stop/clear` with confirmation, blocks consequential
   - `ledger_entries` (v18): append-only `ledger_entry_created`, net = income - expense - refund - fee (unverified), 11-concept `eleven_concepts` separates unverified proposed/quote/contract/invoice/initiated vs verified received/settled (synthetic) and net = settled(synthetic) - refunds - fees - costs
 - `task_plans`: `planned → cancelled`
 - `order_drafts`: `draft → cancelled`
@@ -70,6 +73,6 @@ All tables have `CHECK (length(owner_id)=32 AND hex)` except `state_*`, plus `CH
 - `financial_assertions`: `potential → quote_asserted → contract_asserted → invoice_asserted → initiated_asserted → withdrawn`
 - `sandbox_payments`: `sandbox_awaiting → sandbox_confirmed → sandbox_settled → sandbox_refunded` plus `sandbox_failed` branch
 
-Disposal: all data is disposable, validated via `python -m unittest discover -v` (765/17, incl. v15 opportunity discovery + managed runner + v16 services/portfolio + v17 products/customers + v18 comms/ledger + v19 followups/CSV + v20 invoices/11-concept + v21 provider sandbox HMAC, Linux Python 3.11.2). No customer or payment data, no production use.
+Disposal: all data is disposable, validated via `python -m unittest discover -v` (786/17, incl. v15 opportunity discovery + managed runner + v16 services/portfolio + v17 products/customers + v18 comms/ledger + v19 followups/CSV + v20 invoices/11-concept + v21 provider sandbox HMAC + v22 AI ToolRegistry/ApprovalQueue, Linux Python 3.11.2). No customer or payment data, no production use.
 
 See `ARCHITECTURE.md`, `SECURITY_REVIEW.md`, `TESTING.md` for limits, and `PHASE_STATUS.md` for phase gates. Real-data recovery and production hardening are future milestones (M2, M15).

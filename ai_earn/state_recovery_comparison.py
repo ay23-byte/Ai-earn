@@ -47,7 +47,7 @@ def _compare_operations(current, candidate, owner):
 _RECORD_TABLES = (
     (3, "opportunity_drafts"), (4, "task_plans"), (5, "order_drafts"),
     (6, "invoice_drafts"), (7, "task_queue"), (7, "queue_leases"),
-    (8, "task_workflows"), (9, "payment_observations"), (10, "task_associations"), (11, "paired_completions"), (12, "managed_task_pairs"), (13, "financial_assertions"), (14, "sandbox_payments"), (15, "opportunities"), (16, "services"), (16, "portfolio_items"), (17, "products"), (17, "customers"), (18, "communications"), (18, "ledger_entries"), (19, "followups"), (20, "invoices"), (21, "payment_provider_orders"),
+    (8, "task_workflows"), (9, "payment_observations"), (10, "task_associations"), (11, "paired_completions"), (12, "managed_task_pairs"), (13, "financial_assertions"), (14, "sandbox_payments"), (15, "opportunities"), (16, "services"), (16, "portfolio_items"), (17, "products"), (17, "customers"), (18, "communications"), (18, "ledger_entries"), (19, "followups"), (20, "invoices"), (21, "payment_provider_orders"), (22, "ai_approvals"),
 )
 
 
@@ -56,6 +56,28 @@ def _ordered_records(conn, owner, table):
     return iter(conn.execute(
         f"SELECT * FROM {table} WHERE owner_id=? ORDER BY id COLLATE BINARY", (owner,),
     ))
+
+
+def _compare_ai_approvals(current, candidate, owner):
+    def rows(conn):
+        return iter(conn.execute(
+            "SELECT id,tool_name,args_json,status,created_at,expires_at FROM ai_approvals "
+            "WHERE owner_id=? ORDER BY id COLLATE BINARY", (owner,)))
+    left, right = rows(current), rows(candidate)
+    a, b = next(left, None), next(right, None)
+    counts = {"matching": 0, "current_only": 0, "candidate_only": 0, "conflicts": 0}
+    while a is not None or b is not None:
+        if b is None or (a is not None and a["id"] < b["id"]):
+            counts["current_only"] += 1
+            a = next(left, None)
+        elif a is None or b["id"] < a["id"]:
+            counts["candidate_only"] += 1
+            b = next(right, None)
+        else:
+            same = (a["tool_name"] == b["tool_name"] and a["args_json"] == b["args_json"] and a["status"] == b["status"] and a["created_at"] == b["created_at"] and a["expires_at"] == b["expires_at"])
+            counts["matching" if same else "conflicts"] += 1
+            a, b = next(left, None), next(right, None)
+    return counts
 
 
 def _compare_provider_events(current, candidate, owner):
@@ -196,4 +218,9 @@ class StateRecoveryComparison:
                     "operations": _compare_operations(current, candidate, owner),
                     "tables": _compare_records(current, candidate, owner, version),
                     "sandbox_payment_events": _compare_sandbox_events(current, candidate, owner) if version >= 14 else None,
-                    "provider_events": _compare_provider_events(current, candidate, owner) if version >= 21 else None}
+                    "provider_events": _compare_provider_events(current, candidate, owner) if version >= 21 else None,
+                    "ai_approvals": _compare_ai_approvals(current, candidate, owner) if version >= 22 else None,
+                    "ai_emergency": {
+                        "current": dict(current.execute("SELECT stopped, updated_at, reason FROM ai_emergency WHERE owner_id=?", (owner,)).fetchone() or {}),
+                        "candidate": dict(candidate.execute("SELECT stopped, updated_at, reason FROM ai_emergency WHERE owner_id=?", (owner,)).fetchone() or {}),
+                    } if version >= 22 else None}

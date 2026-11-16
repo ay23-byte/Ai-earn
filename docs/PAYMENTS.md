@@ -1,6 +1,6 @@
 # Payments — Ai-earn (2026-11-16)
 
-**Status:** Sandbox provider HMAC verified (v21), **no live transactions**, **no card storage**. Razorpay/Stripe shaped, sandbox only until explicit approval.
+**Status:** Sandbox provider HMAC verified (v21) + AI Assistant v22 (approval-gated), **no live transactions**, **no card storage**. Razorpay/Stripe shaped, sandbox only until explicit approval.
 
 ## Current synthetic implementation (experimental)
 

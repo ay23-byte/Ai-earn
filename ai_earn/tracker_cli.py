@@ -2,7 +2,7 @@
 
 No payment is verified, received or processed. Use only disposable data.
 Now includes v15 opportunity discovery, v16 service catalog/portfolio,
-v17 product workspace & customers, v18 communications & ledger, v19 followups & CSV, v20 invoices & 11-concept hardening, and v21 provider sandbox.
+v17 product workspace & customers, v18 communications & ledger, v19 followups & CSV, v20 invoices & 11-concept hardening, and v22 AI assistant (ToolRegistry/ApprovalQueue).
 """
 
 import getpass
@@ -21,6 +21,7 @@ from .financial_assertions import FinancialAssertions, FinancialAssertionError
 from .followups import Followups, FollowupError
 from .invoices import Invoices, InvoiceError
 from .payment_providers import PaymentProviders, ProviderConfig, ProviderError
+from .ai_assistant import AIAssistant, ToolRegistry, ApprovalError, AssistantError, ToolError
 from .opportunities import Opportunities, OpportunityError
 from .ledger import Ledger, LedgerError
 from .products import Products, ProductError
@@ -89,6 +90,13 @@ _PROVIDER_STATUS_LABELS = {
     "refunded": "refunded",
     "failed": "failed",
 }
+_AI_STATUS_LABELS = {
+    "pending": "pending (awaiting approval)",
+    "approved": "approved",
+    "rejected": "rejected",
+    "expired": "expired",
+    "revoked": "revoked",
+}
 
 
 def _read(stdin, out, prompt):
@@ -116,11 +124,11 @@ def _key():
 
 def _initialize_state(path):
     # Only initialize a new file; never silently upgrade an existing database.
-    backups = [path.with_name(path.name + f".before-v{version}.sqlite3") for version in range(2, 22)]
+    backups = [path.with_name(path.name + f".before-v{version}.sqlite3") for version in range(2, 23)]
     if path.exists() or path.is_symlink() or any(p.exists() or p.is_symlink() for p in backups):
         raise StateStorageError("State or migration backup already exists; no initialization was attempted.")
     state = StateStorage(path, create=True, confirmed=True)
-    for version, backup in zip(range(2, 22), backups):
+    for version, backup in zip(range(2, 23), backups):
         getattr(state, f"migrate_to_v{version}")(backup, confirmed=True)
     return state
 
@@ -130,8 +138,8 @@ def _csv_preview(text: str, limit: int = 500) -> str:
     return sample + ("..." if len(text) > limit else "")
 
 
-def _menu(service, token, stdin, out, opportunities=None, services=None, portfolio=None, products=None, customers=None, communications=None, ledger=None, followups=None, invoices=None, provider_orders=None):
-    # service = FinancialAssertions, opportunities = Opportunities, services/portfolio = v16, products/customers = v17, comm/ledger = v18, followups = v19, invoices = v20, provider_orders = v21
+def _menu(service, token, stdin, out, opportunities=None, services=None, portfolio=None, products=None, customers=None, communications=None, ledger=None, followups=None, invoices=None, provider_orders=None, ai_assistant=None):
+    # service = FinancialAssertions, opportunities = Opportunities, services/portfolio = v16, products/customers = v17, comm/ledger = v18, followups = v19, invoices = v20, provider_orders = v21, ai=v22
     out.write("Local tracker: all entries are UNVERIFIED. No payment processing or settlement.\n")
     has_opp = opportunities is not None
     has_svc = services is not None and portfolio is not None
@@ -165,6 +173,9 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
         extras.append("Invoices v20 (28-30)")
     if has_prov:
         extras.append("Provider v21 (31-33 sandbox)")
+    has_ai = ai_assistant is not None
+    if has_ai:
+        extras.append("AI v22 (34-41)")
     if extras:
         out.write("Financial (1-4), " + ", ".join(extras) + " available.\n")
     segments = ["1 Add financial  2 List financial  3 Advance financial  4 Withdraw financial"]
@@ -188,6 +199,9 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
         segments.append("28 Add invoice  29 List invoices  30 Manage invoice")
     if has_prov:
         segments.append("31 Add provider order  32 List provider orders  33 Webhook")
+    if has_ai:
+        segments.append("34 List tools  35 Request approval  36 List approvals  37 Decide approval")
+        segments.append("38 Revoke approval  39 AI chat (draft)  40 Emergency stop/clear  41 Execute tool")
     prompt = "\n" + " | ".join(segments) + "  0 Sign out\nChoice: "
     # legacy no-opp/no-svc prompt (financial pipeline wording remains for v13-like fallback)
     legacy_prompt = "\n1 Add opportunity  2 List entries  3 Advance stage  4 Withdraw  0 Sign out\nChoice: "
@@ -764,6 +778,116 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                     out.write(f"Webhook processed: event {result['event_id']} -> {result['new_status']} for order {result['order_id'][:8]}\n")
                 except Exception as e:
                     out.write(str(e) + "\n")
+            elif has_ai and choice == "34":
+                try:
+                    tools = ai_assistant.registry.list()
+                    for tl in tools:
+                        out.write(f"{tl['name']} | {tl['scope']} | {tl['description'][:80]}\n")
+                    if not tools:
+                        out.write("No tools registered.\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
+            elif has_ai and choice == "35":
+                tname = _read(stdin, out, "Tool name (consequential only, e.g. publish_service): ").strip()
+                args_raw = _read(stdin, out, "Args JSON (e.g. {\"service_id\": \"...\"}): ").strip()
+                import json as _json
+                try:
+                    args = _json.loads(args_raw) if args_raw else {}
+                    apid = ai_assistant.queue.request(token, tname, args, operation_key=_key())
+                    out.write(f"Approval requested: {apid} (pending, expires in 15m)\n")
+                    out.write("Use 37 to approve/reject; 41 to execute after approval.\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
+            elif has_ai and choice == "36":
+                filt = _read(stdin, out, "Filter status [pending/approved/rejected/expired/revoked or empty]: ").strip()
+                if filt == "":
+                    filt = None
+                cursor = None
+                try:
+                    while True:
+                        entries = ai_assistant.queue.list(token, after_id=cursor, limit=20, status=filt)
+                        for item in entries:
+                            out.write(f"{item['id']} | {item['tool_name']} | {item['status']}->{item['effective_status']} | expires:{item['expires_at']} | {item['args_json'][:60]}\n")
+                        if len(entries) < 20:
+                            break
+                        if _read(stdin, out, "More? Type YES: ").strip() != "YES":
+                            break
+                        cursor = entries[-1]["id"]
+                    if cursor is None and not entries:
+                        out.write("No approvals.\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
+            elif has_ai and choice == "37":
+                apid = _read(stdin, out, "Approval ID: ").strip()
+                dec = _read(stdin, out, "Decision [approved/rejected]: ").strip()
+                try:
+                    out.write(f"Confirm {dec} for {apid}? This is explicit approval.\n")
+                    if _read(stdin, out, "Type YES to confirm: ").strip() != "YES":
+                        out.write("No change.\n")
+                    else:
+                        ai_assistant.queue.decide(token, apid, dec, confirmed=True, operation_key=_key())
+                        out.write(f"Approval {dec}.\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
+            elif has_ai and choice == "38":
+                apid = _read(stdin, out, "Approval ID to revoke: ").strip()
+                try:
+                    out.write(f"Revoke {apid}? This prevents future execution.\n")
+                    if _read(stdin, out, "Type YES to confirm: ").strip() != "YES":
+                        out.write("No change.\n")
+                    else:
+                        ai_assistant.queue.revoke(token, apid, operation_key=_key())
+                        out.write("Approval revoked.\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
+            elif has_ai and choice == "39":
+                prompt = _read(stdin, out, "Prompt (1-4096): ")
+                ext = _read(stdin, out, "External content (untrusted, empty for none): ")
+                if ext == "":
+                    ext = None
+                try:
+                    result = ai_assistant.chat(token, prompt, external_content=ext)
+                    out.write(f"AI draft (unverified, {result['model']}): {result['output'][:500]}\n")
+                    out.write(f"Policy: {result['policy']}\n")
+                    out.write("Note: external content treated as data, never as instruction; no consequential tool auto-executed.\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
+            elif has_ai and choice == "40":
+                out.write("Emergency: 1 stop  2 clear  (requires explicit YES)\n")
+                sub = _read(stdin, out, "Choice (1-2): ").strip()
+                try:
+                    if sub == "1":
+                        reason = _read(stdin, out, "Reason (0-500, empty for none): ")
+                        if _read(stdin, out, "Type YES to confirm EMERGENCY STOP: ").strip() != "YES":
+                            out.write("No change.\n")
+                        else:
+                            ai_assistant.queue.emergency_stop(token, confirmed=True, reason=reason, operation_key=_key())
+                            out.write("Emergency stop ACTIVE; consequential actions blocked.\n")
+                    elif sub == "2":
+                        if _read(stdin, out, "Type YES to confirm CLEAR emergency: ").strip() != "YES":
+                            out.write("No change.\n")
+                        else:
+                            ai_assistant.queue.emergency_clear(token, confirmed=True, operation_key=_key())
+                            out.write("Emergency cleared.\n")
+                    else:
+                        out.write("Invalid emergency choice.\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
+            elif has_ai and choice == "41":
+                tname = _read(stdin, out, "Tool name: ").strip()
+                args_raw = _read(stdin, out, "Args JSON: ").strip()
+                apid = _read(stdin, out, "Approval ID (required for consequential): ").strip()
+                if apid == "":
+                    apid = None
+                import json as _json2
+                try:
+                    args = _json2.loads(args_raw) if args_raw else {}
+                    result = ai_assistant.registry.execute(token, tname, args, ai_assistant._auth, ai_assistant._state, approval_id=apid)
+                    out.write(f"Executed {tname} -> {result.get('result','ok')} (verification:{result.get('verification')})\n")
+                    if 'note' in result:
+                        out.write(result['note'] + "\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
             else:
                 parts = ["0 Sign out", "1-4 financial"]
                 if has_opp:
@@ -786,8 +910,10 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                     parts.append("28-30 invoices")
                 if has_prov:
                     parts.append("31-33 provider(sandbox)")
+                if has_ai:
+                    parts.append("34-41 AI (sandbox)")
                 out.write("Choose " + ", ".join(parts) + ".\n")
-        except (FinancialAssertionError, OpportunityError, ServiceError, ProductError, CustomerError, CommunicationError, LedgerError, FollowupError, InvoiceError, ProviderError, ValueError, StateStorageError) as exc:
+        except (FinancialAssertionError, OpportunityError, ServiceError, ProductError, CustomerError, CommunicationError, LedgerError, FollowupError, InvoiceError, ProviderError, ApprovalError, AssistantError, ToolError, ValueError, StateStorageError) as exc:
             out.write(str(exc) + "\n")
         except AccessDenied as exc:
             out.write(str(exc) + "\n")
@@ -813,19 +939,19 @@ def run(action, environ, stdin, out, err):
                 out.write("No files created.\n")
                 return 0
             _initialize_state(path)
-            out.write("New tracker state initialized (v21, 20 backups). Register an account with the auth command if needed.\n")
+            out.write("New tracker state initialized (v22, 21 backups). Register an account with the auth command if needed.\n")
             return 0
         # Open only; missing files are never created during login.
         state = StateStorage(path)
         with state.transaction() as conn:
             version = conn.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (13, 14, 15, 16, 17, 18, 19, 20, 21):
-                raise StateStorageError("Tracker requires an existing version 13, 14, 15, 16, 17, 18, 19, 20 or 21 state file; no upgrade was performed.")
+            if version not in (13, 14, 15, 16, 17, 18, 19, 20, 21, 22):
+                raise StateStorageError("Tracker requires an existing version 13, 14, 15, 16, 17, 18, 19, 20, 21 or 22 state file; no upgrade was performed.")
         auth = AuthService(AuthStorage(Path(auth_path), create=False))
         username = _read(stdin, out, "Username: ")
         password = _secret("Password: ", err)
         token = auth.login(username, password)
-        # Opportunities available on 15+, services/portfolio on 16+, products/customers on 17+, comm/ledger on 18+, followups on 19+, invoices on 20+, provider sandbox on 21+
+        # Opportunities available on 15+, services/portfolio on 16+, products/customers on 17+, comm/ledger on 18+, followups on 19+, invoices on 20+, provider sandbox on 21+, AI on 22+
         opp = Opportunities(auth, state) if version >= 15 else None
         svc = Services(auth, state) if version >= 16 else None
         port = Portfolio(auth, state) if version >= 16 else None
@@ -846,7 +972,13 @@ def run(action, environ, stdin, out, err):
                 prov = PaymentProviders(auth, state, cfg)
             except ProviderError:
                 prov = None
-        _menu(FinancialAssertions(auth, state), token, stdin, out, opp, svc, port, prod, cust, comm, ledg, foll, inv, prov)
+        ai = None
+        if version >= 22:
+            try:
+                ai = AIAssistant(auth, state)
+            except AssistantError:
+                ai = None
+        _menu(FinancialAssertions(auth, state), token, stdin, out, opp, svc, port, prod, cust, comm, ledg, foll, inv, prov, ai)
         return 0
     except (AuthError, StorageError, StateStorageError, ConfigurationError):
         err.write("Tracker could not open or complete the operation. Check your account, private paths and state version; no automatic replacement is performed.\n")

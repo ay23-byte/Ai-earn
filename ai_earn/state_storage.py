@@ -19,7 +19,7 @@ from .auth_storage import AuthStorage, StorageError, _windows_auth_verified
 
 APPLICATION_ID = 0x41494533  # AIE3, distinct from the auth-only database.
 SCHEMA_VERSION = 1  # New files still bootstrap as version 1; upgrades are explicit.
-LATEST_SCHEMA_VERSION = 21
+LATEST_SCHEMA_VERSION = 22
 SUPPORTED_STATE_VERSIONS = frozenset(range(1, LATEST_SCHEMA_VERSION + 1))
 
 
@@ -415,6 +415,27 @@ _V21_SCHEMA = {
 )""",
 }
 
+_V22_APPROVAL_INDEX = "CREATE UNIQUE INDEX ai_approvals_id_owner_idx ON ai_approvals(id, owner_id)"
+_V22_SCHEMA = {
+    "ai_approvals": """CREATE TABLE ai_approvals (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    tool_name TEXT NOT NULL CHECK(length(tool_name) BETWEEN 1 AND 64 AND tool_name NOT GLOB '*[^A-Za-z0-9_.-]*'),
+    args_json TEXT NOT NULL CHECK(length(args_json) BETWEEN 2 AND 4096),
+    status TEXT NOT NULL CHECK(status IN ('pending','approved','rejected','expired','revoked')),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    expires_at INTEGER NOT NULL CHECK(typeof(expires_at)='integer' AND expires_at BETWEEN created_at AND 4102444800),
+    decided_at INTEGER CHECK(decided_at IS NULL OR (typeof(decided_at)='integer' AND decided_at >= created_at)),
+    UNIQUE(id, owner_id)
+)""" ,
+    "ai_emergency": """CREATE TABLE ai_emergency (
+    owner_id TEXT PRIMARY KEY NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    stopped INTEGER NOT NULL CHECK(stopped IN (0,1)),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= 0),
+    reason TEXT NOT NULL CHECK(length(reason) BETWEEN 0 AND 500)
+)""" ,
+}
+
 _V20_SCHEMA = {
     "invoices": """CREATE TABLE invoices (
     id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
@@ -628,6 +649,14 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
             ("owner_id", "TEXT", 1, 0), ("event_id", "TEXT", 1, 1), ("order_id", "TEXT", 1, 0),
             ("event_type", "TEXT", 1, 0), ("amount_paise", "INTEGER", 1, 0), ("raw_body_hash", "BLOB", 1, 0), ("received_at", "INTEGER", 1, 0),
         ]
+    if version >= 22:
+        expected_columns["ai_approvals"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("tool_name", "TEXT", 1, 0), ("args_json", "TEXT", 1, 0),
+            ("status", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0), ("expires_at", "INTEGER", 1, 0), ("decided_at", "INTEGER", 0, 0),
+        ]
+        expected_columns["ai_emergency"] = [
+            ("owner_id", "TEXT", 1, 1), ("stopped", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0), ("reason", "TEXT", 1, 0),
+        ]
     if version >= 20:
         expected_columns["invoices"] = [
             ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("order_id", "TEXT", 1, 0),
@@ -661,6 +690,8 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         expected_objects.append(("index", "payment_provider_orders_id_owner_idx"))
         expected_objects.append(("index", "payment_provider_orders_provider_order_idx"))
         expected_objects.append(("index", "payment_provider_events_id_owner_idx"))
+    if version >= 22:
+        expected_objects.append(("index", "ai_approvals_id_owner_idx"))
     if version >= 20:
         expected_objects.append(("index", "invoices_id_owner_idx"))
         expected_objects.append(("index", "invoices_number_owner_idx"))
@@ -714,6 +745,10 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='payment_provider_events_id_owner_idx'").fetchone()
         if row is None or row[0] != _V21_PROVIDER_EVENTS_ID_IDX:
             raise StateStorageError("State database schema constraints are incompatible.")
+    if version >= 22:
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='ai_approvals_id_owner_idx'").fetchone()
+        if row is None or row[0] != _V22_APPROVAL_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
     if version >= 20:
         row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='invoices_id_owner_idx'").fetchone()
         if row is None or row[0] != _V20_INVOICE_INDEX:
@@ -762,10 +797,12 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         schemas.append(_V18_SCHEMA)
     if version >= 19:
         schemas.append(_V19_SCHEMA)
-    if version >= 21:
-        schemas.append(_V21_SCHEMA)
     if version >= 20:
         schemas.append(_V20_SCHEMA)
+    if version >= 21:
+        schemas.append(_V21_SCHEMA)
+    if version >= 22:
+        schemas.append(_V22_SCHEMA)
     for schema in schemas:
         for name, statement in schema.items():
             row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()
@@ -934,6 +971,14 @@ def _apply_v21(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA user_version = 21")
 
 
+def _apply_v22(conn: sqlite3.Connection) -> None:
+    for statement in _V22_SCHEMA.values():
+        conn.execute(statement)
+    conn.execute(_V22_APPROVAL_INDEX)
+    conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (22, int(time.time())))
+    conn.execute("PRAGMA user_version = 22")
+
+
 def _check_managed_pairs(conn: sqlite3.Connection, owner=None, queue_id=None, workflow_id=None, association_id=None) -> None:
     """Check managed-parent state combinations, not history authenticity."""
     invalid = conn.execute("""
@@ -1037,6 +1082,7 @@ _OPERATION_RESULTS = (
     (19, "followup", "followups"),
     (20, "invoice", "invoices"),
     (21, "provider_order", "payment_provider_orders"),
+    (22, "ai_approval", "ai_approvals"),
 )
 
 
@@ -1110,6 +1156,7 @@ _CREATION_EVENTS = (
     (19, "followups", "followup", "followup_created"),
     (20, "invoices", "invoice", "invoice_created"),
     (21, "payment_provider_orders", "provider_order", "provider_order_created"),
+    (22, "ai_approvals", "ai_approval", "ai_approval_created"),
 )
 
 
@@ -1278,6 +1325,14 @@ _MULTI_STEP_HISTORIES = (
         ("captured", "provider_order_refunded"): "refunded",
         ("settled", "provider_order_refunded"): "refunded",
         ("captured", "provider_order_failed"): "failed",
+    }),
+    (22, "ai_approvals", "ai_approval", {
+        (None, "ai_approval_created"): "pending",
+        ("pending", "ai_approval_approved"): "approved",
+        ("pending", "ai_approval_rejected"): "rejected",
+        ("pending", "ai_approval_expired"): "expired",
+        ("pending", "ai_approval_revoked"): "revoked",
+        ("approved", "ai_approval_revoked"): "revoked",
     }),
 )
 
@@ -1795,6 +1850,19 @@ class StateStorage:
             self.backup_to(backup, confirmed=True)
             _apply_v21(conn)
             if _validate_schema(conn) != 21:
+                raise StateStorageError("Migration produced an incompatible schema.")
+            _check_integrity(conn)
+
+    def migrate_to_v22(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 21 only after a checked non-overwriting backup."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 21:
+                raise StateStorageError("Only version 21 can be upgraded to version 22.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v22(conn)
+            if _validate_schema(conn) != 22:
                 raise StateStorageError("Migration produced an incompatible schema.")
             _check_integrity(conn)
 

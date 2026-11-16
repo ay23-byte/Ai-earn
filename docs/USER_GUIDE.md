@@ -11,7 +11,7 @@ mkdir -m 700 ~/.ai-earn-private
 export AI_EARN_AUTH_DB=~/.ai-earn-private/auth.sqlite3
 export AI_EARN_STATE_DB=~/.ai-earn-private/state.sqlite3
 .venv/bin/python -m ai_earn auth register   # hidden password, save one-time code
-.venv/bin/python -m ai_earn tracker init    # type YES, creates state.sqlite3 + 20 before-v*.sqlite3 (v2→v21)
+.venv/bin/python -m ai_earn tracker init    # type YES, creates state.sqlite3 + 21 before-v*.sqlite3 (v2→v22)
 .venv/bin/python -m ai_earn tracker open    # login: 1-4 financial, 5-8 opportunities, 9-12 services/portfolio, 13-33 full menu, 0=logout
 ```
 
@@ -37,6 +37,7 @@ Windows: same via PowerShell `create_private_directory` (see `README.md`). The p
 - **Add followup (v19):** `23` → customer ID → due timestamp 0..4102444800 → note 0-500. Stored as `pending` (unverified). `24` list (customer/status filters, pages 50), `25` complete/cancel (1 completed, 2 cancelled, requires YES).
 - **CSV (v19):** `26` import (paste lines, end with `.`, prefix 1-64 for idempotency, header name,contact,source, 1000-row/1M limit), `27` export (CSV to terminal).
 - **Provider sandbox (v21):** `31` create order (amount INR, generates `order_...` sandbox), `32` list (provider/status filters), `33` webhook (paste JSON + sig, verified HMAC raw-body before parse, amount binding, idempotent event_id).
+- **AI assistant (v22):** `34` list tools (read/draft/consequential), `35` request approval (consequential only, bounded JSON, TTL 15m), `36` list approvals (status filter), `37` decide (approved/rejected, explicit YES), `38` revoke (pending/approved), `39` AI chat (draft_unverified, external content as data, no auto-execution), `40` emergency stop/clear (explicit YES, blocks consequential), `41` execute tool (approval binding, emergency check).
 - **List services:** `10` → optional status filter draft/published/archived → pages 50.
 - **Manage service:** `11` → ID → 1 publish / 2 archive → YES (transitions `draft→published→archived` etc, `draft→archived` allowed).
 - **Portfolio:** `12` → 1 add item (service ID + title + description) / 2 list items (service filter, pages 50). Items are demo only, linked via FK `service_id`.

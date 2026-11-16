@@ -328,4 +328,43 @@ class DashboardMetrics:
                     "verification": "sandbox_only",
                     "note": "HMAC verified webhook events, idempotent by event_id.",
                 }
+            if version >= 22:
+                # AI approvals aggregated by status (pending/approved/rejected/expired virtual/revoked)
+                approv_rows = conn.execute(
+                    "SELECT status, COUNT(*) FROM ai_approvals WHERE owner_id=? GROUP BY status",
+                    (owner,),
+                ).fetchall()
+                approv_statuses = {row[0]: {"count": row[1]} for row in approv_rows}
+                # virtual expired count: pending rows past expires_at
+                import time as _time
+                now_ts = int(_time.time())
+                # use DB now already captured as `now` in transaction; treat pending expired logically
+                try:
+                    pending_expired = conn.execute(
+                        "SELECT COUNT(*) FROM ai_approvals WHERE owner_id=? AND status='pending' AND expires_at < ?",
+                        (owner, now),
+                    ).fetchone()[0]
+                except Exception:
+                    pending_expired = 0
+                total_approv = sum(v["count"] for v in approv_statuses.values())
+                result["ai_approvals"] = {
+                    "count": total_approv,
+                    "statuses": approv_statuses,
+                    "pending_expired_virtual": pending_expired,
+                    "verification": "unverified",
+                    "note": "ApprovalQueue: consequential tools require explicit owner approval; pending past TTL treated as expired (virtual).",
+                }
+                # emergency stop
+                emerg = conn.execute("SELECT stopped, updated_at, reason FROM ai_emergency WHERE owner_id=?", (owner,)).fetchone()
+                if emerg is None:
+                    result["ai_emergency"] = {"stopped": False, "note": "No emergency; consequential actions allowed if approved."}
+                else:
+                    result["ai_emergency"] = {"stopped": bool(emerg["stopped"]), "updated_at": emerg["updated_at"], "reason": emerg["reason"], "verification": "sandbox_only"}
+                # AI provider/tooling note
+                result["ai_policy"] = {
+                    "tool_scopes": {"read": "direct", "draft": "draft_unverified", "consequential": "approval_required"},
+                    "provider": "stub sandbox only; live OpenAI/Ollama blocked",
+                    "injection_isolation": "external content treated as data, never as instruction; consequential tools never auto-executed",
+                    "verification": "draft_unverified or approved_consequential, not authority",
+                }
             return result
