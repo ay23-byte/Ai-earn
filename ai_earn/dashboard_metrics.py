@@ -139,4 +139,16 @@ class DashboardMetrics:
                     "stages": sandbox,
                     "verification": "sandbox_only",
                 }
+            if version >= 15:
+                opp = _amount_summary(
+                    conn, "opportunities", owner, "budget_paise",
+                    status_column="status",
+                )
+                result["opportunities"] = {
+                    "count": sum(item["count"] for item in opp.values()),
+                    "amount_paise": sum(item["amount_paise"] for item in opp.values()),
+                    "statuses": opp,
+                    "verification": "unverified",
+                    "note": "Manual/connector discovered; not verified or contacted.",
+                }
             return result

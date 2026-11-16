@@ -5,7 +5,7 @@
 ## What is backed up
 
 - **Auth DB:** `AI_EARN_AUTH_DB` (`auth.sqlite3`) – single account expected; `recovery_hash` rotation on `replace_recovery_code`/`recover`.
-- **State DB:** `AI_EARN_STATE_DB` (`state.sqlite3`, v1→v14) plus 13 `before-v*.sqlite3` backups created by `tracker init`/`migrate_to_v*`.
+- **State DB:** `AI_EARN_STATE_DB` (`state.sqlite3`, v1→v15) plus 14 `before-v*.sqlite3` backups (`before-v2.sqlite3` … `before-v15.sqlite3`) created by `tracker init`/`migrate_to_v*`.
 - **Snapshots:** `dashboard-snapshot-*.json` beside state DB (counts only, no titles/tokens).
 
 ## How backups are made (current code)

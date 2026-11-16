@@ -19,7 +19,7 @@ from .auth_storage import AuthStorage, StorageError, _windows_auth_verified
 
 APPLICATION_ID = 0x41494533  # AIE3, distinct from the auth-only database.
 SCHEMA_VERSION = 1  # New files still bootstrap as version 1; upgrades are explicit.
-LATEST_SCHEMA_VERSION = 14
+LATEST_SCHEMA_VERSION = 15
 SUPPORTED_STATE_VERSIONS = frozenset(range(1, LATEST_SCHEMA_VERSION + 1))
 
 
@@ -306,6 +306,26 @@ _V14_SCHEMA = {
 )""",
 }
 
+
+_V15_SCHEMA = {
+    "opportunities": """CREATE TABLE opportunities (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 200 AND length(trim(title)) > 0),
+    source_url TEXT NOT NULL CHECK(length(source_url) BETWEEN 1 AND 2048 AND (source_url GLOB 'http://*' OR source_url GLOB 'https://*')),
+    source_type TEXT NOT NULL CHECK(source_type IN ('manual','connector')),
+    connector_id TEXT CHECK(connector_id IS NULL OR (length(connector_id) BETWEEN 1 AND 64 AND connector_id NOT GLOB '*[^A-Za-z0-9_-]*')),
+    budget_paise INTEGER NOT NULL CHECK(typeof(budget_paise)='integer' AND budget_paise BETWEEN 0 AND 1000000000000),
+    currency TEXT NOT NULL CHECK(currency='INR'),
+    deadline_at INTEGER NOT NULL CHECK(typeof(deadline_at)='integer' AND deadline_at BETWEEN 0 AND 4102444800),
+    risk_level TEXT NOT NULL CHECK(risk_level IN ('low','medium','high','unknown')),
+    skill_tags TEXT NOT NULL CHECK(length(skill_tags) BETWEEN 0 AND 500),
+    status TEXT NOT NULL CHECK(status IN ('discovered','vetted','pursuing','archived','dismissed')),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at)
+)""",
+}
+
 def _validate_schema(conn: sqlite3.Connection) -> int:
     application_id = conn.execute("PRAGMA application_id").fetchone()[0]
     version = conn.execute("PRAGMA user_version").fetchone()[0]
@@ -409,6 +429,14 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
             ("owner_id", "TEXT", 1, 1), ("event_id", "TEXT", 1, 2), ("payment_id", "TEXT", 1, 0),
             ("event_type", "TEXT", 1, 0), ("sequence", "INTEGER", 1, 0), ("body_hash", "BLOB", 1, 0),
         ]
+    if version >= 15:
+        expected_columns["opportunities"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("title", "TEXT", 1, 0),
+            ("source_url", "TEXT", 1, 0), ("source_type", "TEXT", 1, 0), ("connector_id", "TEXT", 0, 0),
+            ("budget_paise", "INTEGER", 1, 0), ("currency", "TEXT", 1, 0), ("deadline_at", "INTEGER", 1, 0),
+            ("risk_level", "TEXT", 1, 0), ("skill_tags", "TEXT", 1, 0), ("status", "TEXT", 1, 0),
+            ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+        ]
     objects = conn.execute(
         "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name"
     ).fetchall()
@@ -470,6 +498,8 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         schemas.append(_V13_SCHEMA)
     if version >= 14:
         schemas.append(_V14_SCHEMA)
+    if version >= 15:
+        schemas.append(_V15_SCHEMA)
     for schema in schemas:
         for name, statement in schema.items():
             row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()
@@ -578,6 +608,13 @@ def _apply_v14(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA user_version = 14")
 
 
+def _apply_v15(conn: sqlite3.Connection) -> None:
+    for statement in _V15_SCHEMA.values():
+        conn.execute(statement)
+    conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (15, int(time.time())))
+    conn.execute("PRAGMA user_version = 15")
+
+
 def _check_managed_pairs(conn: sqlite3.Connection, owner=None, queue_id=None, workflow_id=None, association_id=None) -> None:
     """Check managed-parent state combinations, not history authenticity."""
     invalid = conn.execute("""
@@ -671,6 +708,7 @@ _OPERATION_RESULTS = (
     (12, "managed_task_pair", "managed_task_pairs"),
     (13, "financial_assertion", "financial_assertions"),
     (14, "sandbox_payment", "sandbox_payments"),
+    (15, "opportunity", "opportunities"),
 )
 
 
@@ -734,6 +772,7 @@ _CREATION_EVENTS = (
     (12, "managed_task_pairs", "managed_task_pair", "managed_task_pair_created"),
     (13, "financial_assertions", "financial_assertion", "financial_assertion_created"),
     (14, "sandbox_payments", "sandbox_payment", "sandbox_payment_created"),
+    (15, "opportunities", "opportunity", "opportunity_created"),
 )
 
 
@@ -840,6 +879,17 @@ _MULTI_STEP_HISTORIES = (
         ("flagged", "payment_observation_unflag"): "unverified",
         ("unverified", "payment_observation_discard"): "discarded",
         ("flagged", "payment_observation_discard"): "discarded",
+    }),
+    (15, "opportunities", "opportunity", {
+        (None, "opportunity_created"): "discovered",
+        ("discovered", "opportunity_vetted"): "vetted",
+        ("discovered", "opportunity_dismissed"): "dismissed",
+        ("discovered", "opportunity_archived"): "archived",
+        ("vetted", "opportunity_pursuing"): "pursuing",
+        ("vetted", "opportunity_dismissed"): "dismissed",
+        ("vetted", "opportunity_archived"): "archived",
+        ("pursuing", "opportunity_archived"): "archived",
+        ("pursuing", "opportunity_dismissed"): "dismissed",
     }),
 )
 
@@ -1266,6 +1316,19 @@ class StateStorage:
             self.backup_to(backup, confirmed=True)
             _apply_v14(conn)
             if _validate_schema(conn) != 14:
+                raise StateStorageError("Migration produced an incompatible schema.")
+            _check_integrity(conn)
+
+    def migrate_to_v15(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 14 only after a checked non-overwriting backup."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 14:
+                raise StateStorageError("Only version 14 can be upgraded to version 15.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v15(conn)
+            if _validate_schema(conn) != 15:
                 raise StateStorageError("Migration produced an incompatible schema.")
             _check_integrity(conn)
 

@@ -11,8 +11,8 @@ mkdir -m 700 ~/.ai-earn-private
 export AI_EARN_AUTH_DB=~/.ai-earn-private/auth.sqlite3
 export AI_EARN_STATE_DB=~/.ai-earn-private/state.sqlite3
 .venv/bin/python -m ai_earn auth register   # hidden password, save one-time code
-.venv/bin/python -m ai_earn tracker init    # type YES, creates state.sqlite3 + 13 before-v*.sqlite3
-.venv/bin/python -m ai_earn tracker open    # login, 1=add, 2=list, 3=advance, 4=withdraw, 0=logout
+.venv/bin/python -m ai_earn tracker init    # type YES, creates state.sqlite3 + 14 before-v*.sqlite3 (v2→v15)
+.venv/bin/python -m ai_earn tracker open    # login, 1=add, 2=list, 3=advance, 4=withdraw, 0=logout (opportunities via API, see docs/DATABASE.md)
 ```
 
 Windows: same via PowerShell `create_private_directory` (see `README.md`). The private dir must be on a fixed NTFS drive, not a reparse point; never reuse an untrusted ancestor.
@@ -50,6 +50,6 @@ Statuses: `not_configured` (set env), `relative_path`, `invalid_path`, `permissi
 
 ## What is not ready
 
-- No real opportunity discovery, no CRM, no invoicing PDF, no ledger net income, no Razorpay/Stripe live, no AI assistant. Do not enter real customer/financial data.
+- Opportunity discovery is experimental local drafts only (v15 `opportunities`, manual/connector, unverified, draft ranking, stub AI helpers). No verified external source, no evidence scoring. No CRM, no invoicing PDF, no ledger net income, no Razorpay/Stripe live, no autonomous AI. Do not enter real customer/financial data.
 
 See `docs/ARCHITECTURE.md`, `DATABASE.md`, `PAYMENTS.md`, `SECURITY_REVIEW.md` for limits.
