@@ -5,10 +5,11 @@ creating, migrating, replacing or truncating a database. It reports distinct,
 actionable statuses so a missing state database can be recovered deliberately.
 No password, hash, token or recovery secret is read or displayed.
 """
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 import os
 from pathlib import Path
 import sqlite3
+import stat
 from typing import Mapping
 
 from .config import load_settings
@@ -111,6 +112,28 @@ def _inspect_state(connection: sqlite3.Connection) -> StoreReport:
                        schema_version=version)
 
 
+def _verify_parent_is_private(candidate: Path) -> bool:
+    """Check parent directory privacy without creating files; fail closed."""
+    parent = candidate.parent
+    if os.name == "nt":
+        try:
+            from .windows_security import WindowsSecurityError, verify_private_path
+            verify_private_path(parent, directory=True)
+            return True
+        except Exception:
+            return False
+    try:
+        info = parent.lstat()
+        if not stat.S_ISDIR(info.st_mode):
+            return False
+        # Must be owned by current user and have no group/other access.
+        if info.st_uid != os.geteuid() or bool(stat.S_IMODE(info.st_mode) & 0o077):
+            return False
+        return True
+    except OSError:
+        return False
+
+
 def _classify(variable: str, value: str) -> StoreReport:
     if not value:
         return StoreReport(variable, NOT_CONFIGURED,
@@ -121,6 +144,11 @@ def _classify(variable: str, value: str) -> StoreReport:
         return StoreReport(variable, INVALID_PATH, "The configured path cannot be resolved.")
     if not candidate.is_absolute():
         return StoreReport(variable, RELATIVE_PATH, "The configured path must be absolute.")
+    # Parent privacy is checked before even reporting missing, so a world-readable
+    # parent is surfaced as a permission problem rather than a simple missing file.
+    if not _verify_parent_is_private(candidate):
+        return StoreReport(variable, PERMISSION_ERROR,
+                           "The parent directory is not private or cannot be verified; fix permissions before use.")
     try:
         info = candidate.lstat()
     except FileNotFoundError:
@@ -134,6 +162,22 @@ def _classify(variable: str, value: str) -> StoreReport:
     if info.st_size == 0:
         return StoreReport(variable, EMPTY_FILE,
                            "The file exists but is empty; it was never initialized.")
+    # Enforce file ownership/mode on POSIX even if SQLite can still open it.
+    if os.name != "nt":
+        try:
+            if info.st_uid != os.geteuid() or bool(stat.S_IMODE(info.st_mode) & 0o077):
+                return StoreReport(variable, PERMISSION_ERROR,
+                                   "The database file must be owned by the current user with 0600 permissions.")
+        except OSError:
+            return StoreReport(variable, PERMISSION_ERROR,
+                               "The database file permissions could not be verified.")
+    else:
+        try:
+            from .windows_security import WindowsSecurityError, verify_private_path
+            verify_private_path(candidate, directory=False)
+        except Exception:
+            return StoreReport(variable, PERMISSION_ERROR,
+                               "The database file Windows ACL is unsafe.")
     try:
         connection = _open_read_only(candidate)
     except sqlite3.Error:

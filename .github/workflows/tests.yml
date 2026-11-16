@@ -2,7 +2,7 @@ name: Python tests
 
 on:
   push:
-    branches: ["main", "earn-os/**"]
+    branches: ["main", "earn-os/**", "arena/**"]
   pull_request:
     branches: ["main"]
   workflow_dispatch:

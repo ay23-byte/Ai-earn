@@ -1,6 +1,6 @@
 # Ai-earn
 
-Ai-earn is in early development. It currently contains an offline status command, an **experimental local authentication component**, and internal Phase 3 storage, opportunity-draft, task-plan, scheduling-queue, local task-review, queue/workflow-association and opt-in paired start/cancellation, lease-aware review, lease recovery, opt-in local completion and v12 managed-pair safeguards, order-estimate, invoice-draft, unverified-payment-placeholder, draft-only coordinated withdrawal, unverified financial assertions, synthetic in-memory and durable payment-event rehearsals and recovery-comparison experiments for disposable tests. There is no dashboard, opportunity tracker, customer data, automation or payment processing. It makes no income claims and is not production-ready. Phase 3 is in progress; see [phase status](docs/PHASE_STATUS.md).
+Ai-earn is in early development. It currently contains an offline `status` command, an **experimental local authentication component**, internal Phase 3 storage with opportunity-draft, task-plan, scheduling-queue, local task-review, queue/workflow-association and opt-in paired start/cancellation, lease-aware review, lease recovery, opt-in local completion and v12 managed-pair safeguards, order-estimate, invoice-draft, unverified-payment-placeholder, draft-only coordinated withdrawal, unverified financial assertions, synthetic in-memory and durable payment-event rehearsals and recovery-comparison experiments for disposable tests, plus an **experimental offline tracker** for unverified local assertions, a **read-only local dashboard snapshot** (`dashboard/connected.html`, no HTTP API), and a **read-only `doctor` diagnostic** for private-database recovery. There is no customer data, automation, verified income ledger or payment processing. It makes no income claims and is not production-ready. Phase 3 is in progress; see [phase status](docs/PHASE_STATUS.md).
 
 **Windows:** the user reported the experimental offline authentication path passed its Windows tests at `72241cc`. Phase 2 passed with documented limitations for this offline increment only; it is not production-ready. Use only disposable test credentials, and do not store customer or financial data.
 
@@ -20,9 +20,21 @@ $env:AI_EARN_STATE_DB = Join-Path $private 'state.sqlite3'
 .\.venv\Scripts\python.exe -m ai_earn tracker open
 ```
 
-Registration requests a hidden password and displays a one-time recovery code: save it privately. `tracker init` requires typing `YES`, creates a new state database and 12 non-overwriting migration backups, and never upgrades an existing file. If setup is interrupted, **do not delete or overwrite files automatically**; inspect the private directory and use a different new test directory or review recovery. Environment variables above last only for the current PowerShell session; set them again before opening the tracker later. The tracker requires a real terminal, does not accept passwords as arguments, and closes the session on exit where possible. Entries may be visible to anyone who can access your OS account or files; never use sensitive data. If an operation is interrupted or reports an error, inspect entries before retrying: the outcome may be ambiguous and the CLI creates a new operation key for each attempt.
+Registration requests a hidden password and displays a one-time recovery code: save it privately. `tracker init` requires typing `YES`, creates a new state database and 13 non-overwriting migration backups (v2–v14), and never upgrades an existing file. If setup is interrupted, **do not delete or overwrite files automatically**; inspect the private directory and use a different new test directory or review recovery. Environment variables above last only for the current PowerShell session; set them again before opening the tracker later. The tracker requires a real terminal, does not accept passwords as arguments, and closes the session on exit where possible. Entries may be visible to anyone who can access your OS account or files; never use sensitive data. If an operation is interrupted or reports an error, inspect entries before retrying: the outcome may be ambiguous and the CLI creates a new operation key for each attempt.
+
+If the state database is missing or permissions look wrong, run the read-only diagnostics first:
+
+```powershell
+python -m ai_earn doctor
+python -m ai_earn doctor --plan-init   # explicit, confirmation-required recovery steps
+```
 
 On POSIX use a newly created owner-only directory (`mkdir -m 700`), export the same two absolute paths, and run `python3 -m ai_earn auth register`, `python3 -m ai_earn tracker init`, then `python3 -m ai_earn tracker open`. Never replace an existing database. Windows verification of this new interface is pending.
+
+The doctor is read-only and never creates, migrates or overwrites a file. It reports
+environment validity, per-store status, schema version, account count and
+actionable next steps, including the `--plan-init` recovery plan. Use
+`--json` for machine-readable output.
 
 ## Local authenticated dashboard snapshot
 
@@ -99,6 +111,7 @@ Configuration comes only from process environment variables. `.env.example` is a
 | `AI_EARN_ENV` | `development` | `development`, `test`, `production` |
 | `AI_EARN_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 | `AI_EARN_AUTH_DB` | None | Absolute path to the auth-only database in an owner-only directory; required for auth |
+| `AI_EARN_STATE_DB` | None | Absolute path to the state-only database in the same private directory; required for tracker/dashboard/doctor |
 
 Invalid configuration is rejected without echoing values. Environment labels do not isolate data; explicitly choose separate database paths for development and testing. The auth CLI refuses the `production` label. No environment is approved for public deployment.
 

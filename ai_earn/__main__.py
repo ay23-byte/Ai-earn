@@ -12,6 +12,12 @@ from .status import current_status
 
 
 def main(args: Sequence[str], environ: Mapping[str, str], out: TextIO, err: TextIO) -> int:
+    if len(args) >= 1 and args[0] == "doctor":
+        from .doctor_cli import run as doctor_run
+        # `python -m ai_earn doctor` or `python -m ai_earn doctor --plan-init`
+        # Accept any trailing args; pass them through without exposing secrets.
+        return doctor_run(args[1:], environ, out, err)
+
     if len(args) == 2 and args[0] == "tracker":
         from .tracker_cli import run
         return run(args[1], environ, sys.stdin, out, err)
@@ -28,7 +34,7 @@ def main(args: Sequence[str], environ: Mapping[str, str], out: TextIO, err: Text
         write_event(Event.INVALID_REQUEST, err)
         result = failure(
             "invalid_command",
-            "Usage: python -m ai_earn status | auth {register|login|recover} | tracker {init|open} | dashboard snapshot",
+            "Usage: python -m ai_earn status | auth {register|login|recover} | tracker {init|open} | dashboard snapshot | doctor [--plan-init|--json]",
         )
         out.write(json.dumps(result) + "\n")
         return 2
