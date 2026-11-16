@@ -39,10 +39,17 @@ jobs:
         run: python -m compileall -q ai_earn tests tools
 
       - name: Check for whitespace / secret patterns
+        shell: bash
         run: |
           git diff --check
-          ! grep -R --include="*.py" -n "BEGIN PRIVATE KEY" ai_earn/ || (echo "private key material found" && exit 1)
-          ! grep -R --include="*.py" -n "sk-[A-Za-z0-9]\{20\}" ai_earn/ || (echo "possible API key found" && exit 1)
+          if grep -R --include="*.py" -n "BEGIN PRIVATE KEY" ai_earn/; then
+            echo "private key material found"
+            exit 1
+          fi
+          if grep -R --include="*.py" -n -E "sk-[A-Za-z0-9]{20}" ai_earn/; then
+            echo "possible API key found"
+            exit 1
+          fi
 
       - name: Run unit tests
         run: python -m unittest discover -v
