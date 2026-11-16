@@ -22,7 +22,7 @@ from ai_earn.task_runner import ManagedTaskRunner, RunnerError
 @unittest.skipUnless(os.name in {"posix", "nt"}, "requires private filesystem")
 class TaskRunnerTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(self.tmp.cleanup)
         self.directory = Path(self.tmp.name) / "private"
         if os.name == "nt":

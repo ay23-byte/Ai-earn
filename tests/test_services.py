@@ -18,7 +18,7 @@ from ai_earn.state_recovery_comparison import StateRecoveryComparison
 @unittest.skipUnless(os.name in {"posix", "nt"}, "requires private filesystem")
 class ServiceTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(self.tmp.cleanup)
         self.directory = Path(self.tmp.name) / "private"
         if os.name == "nt":
@@ -168,7 +168,7 @@ class ServiceTests(unittest.TestCase):
 
     def test_migration_v15_to_v16(self):
         # create v15 DB, then migrate to v16
-        tmp2 = tempfile.TemporaryDirectory()
+        tmp2 = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(tmp2.cleanup)
         dir2 = Path(tmp2.name) / "priv"
         if os.name == "nt":
@@ -205,7 +205,7 @@ class ServiceTests(unittest.TestCase):
 
     def test_version_guard(self):
         # v15 DB should reject services
-        tmp2 = tempfile.TemporaryDirectory()
+        tmp2 = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(tmp2.cleanup)
         dir2 = Path(tmp2.name) / "priv"
         if os.name == "nt":

@@ -19,7 +19,7 @@ class Terminal(io.StringIO):
 @unittest.skipUnless(os.name == "posix", "account storage requires verified POSIX permissions")
 class AuthCliTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
+        self.temp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(self.temp.cleanup)
         self.env = {"AI_EARN_AUTH_DB": str(Path(self.temp.name) / "auth.sqlite3")}
 

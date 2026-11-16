@@ -8,7 +8,7 @@ from ai_earn.dashboard_cli import write_snapshot
 @unittest.skipUnless(os.name in {'posix', 'nt'}, 'supported filesystem required')
 class DashboardSnapshotWriterTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(self.tmp.cleanup)
         self.directory = Path(self.tmp.name) / 'private'
         if os.name == 'nt':

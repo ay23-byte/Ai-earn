@@ -15,7 +15,7 @@ class TerminalIntegrationTests(unittest.TestCase):
     def test_register_login_and_recovery_in_real_terminal(self):
         import pty
 
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
             db = str(Path(directory) / "auth.sqlite3")
             env = os.environ.copy()
             env.update({"AI_EARN_AUTH_DB": db, "AI_EARN_ENV": "test", "PYTHONPATH": str(Path.cwd())})

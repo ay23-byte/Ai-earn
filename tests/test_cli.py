@@ -100,7 +100,7 @@ class CliTests(unittest.TestCase):
 
     def test_clean_copy_runs_without_install_or_network(self):
         source = Path(__file__).resolve().parents[1] / "ai_earn"
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:
             shutil.copytree(source, Path(directory) / "ai_earn", ignore=shutil.ignore_patterns("__pycache__"))
             environment = os.environ.copy()
             environment.pop("AI_EARN_ENV", None)

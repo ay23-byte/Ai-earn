@@ -29,7 +29,7 @@ class Clock:
 class FinancialDraftWorkflowTests(unittest.TestCase):
     def setUp(self):
         from ai_earn.financial_draft_workflows import FinancialDraftWorkflows
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(self.tmp.cleanup)
         self.directory = Path(self.tmp.name) / "private"
         if os.name == "nt":

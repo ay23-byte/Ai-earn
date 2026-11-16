@@ -23,7 +23,7 @@ from ai_earn.state_recovery_comparison import StateRecoveryComparison
 @unittest.skipUnless(os.name in {"posix", "nt"}, "requires private filesystem")
 class AIAssistantTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(self.tmp.cleanup)
         self.directory = Path(self.tmp.name) / "private"
         if os.name == "nt":
@@ -335,7 +335,7 @@ class AIAssistantTests(unittest.TestCase):
         self.assertIn("ai_emergency", snap)
 
     def test_migration_v21_to_v22(self):
-        tmp2 = tempfile.TemporaryDirectory()
+        tmp2 = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(tmp2.cleanup)
         dir2 = Path(tmp2.name) / "priv"
         if os.name == "nt":
@@ -364,7 +364,7 @@ class AIAssistantTests(unittest.TestCase):
         self.assertEqual(ai2.queue.get(token2, apid)["status"], "approved")
 
     def test_version_guard(self):
-        tmp2 = tempfile.TemporaryDirectory()
+        tmp2 = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(tmp2.cleanup)
         dir2 = Path(tmp2.name) / "priv"
         if os.name == "nt":

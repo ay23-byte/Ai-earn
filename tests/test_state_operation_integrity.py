@@ -22,7 +22,7 @@ from ai_earn.task_workflows import TaskWorkflows
 @unittest.skipUnless(os.name in {"posix", "nt"}, "requires a supported private filesystem")
 class OperationIntegrityTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(self.tmp.cleanup)
         directory = Path(self.tmp.name) / "private"
         if os.name == "nt":

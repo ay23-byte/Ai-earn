@@ -19,7 +19,7 @@ from ai_earn.state_recovery_comparison import StateRecoveryComparison
 @unittest.skipUnless(os.name in {"posix", "nt"}, "requires private filesystem")
 class FollowupTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(self.tmp.cleanup)
         self.directory = Path(self.tmp.name) / "private"
         if os.name == "nt":
@@ -147,7 +147,7 @@ class FollowupTests(unittest.TestCase):
         self.assertEqual(rec["tables"]["followups"]["matching"], 1)
 
     def test_migration_v18_to_v19(self):
-        tmp2 = tempfile.TemporaryDirectory()
+        tmp2 = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(tmp2.cleanup)
         dir2 = Path(tmp2.name) / "priv"
         if os.name == "nt":
@@ -176,7 +176,7 @@ class FollowupTests(unittest.TestCase):
         self.assertEqual(foll2.get(token2, pid)["status"], "pending")
 
     def test_version_guard(self):
-        tmp2 = tempfile.TemporaryDirectory()
+        tmp2 = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(tmp2.cleanup)
         dir2 = Path(tmp2.name) / "priv"
         if os.name == "nt":

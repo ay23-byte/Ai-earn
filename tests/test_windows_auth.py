@@ -25,7 +25,7 @@ class WindowsGateDefaultTests(unittest.TestCase):
 @unittest.skipUnless(os.name == "nt", "requires actual Windows Win32 APIs and a local ACL-capable drive")
 class WindowsAuthenticationTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(self.tmp.cleanup)
         self.directory = Path(self.tmp.name) / "private"
         create_private_directory(self.directory)

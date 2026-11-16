@@ -18,7 +18,7 @@ from ai_earn.state_recovery_comparison import StateRecoveryComparison
 @unittest.skipUnless(os.name in {"posix", "nt"}, "requires private filesystem")
 class ProductTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(self.tmp.cleanup)
         self.directory = Path(self.tmp.name) / "private"
         if os.name == "nt":
@@ -137,7 +137,7 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(rec["tables"]["products"]["matching"], 1)
 
     def test_migration_v16_to_v17(self):
-        tmp2 = tempfile.TemporaryDirectory()
+        tmp2 = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(tmp2.cleanup)
         dir2 = Path(tmp2.name) / "priv"
         if os.name == "nt":
@@ -164,7 +164,7 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(prod2.get(token2, pid)["status"], "draft")
 
     def test_version_guard(self):
-        tmp2 = tempfile.TemporaryDirectory()
+        tmp2 = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(tmp2.cleanup)
         dir2 = Path(tmp2.name) / "priv"
         if os.name == "nt":

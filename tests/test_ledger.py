@@ -18,7 +18,7 @@ from ai_earn.state_recovery_comparison import StateRecoveryComparison
 @unittest.skipUnless(os.name in {"posix", "nt"}, "requires private filesystem")
 class LedgerTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(self.tmp.cleanup)
         self.directory = Path(self.tmp.name) / "private"
         if os.name == "nt":
@@ -126,7 +126,7 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(rec["tables"]["ledger_entries"]["matching"], 1)
 
     def test_migration_v17_to_v18(self):
-        tmp2 = tempfile.TemporaryDirectory()
+        tmp2 = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(tmp2.cleanup)
         dir2 = Path(tmp2.name) / "priv"
         if os.name == "nt":
@@ -153,7 +153,7 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(led2.get(token2, lid)["amount_paise"], 1000)
 
     def test_version_guard(self):
-        tmp2 = tempfile.TemporaryDirectory()
+        tmp2 = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(tmp2.cleanup)
         dir2 = Path(tmp2.name) / "priv"
         if os.name == "nt":

@@ -21,7 +21,7 @@ from ai_earn.state_recovery_comparison import StateRecoveryComparison
 @unittest.skipUnless(os.name in {"posix", "nt"}, "requires private filesystem")
 class InvoiceTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(self.tmp.cleanup)
         self.directory = Path(self.tmp.name) / "private"
         if os.name == "nt":
@@ -268,7 +268,7 @@ class InvoiceTests(unittest.TestCase):
         self.assertEqual(eleven["net_realized_synthetic"]["amount_paise"], 0 - 5000 - 1000 - 20000)  # settled 0
 
     def test_migration_v19_to_v20(self):
-        tmp2 = tempfile.TemporaryDirectory()
+        tmp2 = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(tmp2.cleanup)
         dir2 = Path(tmp2.name) / "priv"
         if os.name == "nt":
@@ -298,7 +298,7 @@ class InvoiceTests(unittest.TestCase):
         self.assertEqual(inv2.get(token2, iid)["status"], "draft")
 
     def test_version_guard(self):
-        tmp2 = tempfile.TemporaryDirectory()
+        tmp2 = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(tmp2.cleanup)
         dir2 = Path(tmp2.name) / "priv"
         if os.name == "nt":

@@ -164,7 +164,7 @@ class ConnectorFrameworkTests(unittest.TestCase):
 
     def test_integration_with_opportunities_import(self):
         # Ensure stub connectors can be used via Opportunities.import_from_connector
-        tmp = tempfile.TemporaryDirectory()
+        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(tmp.cleanup)
         directory = Path(tmp.name) / "private"
         if os.name == "nt":

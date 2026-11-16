@@ -22,7 +22,7 @@ class Clock:
 
 class ServiceWorkspaceTests(unittest.TestCase):
     def setUp(self):
-        self.tmp=tempfile.TemporaryDirectory()
+        self.tmp=tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(self.tmp.cleanup)
         self.priv=Path(self.tmp.name)/"priv"
         if os.name == "nt":

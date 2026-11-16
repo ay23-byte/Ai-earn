@@ -31,7 +31,7 @@ def _stripe_signature(secret: bytes, body: bytes, timestamp: int) -> str:
 @unittest.skipUnless(os.name in {"posix", "nt"}, "requires private filesystem")
 class ProviderSandboxTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(self.tmp.cleanup)
         self.directory = Path(self.tmp.name) / "private"
         if os.name == "nt":
@@ -298,7 +298,7 @@ class ProviderSandboxTests(unittest.TestCase):
         self.assertEqual(rec["event_count"], 0)
 
     def test_migration_v20_to_v21(self):
-        tmp2 = tempfile.TemporaryDirectory()
+        tmp2 = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(tmp2.cleanup)
         dir2 = Path(tmp2.name) / "priv"
         if os.name == "nt":
@@ -325,7 +325,7 @@ class ProviderSandboxTests(unittest.TestCase):
         self.assertEqual(pp2.get(token2, oid)["status"], "created")
 
     def test_version_guard(self):
-        tmp2 = tempfile.TemporaryDirectory()
+        tmp2 = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(tmp2.cleanup)
         dir2 = Path(tmp2.name) / "priv"
         if os.name == "nt":
