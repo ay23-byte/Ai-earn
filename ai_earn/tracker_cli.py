@@ -1,18 +1,21 @@
 """Experimental offline, manually asserted opportunity tracker.
 
 No payment is verified, received or processed. Use only disposable data.
+Now includes v15 opportunity discovery (manual import + vetted/pursuing lifecycle).
 """
+
 import getpass
 import re
 import secrets
 import sqlite3
 from pathlib import Path
 
-from .auth import AuthError, AuthService
+from .auth import AccessDenied, AuthError, AuthService
 from .auth_cli import _secret
 from .auth_storage import AuthStorage, StorageError
 from .config import ConfigurationError, load_settings
 from .financial_assertions import FinancialAssertions, FinancialAssertionError
+from .opportunities import Opportunities, OpportunityError
 from .state_storage import StateStorage, StateStorageError
 
 _STAGES = {"potential": "potential opportunity", "quote_asserted": "quote (unverified)",
@@ -20,6 +23,20 @@ _STAGES = {"potential": "potential opportunity", "quote_asserted": "quote (unver
            "initiated_asserted": "payment initiated (unverified, not received)", "withdrawn": "withdrawn"}
 _NEXT = {"potential": "quote_asserted", "quote_asserted": "contract_asserted",
          "contract_asserted": "invoice_asserted", "invoice_asserted": "initiated_asserted"}
+
+_OPP_STATUS_LABELS = {
+    "discovered": "discovered (unverified)",
+    "vetted": "vetted (unverified)",
+    "pursuing": "pursuing (unverified)",
+    "archived": "archived",
+    "dismissed": "dismissed",
+}
+_OPP_TRANSITIONS = {
+    "1": ("vetted", "opportunity_vetted"),
+    "2": ("pursuing", "opportunity_pursuing"),
+    "3": ("archived", "opportunity_archived"),
+    "4": ("dismissed", "opportunity_dismissed"),
+}
 
 
 def _read(stdin, out, prompt):
@@ -56,10 +73,16 @@ def _initialize_state(path):
     return state
 
 
-def _menu(service, token, stdin, out):
+def _menu(service, token, stdin, out, opportunities=None):
+    # service = FinancialAssertions, opportunities = Opportunities (optional for backward compat)
     out.write("Local tracker: all entries are UNVERIFIED. No payment processing or settlement.\n")
+    if opportunities is not None:
+        out.write("Financial pipeline (1-4) and Opportunities v15 (5-8) are both available.\n")
     while True:
-        choice = _read(stdin, out, "\n1 Add opportunity  2 List entries  3 Advance stage  4 Withdraw  0 Sign out\nChoice: ").strip()
+        if opportunities is None:
+            choice = _read(stdin, out, "\n1 Add opportunity  2 List entries  3 Advance stage  4 Withdraw  0 Sign out\nChoice: ").strip()
+        else:
+            choice = _read(stdin, out, "\n1 Add financial  2 List financial  3 Advance financial  4 Withdraw financial | 5 Add opportunity  6 List opportunities  7 Manage opportunity  8 Ranked opportunities  0 Sign out\nChoice: ").strip()
         try:
             if choice == "0":
                 return
@@ -67,7 +90,7 @@ def _menu(service, token, stdin, out):
                 title = _read(stdin, out, "Opportunity title (no sensitive data): ")
                 amount = _paise(_read(stdin, out, "Proposed INR amount: ").strip())
                 ident = service.create(token, title, amount, operation_key=_key())
-                out.write(f"Created unverified entry: {ident}\n")
+                out.write(f"Created unverified financial entry: {ident}\n")
             elif choice == "2":
                 cursor = None
                 while True:
@@ -98,9 +121,107 @@ def _menu(service, token, stdin, out):
                 else:
                     service.withdraw(token, ident, confirmed=True, operation_key=_key())
                 out.write("Local entry updated; nothing was sent or paid.\n")
+            elif opportunities is not None and choice == "5":
+                title = _read(stdin, out, "Opportunity title (1-200, no control chars): ")
+                url = _read(stdin, out, "Source URL (http:// or https://): ").strip()
+                budget_raw = _read(stdin, out, "Budget INR amount (e.g. 5000 or 5000.50): ").strip()
+                budget = _paise(budget_raw)
+                deadline_raw = _read(stdin, out, "Deadline unix timestamp (0 for none, or future seconds): ").strip()
+                if deadline_raw == "":
+                    deadline_raw = "0"
+                try:
+                    deadline = int(deadline_raw)
+                except ValueError:
+                    raise ValueError("Deadline must be an integer timestamp or 0.")
+                risk = _read(stdin, out, "Risk level [low/medium/high/unknown] (default unknown): ").strip().lower()
+                if risk == "":
+                    risk = "unknown"
+                tags = _read(stdin, out, "Skill tags (comma separated, 0-500 chars, empty for none): ")
+                ident = opportunities.create(
+                    token,
+                    title,
+                    url,
+                    budget,
+                    operation_key=_key(),
+                    deadline_at=deadline,
+                    risk_level=risk,
+                    skill_tags=tags,
+                    source_type="manual",
+                    connector_id=None,
+                )
+                out.write(f"Created unverified opportunity (discovered): {ident}\n")
+                out.write("Verification: unverified, budget_not_revenue. Use vet/pursue to advance.\n")
+            elif opportunities is not None and choice == "6":
+                # List opportunities with optional filters
+                out.write("Listing opportunities (owner-scoped, id-ordered). Filters optional.\n")
+                status_f = _read(stdin, out, "Filter status [discovered/vetted/pursuing/archived/dismissed or empty]: ").strip()
+                if status_f == "":
+                    status_f = None
+                risk_f = _read(stdin, out, "Filter risk [low/medium/high/unknown or empty]: ").strip()
+                if risk_f == "":
+                    risk_f = None
+                cursor = None
+                while True:
+                    entries = opportunities.list(token, after_id=cursor, limit=50, status=status_f, risk_level=risk_f)
+                    for item in entries:
+                        out.write(f"{item['id']} | {item['title']} | {item['source_url'][:60]} | INR {item['budget_paise'] // 100}.{item['budget_paise'] % 100:02d} | {_OPP_STATUS_LABELS.get(item['status'], item['status'])} | risk:{item['risk_level']} | skills:{item['skill_tags'][:40]}\n")
+                    if len(entries) < 50:
+                        break
+                    if _read(stdin, out, "More? Type YES: ").strip() != "YES":
+                        break
+                    cursor = entries[-1]["id"]
+                if cursor is None and not entries:
+                    out.write("No opportunities.\n")
+            elif opportunities is not None and choice == "7":
+                ident = _read(stdin, out, "Opportunity ID: ").strip()
+                item = opportunities.get(token, ident)
+                out.write(f"Current: {item['title']} | {_OPP_STATUS_LABELS.get(item['status'], item['status'])} | risk:{item['risk_level']} | budget INR {item['budget_paise'] // 100}.{item['budget_paise'] % 100:02d}\n")
+                out.write("Transitions: 1 vetted  2 pursuing  3 archived  4 dismissed\n")
+                tchoice = _read(stdin, out, "Choose transition (1-4) or empty to cancel: ").strip()
+                if tchoice == "":
+                    out.write("No change.\n")
+                    continue
+                if tchoice not in _OPP_TRANSITIONS:
+                    out.write("Invalid transition choice.\n")
+                    continue
+                target, _event = _OPP_TRANSITIONS[tchoice]
+                out.write(f"Change to {_OPP_STATUS_LABELS.get(target, target)}? This is unverified.\n")
+                if _read(stdin, out, "Type YES to confirm: ").strip() != "YES":
+                    out.write("No change.\n")
+                    continue
+                if target == "vetted":
+                    opportunities.vetted(token, ident, operation_key=_key())
+                elif target == "pursuing":
+                    opportunities.pursuing(token, ident, operation_key=_key())
+                elif target == "archived":
+                    opportunities.archived(token, ident, operation_key=_key())
+                elif target == "dismissed":
+                    opportunities.dismissed(token, ident, operation_key=_key())
+                out.write(f"Opportunity updated to {target} (unverified).\n")
+            elif opportunities is not None and choice == "8":
+                limit_raw = _read(stdin, out, "How many ranked results (1-100, default 20): ").strip()
+                if limit_raw == "":
+                    limit = 20
+                else:
+                    try:
+                        limit = int(limit_raw)
+                    except ValueError:
+                        raise ValueError("Invalid limit.")
+                results = opportunities.ranked(token, limit=limit)
+                if not results:
+                    out.write("No opportunities to rank.\n")
+                else:
+                    out.write("Ranked (budget desc, risk low->high, deadline asc) — draft heuristic, unverified:\n")
+                    for item in results:
+                        out.write(f"{item['id']} | {item['title'][:40]} | INR {item['budget_paise'] // 100}.{item['budget_paise'] % 100:02d} | {item['risk_level']} | deadline:{item['deadline_at']} | {item['status']}\n")
             else:
-                out.write("Choose 0, 1, 2, 3 or 4.\n")
-        except (FinancialAssertionError, ValueError) as exc:
+                if opportunities is None:
+                    out.write("Choose 0, 1, 2, 3 or 4.\n")
+                else:
+                    out.write("Choose 0-4 (financial) or 5-8 (opportunities).\n")
+        except (FinancialAssertionError, OpportunityError, ValueError, StateStorageError) as exc:
+            out.write(str(exc) + "\n")
+        except AccessDenied as exc:
             out.write(str(exc) + "\n")
 
 
@@ -124,7 +245,7 @@ def run(action, environ, stdin, out, err):
                 out.write("No files created.\n")
                 return 0
             _initialize_state(path)
-            out.write("New tracker state initialized. Register an account with the auth command if needed.\n")
+            out.write("New tracker state initialized (v15, 14 backups). Register an account with the auth command if needed.\n")
             return 0
         # Open only; missing files are never created during login.
         state = StateStorage(path)
@@ -135,7 +256,7 @@ def run(action, environ, stdin, out, err):
         username = _read(stdin, out, "Username: ")
         password = _secret("Password: ", err)
         token = auth.login(username, password)
-        _menu(FinancialAssertions(auth, state), token, stdin, out)
+        _menu(FinancialAssertions(auth, state), token, stdin, out, Opportunities(auth, state))
         return 0
     except (AuthError, StorageError, StateStorageError, ConfigurationError):
         err.write("Tracker could not open or complete the operation. Check your account, private paths and state version; no automatic replacement is performed.\n")

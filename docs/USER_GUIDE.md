@@ -12,17 +12,21 @@ export AI_EARN_AUTH_DB=~/.ai-earn-private/auth.sqlite3
 export AI_EARN_STATE_DB=~/.ai-earn-private/state.sqlite3
 .venv/bin/python -m ai_earn auth register   # hidden password, save one-time code
 .venv/bin/python -m ai_earn tracker init    # type YES, creates state.sqlite3 + 14 before-v*.sqlite3 (v2→v15)
-.venv/bin/python -m ai_earn tracker open    # login, 1=add, 2=list, 3=advance, 4=withdraw, 0=logout (opportunities via API, see docs/DATABASE.md)
+.venv/bin/python -m ai_earn tracker open    # login: 1-4 financial, 5-8 opportunities (manual add/list/manage/ranked), 0=logout
 ```
 
 Windows: same via PowerShell `create_private_directory` (see `README.md`). The private dir must be on a fixed NTFS drive, not a reparse point; never reuse an untrusted ancestor.
 
 ## Everyday use
 
-- **Add opportunity:** `tracker open` → `1` → title → INR amount (e.g., `123.45`). Stored as `potential` (unverified), amount immutable.
-- **Advance:** `3` → ID → `YES` → `potential → quote_asserted → contract_asserted → invoice_asserted → initiated_asserted` (each requires `YES`, `confirmed=True` in service).
-- **Withdraw:** `4` → ID → `YES` → `withdrawn`.
-- **List:** `2` → pages 100 at a time, `YES` for next.
+- **Add financial:** `tracker open` → `1` → title → INR amount (e.g., `123.45`). Stored as `potential` (unverified), amount immutable.
+- **Advance financial:** `3` → ID → `YES` → `potential → quote_asserted → contract_asserted → invoice_asserted → initiated_asserted` (each requires `YES`, `confirmed=True`).
+- **Withdraw financial:** `4` → ID → `YES` → `withdrawn`.
+- **List financial:** `2` → pages 100 at a time, `YES` for next.
+- **Add opportunity (v15):** `5` → title → source URL (http/https) → budget INR → deadline 0 or future timestamp → risk low/medium/high/unknown → skill tags. Stored as `discovered` (unverified, `budget_not_revenue`).
+- **List opportunities:** `6` → optional status/risk filters → pages 50.
+- **Manage opportunity:** `7` → ID → 1 vetted / 2 pursuing / 3 archived / 4 dismissed → YES (transitions `discovered→vetted→pursuing→archived/dismissed` etc).
+- **Ranked opportunities:** `8` → limit (default 20) → draft heuristic (budget desc, risk low→high, deadline asc), unverified.
 - **Dashboard:** `python -m ai_earn dashboard snapshot` (needs login, interactive), then `python -m http.server 8000 --bind 127.0.0.1` and open `dashboard/connected.html` → `Load snapshot` → pick `dashboard-snapshot-*.json` beside state DB. `Verified income` is `Not available` (no ledger).
 
 ## Troubleshooting with doctor
