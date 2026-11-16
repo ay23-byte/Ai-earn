@@ -19,7 +19,7 @@ from .auth_storage import AuthStorage, StorageError, _windows_auth_verified
 
 APPLICATION_ID = 0x41494533  # AIE3, distinct from the auth-only database.
 SCHEMA_VERSION = 1  # New files still bootstrap as version 1; upgrades are explicit.
-LATEST_SCHEMA_VERSION = 26
+LATEST_SCHEMA_VERSION = 27
 SUPPORTED_STATE_VERSIONS = frozenset(range(1, LATEST_SCHEMA_VERSION + 1))
 
 
@@ -585,6 +585,73 @@ _V26_FILE_INDEX = "CREATE INDEX product_files_product_idx ON product_files(produ
 _V26_SALES_INDEX = "CREATE INDEX product_sales_product_idx ON product_sales(product_id, owner_id)"
 _V26_DELIVERABLE_INDEX = "CREATE INDEX product_deliverables_product_idx ON product_deliverables(product_id, owner_id)"
 _V26_DOCS_INDEX = "CREATE INDEX product_documentation_product_idx ON product_documentation(product_id, owner_id)"
+_V27_NOTE_INDEX = "CREATE INDEX customer_notes_customer_idx ON customer_notes(customer_id, owner_id)"
+_V27_REQUIREMENT_INDEX = "CREATE INDEX customer_requirements_customer_idx ON customer_requirements(customer_id, owner_id)"
+_V27_ORDER_INDEX = "CREATE UNIQUE INDEX customer_orders_id_owner_idx ON customer_orders(id, owner_id)"
+_V27_ORDER_CUSTOMER_INDEX = "CREATE INDEX customer_orders_customer_idx ON customer_orders(customer_id, owner_id)"
+_V27_PROJECT_CUSTOMER_INDEX = "CREATE INDEX customer_projects_customer_idx ON customer_projects(customer_id, owner_id)"
+_V27_PROJECT_TASK_INDEX = "CREATE INDEX customer_projects_task_idx ON customer_projects(project_task_id, owner_id)"
+_V27_COMM_APPROVAL_INDEX = "CREATE UNIQUE INDEX crm_communication_approvals_id_owner_idx ON crm_communication_approvals(id, owner_id)"
+_V27_COMM_APPROVAL_COMM_INDEX = "CREATE INDEX crm_communication_approvals_comm_idx ON crm_communication_approvals(communication_id, owner_id)"
+_V27_OUTBOUND_INDEX = "CREATE UNIQUE INDEX crm_outbound_configs_owner_idx ON crm_outbound_configs(owner_id)"
+_V27_SCHEMA = {
+    "customer_notes": """CREATE TABLE customer_notes (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    customer_id TEXT NOT NULL CHECK(length(customer_id)=32 AND customer_id NOT GLOB '*[^0-9a-f]*'),
+    note TEXT NOT NULL CHECK(length(note) BETWEEN 1 AND 2000 AND length(trim(note)) > 0),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    FOREIGN KEY(customer_id, owner_id) REFERENCES customers(id, owner_id)
+)""",
+    "customer_requirements": """CREATE TABLE customer_requirements (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    customer_id TEXT NOT NULL CHECK(length(customer_id)=32 AND customer_id NOT GLOB '*[^0-9a-f]*'),
+    requirement TEXT NOT NULL CHECK(length(requirement) BETWEEN 1 AND 500 AND length(trim(requirement)) > 0),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    FOREIGN KEY(customer_id, owner_id) REFERENCES customers(id, owner_id)
+)""",
+    "customer_orders": """CREATE TABLE customer_orders (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    customer_id TEXT NOT NULL CHECK(length(customer_id)=32 AND customer_id NOT GLOB '*[^0-9a-f]*'),
+    title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 200 AND length(trim(title)) > 0),
+    description TEXT NOT NULL CHECK(length(description) BETWEEN 0 AND 2000),
+    amount_paise INTEGER NOT NULL CHECK(typeof(amount_paise)='integer' AND amount_paise BETWEEN 0 AND 1000000000000),
+    currency TEXT NOT NULL CHECK(currency='INR'),
+    status TEXT NOT NULL CHECK(status IN ('draft','confirmed','fulfilled','cancelled')),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at),
+    FOREIGN KEY(customer_id, owner_id) REFERENCES customers(id, owner_id)
+)""",
+    "customer_projects": """CREATE TABLE customer_projects (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    customer_id TEXT NOT NULL CHECK(length(customer_id)=32 AND customer_id NOT GLOB '*[^0-9a-f]*'),
+    project_task_id TEXT NOT NULL CHECK(length(project_task_id)=32 AND project_task_id NOT GLOB '*[^0-9a-f]*'),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    UNIQUE(customer_id, project_task_id, owner_id),
+    FOREIGN KEY(customer_id, owner_id) REFERENCES customers(id, owner_id),
+    FOREIGN KEY(project_task_id, owner_id) REFERENCES project_tasks(id, owner_id)
+)""",
+    "crm_communication_approvals": """CREATE TABLE crm_communication_approvals (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    communication_id TEXT NOT NULL CHECK(length(communication_id)=32 AND communication_id NOT GLOB '*[^0-9a-f]*'),
+    status TEXT NOT NULL CHECK(status IN ('pending','approved','rejected','expired')),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    expires_at INTEGER NOT NULL CHECK(typeof(expires_at)='integer' AND expires_at > created_at AND (expires_at - created_at) BETWEEN 60 AND 86400),
+    decided_at INTEGER CHECK(decided_at IS NULL OR typeof(decided_at)='integer'),
+    FOREIGN KEY(communication_id, owner_id) REFERENCES communications(id, owner_id)
+)""",
+    "crm_outbound_configs": """CREATE TABLE crm_outbound_configs (
+    owner_id TEXT PRIMARY KEY NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),
+    allowed_channels TEXT NOT NULL CHECK(length(allowed_channels) BETWEEN 0 AND 500),
+    daily_limit INTEGER NOT NULL CHECK(typeof(daily_limit)='integer' AND daily_limit BETWEEN 1 AND 100),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= 0)
+)""",
+}
 _V26_SCHEMA = {
     "product_ideas": """CREATE TABLE product_ideas (
     id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
@@ -977,6 +1044,25 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         expected_columns["product_documentation"] = [
             ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("product_id", "TEXT", 1, 0), ("title", "TEXT", 1, 0), ("content", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
         ]
+    if version >= 27:
+        expected_columns["customer_notes"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("customer_id", "TEXT", 1, 0), ("note", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["customer_requirements"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("customer_id", "TEXT", 1, 0), ("requirement", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["customer_orders"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("customer_id", "TEXT", 1, 0), ("title", "TEXT", 1, 0), ("description", "TEXT", 1, 0), ("amount_paise", "INTEGER", 1, 0), ("currency", "TEXT", 1, 0), ("status", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["customer_projects"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("customer_id", "TEXT", 1, 0), ("project_task_id", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["crm_communication_approvals"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("communication_id", "TEXT", 1, 0), ("status", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0), ("expires_at", "INTEGER", 1, 0), ("decided_at", "INTEGER", 0, 0),
+        ]
+        expected_columns["crm_outbound_configs"] = [
+            ("owner_id", "TEXT", 1, 1), ("enabled", "INTEGER", 1, 0), ("allowed_channels", "TEXT", 1, 0), ("daily_limit", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+        ]
     if version >= 20:
         expected_columns["invoices"] = [
             ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("order_id", "TEXT", 1, 0),
@@ -1032,6 +1118,16 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         expected_objects.append(("index", "product_sales_product_idx"))
         expected_objects.append(("index", "product_deliverables_product_idx"))
         expected_objects.append(("index", "product_documentation_product_idx"))
+    if version >= 27:
+        expected_objects.append(("index", "customer_notes_customer_idx"))
+        expected_objects.append(("index", "customer_requirements_customer_idx"))
+        expected_objects.append(("index", "customer_orders_id_owner_idx"))
+        expected_objects.append(("index", "customer_orders_customer_idx"))
+        expected_objects.append(("index", "customer_projects_customer_idx"))
+        expected_objects.append(("index", "customer_projects_task_idx"))
+        expected_objects.append(("index", "crm_communication_approvals_id_owner_idx"))
+        expected_objects.append(("index", "crm_communication_approvals_comm_idx"))
+        expected_objects.append(("index", "crm_outbound_configs_owner_idx"))
     if version >= 20:
         expected_objects.append(("index", "invoices_id_owner_idx"))
         expected_objects.append(("index", "invoices_number_owner_idx"))
@@ -1143,6 +1239,34 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='product_documentation_product_idx'").fetchone()
         if row is None or row[0] != _V26_DOCS_INDEX:
             raise StateStorageError("State database schema constraints are incompatible.")
+    if version >= 27:
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='customer_notes_customer_idx'").fetchone()
+        if row is None or row[0] != _V27_NOTE_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='customer_requirements_customer_idx'").fetchone()
+        if row is None or row[0] != _V27_REQUIREMENT_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='customer_orders_id_owner_idx'").fetchone()
+        if row is None or row[0] != _V27_ORDER_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='customer_orders_customer_idx'").fetchone()
+        if row is None or row[0] != _V27_ORDER_CUSTOMER_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='customer_projects_customer_idx'").fetchone()
+        if row is None or row[0] != _V27_PROJECT_CUSTOMER_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='customer_projects_task_idx'").fetchone()
+        if row is None or row[0] != _V27_PROJECT_TASK_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='crm_communication_approvals_id_owner_idx'").fetchone()
+        if row is None or row[0] != _V27_COMM_APPROVAL_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='crm_communication_approvals_comm_idx'").fetchone()
+        if row is None or row[0] != _V27_COMM_APPROVAL_COMM_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='crm_outbound_configs_owner_idx'").fetchone()
+        if row is None or row[0] != _V27_OUTBOUND_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
     if version >= 20:
         row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='invoices_id_owner_idx'").fetchone()
         if row is None or row[0] != _V20_INVOICE_INDEX:
@@ -1205,6 +1329,8 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         schemas.append(_V25_SCHEMA)
     if version >= 26:
         schemas.append(_V26_SCHEMA)
+    if version >= 27:
+        schemas.append(_V27_SCHEMA)
     for schema in schemas:
         for name, statement in schema.items():
             # v24 alters project_tasks via ALTER TABLE; sql formatting differs from CREATE literal, so rely on PRAGMA table_info instead
@@ -1433,6 +1559,22 @@ def _apply_v26(conn: sqlite3.Connection) -> None:
     conn.execute(_V26_DOCS_INDEX)
     conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (26, int(time.time())))
     conn.execute("PRAGMA user_version = 26")
+
+
+def _apply_v27(conn: sqlite3.Connection) -> None:
+    for statement in _V27_SCHEMA.values():
+        conn.execute(statement)
+    conn.execute(_V27_NOTE_INDEX)
+    conn.execute(_V27_REQUIREMENT_INDEX)
+    conn.execute(_V27_ORDER_INDEX)
+    conn.execute(_V27_ORDER_CUSTOMER_INDEX)
+    conn.execute(_V27_PROJECT_CUSTOMER_INDEX)
+    conn.execute(_V27_PROJECT_TASK_INDEX)
+    conn.execute(_V27_COMM_APPROVAL_INDEX)
+    conn.execute(_V27_COMM_APPROVAL_COMM_INDEX)
+    conn.execute(_V27_OUTBOUND_INDEX)
+    conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (27, int(time.time())))
+    conn.execute("PRAGMA user_version = 27")
 
 
 def _check_managed_pairs(conn: sqlite3.Connection, owner=None, queue_id=None, workflow_id=None, association_id=None) -> None:
@@ -2371,6 +2513,19 @@ class StateStorage:
             self.backup_to(backup, confirmed=True)
             _apply_v26(conn)
             if _validate_schema(conn) != 26:
+                raise StateStorageError("Migration produced an incompatible schema.")
+            _check_integrity(conn)
+
+    def migrate_to_v27(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 26 only after a checked non-overwriting backup."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 26:
+                raise StateStorageError("Only version 26 can be upgraded to version 27.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v27(conn)
+            if _validate_schema(conn) != 27:
                 raise StateStorageError("Migration produced an incompatible schema.")
             _check_integrity(conn)
 

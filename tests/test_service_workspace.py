@@ -257,12 +257,12 @@ class ServiceWorkspaceTests(unittest.TestCase):
             self.pkgs.create(self.token, sid, "Basic2", "Desc2", 60000, 3, 2, operation_key="scope_pkg")
 
     def test_migrations_and_integrity(self):
-        self.assertEqual(LATEST_SCHEMA_VERSION, 26)
+        self.assertEqual(LATEST_SCHEMA_VERSION, 27)
         with StateStorage(self.state_path).transaction() as conn:
-            self.assertEqual(_validate_schema(conn), 26)
+            self.assertEqual(_validate_schema(conn), 27)
             _check_integrity(conn)
         count=len(list(self.priv.glob("before-v*.sqlite3")))
-        self.assertEqual(count, 25)
+        self.assertEqual(count, 26)
 
 if __name__=="__main__":
     unittest.main()

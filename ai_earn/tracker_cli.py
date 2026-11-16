@@ -2,7 +2,7 @@
 
 No payment is verified, received or processed. Use only disposable data.
 Now includes v15 opportunity discovery, v16 service catalog/portfolio,
-v17 product workspace & customers, v18 communications & ledger, v19 followups & CSV, v20 invoices & 11-concept hardening, and v22 AI assistant (ToolRegistry/ApprovalQueue) and v22 analytics (funnel/MRR/conversion/workload) and connectors (Gmail/Drive/GitHub stubs) and v25 service workspace (packages/requirements/attachments/proposals/AI drafts/requests/templates/portfolio presentation) and v26 product workspace (ideas/validations/research/pricing/versions/files/sales/deliverables/docs).
+v17 product workspace & customers, v18 communications & ledger, v19 followups & CSV, v20 invoices & 11-concept hardening, and v22 AI assistant (ToolRegistry/ApprovalQueue) and v22 analytics (funnel/MRR/conversion/workload) and connectors (Gmail/Drive/GitHub stubs) and v25 service workspace (packages/requirements/attachments/proposals/AI drafts/requests/templates/portfolio presentation) and v26 product workspace (ideas/validations/research/pricing/versions/files/sales/deliverables/docs) and v27 CRM (notes/requirements/orders/projects/timeline/approval/safe workflow).
 """
 
 import getpass
@@ -31,6 +31,7 @@ from ai_earn.connectors.drive import DriveConnector
 from ai_earn.connectors.github import GitHubConnector
 from ai_earn.connectors.throttle import Throttle
 from .product_workspace import ProductIdeas, ProductValidations, MarketResearch, PricingSuggestions, ProductVersions, ProductFiles, ProductDeliverables, ProductSales, ProductDocumentation, ProductEditor, ProductWorkspaceError
+from .crm import CustomerNotes, CustomerRequirements, CustomerOrders, CustomerProjects, CommunicationApprovals, OutboundWorkflowConfig, CRMCommunications, ActivityTimeline, CustomerProfile, CustomerCSV, CRMError
 from .opportunities import Opportunities, OpportunityError
 from .ledger import Ledger, LedgerError
 from .products import Products, ProductError
@@ -133,11 +134,11 @@ def _key():
 
 def _initialize_state(path):
     # Only initialize a new file; never silently upgrade an existing database.
-    backups = [path.with_name(path.name + f".before-v{version}.sqlite3") for version in range(2, 27)]
+    backups = [path.with_name(path.name + f".before-v{version}.sqlite3") for version in range(2, 28)]
     if path.exists() or path.is_symlink() or any(p.exists() or p.is_symlink() for p in backups):
         raise StateStorageError("State or migration backup already exists; no initialization was attempted.")
     state = StateStorage(path, create=True, confirmed=True)
-    for version, backup in zip(range(2, 27), backups):
+    for version, backup in zip(range(2, 28), backups):
         getattr(state, f"migrate_to_v{version}")(backup, confirmed=True)
     return state
 
@@ -147,7 +148,7 @@ def _csv_preview(text: str, limit: int = 500) -> str:
     return sample + ("..." if len(text) > limit else "")
 
 
-def _menu(service, token, stdin, out, opportunities=None, services=None, portfolio=None, products=None, customers=None, communications=None, ledger=None, followups=None, invoices=None, provider_orders=None, ai_assistant=None, analytics=None, workspace_pkgs=None, workspace_reqs=None, workspace_atts=None, proposals=None, customer_requests=None, service_editor=None, service_templates=None, portfolio_pres=None, product_ideas=None, product_validations=None, market_research=None, pricing_suggestions=None, product_versions=None, product_files=None, product_deliverables=None, product_sales=None, product_docs=None, product_editor=None):
+def _menu(service, token, stdin, out, opportunities=None, services=None, portfolio=None, products=None, customers=None, communications=None, ledger=None, followups=None, invoices=None, provider_orders=None, ai_assistant=None, analytics=None, workspace_pkgs=None, workspace_reqs=None, workspace_atts=None, proposals=None, customer_requests=None, service_editor=None, service_templates=None, portfolio_pres=None, product_ideas=None, product_validations=None, market_research=None, pricing_suggestions=None, product_versions=None, product_files=None, product_deliverables=None, product_sales=None, product_docs=None, product_editor=None, crm_notes=None, crm_requirements=None, crm_orders=None, crm_projects=None, crm_comm_approvals=None, crm_outbound=None, crm_comms=None, crm_timeline=None, crm_profile=None, crm_csv=None):
     # service = FinancialAssertions, opportunities = Opportunities, services/portfolio = v16, products/customers = v17, comm/ledger = v18, followups = v19, invoices = v20, provider_orders = v21, ai=v22, analytics=v22 (no schema)
     out.write("Local tracker: all entries are UNVERIFIED. No payment processing or settlement.\n")
     has_opp = opportunities is not None
@@ -198,6 +199,9 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
     has_prod_ws = product_ideas is not None
     if has_prod_ws:
         extras.append("Product Workspace v26 (62-75)")
+    has_crm = crm_notes is not None
+    if has_crm:
+        extras.append("CRM v27 (73-85)")
     if extras:
         out.write("Financial (1-4), " + ", ".join(extras) + " available.\n")
     segments = ["1 Add financial  2 List financial  3 Advance financial  4 Withdraw financial"]
@@ -236,6 +240,9 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
         segments.append("62 Ideas  63 Validations  64 Market research (AI)  65 Pricing (AI)")
         segments.append("66 Versions  67 Files  68 Sales (verified)  69 Deliverables")
         segments.append("70 Documentation (AI)  71 Edit product  72 Product status")
+    if has_crm:
+        segments.append("73 Profile  74 Notes  75 Requirements  76 Communications+Approval  77 Follow-ups")
+        segments.append("78 Orders  79 Projects history  80 Timeline  81 Outbound workflow  82 CSV")
 
     prompt = "\n" + " | ".join(segments) + "  0 Sign out\nChoice: "
     # legacy no-opp/no-svc prompt (financial pipeline wording remains for v13-like fallback)
@@ -1568,6 +1575,231 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                         out.write("Archived.\n")
                 except Exception as e:
                     out.write(str(e) + "\n")
+            elif has_crm and choice == "73":
+                cid=_read(stdin, out, "Customer ID: ").strip()
+                try:
+                    prof=crm_profile.get(token, cid)
+                    out.write(f"Profile: {prof['name']} | {prof['contact']} | source:{prof['source']} | {prof['status']} | notes:{prof['_note_count']} req:{prof['_requirement_count']} comm:{prof['_communication_count']} follow:{prof['_followup_count']} orders:{prof['_order_count']} proj:{prof['_project_count']} prop:{prof['_proposal_count']}\n")
+                    full=crm_profile.full(token, cid)
+                    out.write(f"Timeline events: {len(full['timeline'])} | proposals:{len(full['proposals'])} | orders:{len(full['orders'])}\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
+            elif has_crm and choice == "74":
+                out.write("Notes: 1 Add  2 List  3 Get\n")
+                sub=_read(stdin, out, "Choice (1-3): ").strip()
+                try:
+                    if sub=="1":
+                        cid=_read(stdin, out, "Customer ID: ").strip()
+                        note=_read(stdin, out, "Note (1..2000): ")
+                        nid=crm_notes.add(token, cid, note, operation_key=_key())
+                        out.write(f"Added note {nid}\n")
+                    elif sub=="2":
+                        cid=_read(stdin, out, "Customer ID: ").strip()
+                        lst=crm_notes.list(token, cid)
+                        for n in lst:
+                            out.write(f"{n['id']} | {n['note'][:60]} | {n['created_at']}\n")
+                        if not lst:
+                            out.write("No notes.\n")
+                    elif sub=="3":
+                        nid=_read(stdin, out, "Note ID: ").strip()
+                        n=crm_notes.get(token, nid)
+                        out.write(f"{n['id']} | cust:{n['customer_id'][:8]} | {n['note'][:120]}\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
+            elif has_crm and choice == "75":
+                out.write("Requirements: 1 Add  2 List  3 Remove\n")
+                sub=_read(stdin, out, "Choice (1-3): ").strip()
+                try:
+                    if sub=="1":
+                        cid=_read(stdin, out, "Customer ID: ").strip()
+                        req=_read(stdin, out, "Requirement (1..500): ")
+                        rid=crm_requirements.add(token, cid, req, operation_key=_key())
+                        out.write(f"Added requirement {rid}\n")
+                    elif sub=="2":
+                        cid=_read(stdin, out, "Customer ID: ").strip()
+                        lst=crm_requirements.list(token, cid)
+                        for r in lst:
+                            out.write(f"{r['id']} | {r['requirement'][:60]} | {r['created_at']}\n")
+                        if not lst:
+                            out.write("No requirements.\n")
+                    elif sub=="3":
+                        rid=_read(stdin, out, "Requirement ID: ").strip()
+                        crm_requirements.remove(token, rid, operation_key=_key())
+                        out.write("Requirement removed.\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
+            elif has_crm and choice == "76":
+                out.write("CRM Communications (approval-gated): 1 Create draft  2 Request approval  3 Approve/Reject  4 Send  5 List history\n")
+                sub=_read(stdin, out, "Choice (1-5): ").strip()
+                try:
+                    if sub=="1":
+                        cid=_read(stdin, out, "Customer ID: ").strip()
+                        chan=_read(stdin, out, "Channel (1..30): ")
+                        body=_read(stdin, out, "Body (1..2000): ")
+                        did=crm_comms.create_draft(token, cid, chan, body, operation_key=_key())
+                        out.write(f"Created draft {did} (requires approval unless safe workflow)\n")
+                    elif sub=="2":
+                        did=_read(stdin, out, "Communication ID: ").strip()
+                        ttl_raw=_read(stdin, out, "TTL 60..86400 (default 900): ").strip()
+                        ttl=int(ttl_raw) if ttl_raw else 900
+                        aid=crm_comm_approvals.request(token, did, operation_key=_key(), ttl=ttl)
+                        out.write(f"Approval requested {aid} (pending, expires in {ttl}s)\n")
+                    elif sub=="3":
+                        aid=_read(stdin, out, "Approval ID: ").strip()
+                        dec=_read(stdin, out, "Decision [approved/rejected]: ").strip()
+                        if dec=="approved":
+                            crm_comm_approvals.approve(token, aid, operation_key=_key())
+                            out.write("Approved.\n")
+                        elif dec=="rejected":
+                            crm_comm_approvals.reject(token, aid, operation_key=_key())
+                            out.write("Rejected.\n")
+                        else:
+                            out.write("Invalid decision.\n")
+                    elif sub=="4":
+                        did=_read(stdin, out, "Communication ID: ").strip()
+                        aid=_read(stdin, out, "Approval ID (empty if safe workflow): ").strip() or None
+                        crm_comms.send(token, did, operation_key=_key(), approval_id=aid)
+                        out.write(f"Sent {did} (approval={aid} or safe workflow)\n")
+                    elif sub=="5":
+                        cid=_read(stdin, out, "Customer ID: ").strip()
+                        lst=crm_comms.list_history(token, cid, limit=20)
+                        for c in lst:
+                            out.write(f"{c['id']} | {c['channel']} | {c['status']} | {c['body'][:40]}\n")
+                        if not lst:
+                            out.write("No communications.\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
+            elif has_crm and choice == "77":
+                out.write("Follow-ups: use 23 Add  24 List  25 Manage (CRM follow-ups are customer-scoped)\n")
+                cid=_read(stdin, out, "Customer ID (empty for all): ").strip() or None
+                try:
+                    from ai_earn.followups import Followups as _F
+                    fl=_F(crm_notes._auth, crm_notes._state)
+                    lst=fl.list(token, customer_id=cid, limit=20)
+                    for f in lst:
+                        out.write(f"{f['id']} | cust:{f['customer_id'][:8]} | due:{f['due_at']} | {f['status']} | {f['note'][:40]}\n")
+                    if not lst:
+                        out.write("No followups.\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
+            elif has_crm and choice == "78":
+                out.write("Orders: 1 Create  2 List  3 Confirm  4 Fulfill  5 Cancel  6 Get\n")
+                sub=_read(stdin, out, "Choice (1-6): ").strip()
+                try:
+                    if sub=="1":
+                        cid=_read(stdin, out, "Customer ID: ").strip()
+                        title=_read(stdin, out, "Title (1..200): ")
+                        desc=_read(stdin, out, "Description (0..2000): ")
+                        amt=_paise(_read(stdin, out, "Amount INR: ").strip())
+                        oid=crm_orders.create(token, cid, title, desc, amt, operation_key=_key())
+                        out.write(f"Created order {oid} (draft)\n")
+                    elif sub=="2":
+                        cid=_read(stdin, out, "Customer ID (empty for all): ").strip() or None
+                        status=_read(stdin, out, "Filter status [draft/confirmed/fulfilled/cancelled or empty]: ").strip() or None
+                        lst=crm_orders.list(token, customer_id=cid, status=status, limit=20)
+                        for o in lst:
+                            out.write(f"{o['id']} | cust:{o['customer_id'][:8]} | {o['title'][:30]} | INR {o['amount_paise']//100}.{o['amount_paise']%100:02d} | {o['status']}\n")
+                        if not lst:
+                            out.write("No orders.\n")
+                    elif sub=="3":
+                        oid=_read(stdin, out, "Order ID: ").strip()
+                        crm_orders.confirm(token, oid, operation_key=_key())
+                        out.write("Confirmed.\n")
+                    elif sub=="4":
+                        oid=_read(stdin, out, "Order ID: ").strip()
+                        crm_orders.fulfill(token, oid, operation_key=_key())
+                        out.write("Fulfilled.\n")
+                    elif sub=="5":
+                        oid=_read(stdin, out, "Order ID: ").strip()
+                        crm_orders.cancel(token, oid, operation_key=_key())
+                        out.write("Cancelled.\n")
+                    elif sub=="6":
+                        oid=_read(stdin, out, "Order ID: ").strip()
+                        o=crm_orders.get(token, oid)
+                        out.write(f"{o['id']} | {o['title']} | {o['description'][:40]} | {o['status']}\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
+            elif has_crm and choice == "79":
+                out.write("Project history: 1 Link  2 List  3 Unlink\n")
+                sub=_read(stdin, out, "Choice (1-3): ").strip()
+                try:
+                    if sub=="1":
+                        cid=_read(stdin, out, "Customer ID: ").strip()
+                        tid=_read(stdin, out, "Project task ID: ").strip()
+                        lid=crm_projects.link(token, cid, tid, operation_key=_key())
+                        out.write(f"Linked {lid}\n")
+                    elif sub=="2":
+                        cid=_read(stdin, out, "Customer ID: ").strip()
+                        lst=crm_projects.list(token, cid)
+                        for l in lst:
+                            pt=l.get("project_task") or {}
+                            out.write(f"{l['id']} | task:{l['project_task_id'][:8]} | {pt.get('title','')[:30]} | {pt.get('status','')}\n")
+                        if not lst:
+                            out.write("No projects.\n")
+                    elif sub=="3":
+                        lid=_read(stdin, out, "Link ID: ").strip()
+                        crm_projects.unlink(token, lid, operation_key=_key())
+                        out.write("Unlinked.\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
+            elif has_crm and choice == "80":
+                cid=_read(stdin, out, "Customer ID: ").strip()
+                try:
+                    tl=crm_timeline.get(token, cid, limit=30)
+                    out.write(f"Timeline {len(tl)} events for {cid[:8]}:\n")
+                    for ev in tl:
+                        out.write(f"{ev['at']} | {ev['type']}/{ev['event']} | {ev['summary'][:60]}\n")
+                    if not tl:
+                        out.write("No timeline events.\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
+            elif has_crm and choice == "81":
+                out.write("Outbound workflow (safe limited workflow): 1 Get  2 Set  3 Clear\n")
+                sub=_read(stdin, out, "Choice (1-3): ").strip()
+                try:
+                    if sub=="1":
+                        cfg=crm_outbound.get(token)
+                        if cfg:
+                            out.write(f"enabled:{cfg['enabled']} channels:{cfg['allowed_channels']} limit:{cfg['daily_limit']} updated:{cfg['updated_at']}\n")
+                        else:
+                            out.write("No config (approval required for all outbound).\n")
+                    elif sub=="2":
+                        enabled_raw=_read(stdin, out, "Enabled [yes/no]: ").strip().lower()
+                        enabled=enabled_raw in ("yes","y","1","true")
+                        chans=_read(stdin, out, "Allowed channels comma-separated (0..500, empty for none): ")
+                        limit_raw=_read(stdin, out, "Daily limit 1..100 (default 5): ").strip()
+                        limit=int(limit_raw) if limit_raw else 5
+                        crm_outbound.set(token, operation_key=_key(), enabled=enabled, allowed_channels=chans, daily_limit=limit)
+                        out.write(f"Outbound config set enabled={enabled} channels={chans} limit={limit} (explicit safe workflow)\n")
+                    elif sub=="3":
+                        crm_outbound.clear(token, operation_key=_key())
+                        out.write("Outbound config cleared (approval required).\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
+            elif has_crm and choice == "82":
+                out.write("CSV (validated): 1 Export  2 Import\n")
+                sub=_read(stdin, out, "Choice (1-2): ").strip()
+                try:
+                    if sub=="1":
+                        csv_text=crm_csv.export(token)
+                        out.write("CSV export:\n")
+                        out.write(csv_text[:2000] + ("...\n" if len(csv_text)>2000 else "\n"))
+                    elif sub=="2":
+                        out.write("Paste CSV (header name,contact,source). End with line '.'\n")
+                        lines=[]
+                        while True:
+                            line=_read(stdin, out, "")
+                            if line==".":
+                                break
+                            lines.append(line)
+                        csv_text="\n".join(lines)
+                        prefix=_read(stdin, out, "Operation prefix 1..64: ").strip() or "csv_import"
+                        res=crm_csv.import_csv(token, csv_text, operation_key_prefix=prefix)
+                        out.write(f"Imported {len(res['created'])} customers\n")
+                        for iid in res['created']:
+                            out.write(f" {iid}\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
             else:
                 parts = ["0 Sign out", "1-4 financial"]
                 if has_opp:
@@ -1600,8 +1832,10 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                     parts.append("49-61 Service Workspace")
                 if has_prod_ws:
                     parts.append("62-72 Product Workspace (v26)")
+                if has_crm:
+                    parts.append("73-82 CRM v27 (profile/notes/req/comm approval/orders/projects/timeline/workflow/CSV)")
                 out.write("Choose " + ", ".join(parts) + ".\n")
-        except (FinancialAssertionError, OpportunityError, ServiceError, ProductError, CustomerError, CommunicationError, LedgerError, FollowupError, InvoiceError, ProviderError, ApprovalError, AssistantError, ToolError, AnalyticsError, ConnError, ValueError, StateStorageError, ServiceWorkspaceError, ProductWorkspaceError) as exc:
+        except (FinancialAssertionError, OpportunityError, ServiceError, ProductError, CustomerError, CommunicationError, LedgerError, FollowupError, InvoiceError, ProviderError, ApprovalError, AssistantError, ToolError, AnalyticsError, ConnError, ValueError, StateStorageError, ServiceWorkspaceError, ProductWorkspaceError, CRMError) as exc:
             out.write(str(exc) + "\n")
         except AccessDenied as exc:
             out.write(str(exc) + "\n")
@@ -1627,13 +1861,13 @@ def run(action, environ, stdin, out, err):
                 out.write("No files created.\n")
                 return 0
             _initialize_state(path)
-            out.write("New tracker state initialized (v26, 25 backups). Register an account with the auth command if needed.\n")
+            out.write("New tracker state initialized (v27, 26 backups). Register an account with the auth command if needed.\n")
             return 0
         # Open only; missing files are never created during login.
         state = StateStorage(path)
         with state.transaction() as conn:
             version = conn.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26):
+            if version not in (13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27):
                 raise StateStorageError("Tracker requires an existing version 13, 14, 15, 16, 17, 18, 19, 20, 21 or 22 state file; no upgrade was performed.")
         auth = AuthService(AuthStorage(Path(auth_path), create=False))
         username = _read(stdin, out, "Username: ")
@@ -1702,7 +1936,23 @@ def run(action, environ, stdin, out, err):
                 product_editor = ProductEditor(auth, state)
             except Exception:
                 product_ideas = None
-        _menu(FinancialAssertions(auth, state), token, stdin, out, opp, svc, port, prod, cust, comm, ledg, foll, inv, prov, ai, an, workspace_pkgs, workspace_reqs, workspace_atts, proposals, customer_requests, service_editor, service_templates, portfolio_pres, product_ideas, product_validations, market_research, pricing_suggestions, product_versions, product_files, product_deliverables, product_sales, product_docs, product_editor)
+        # CRM v27
+        crm_notes = crm_requirements = crm_orders = crm_projects = crm_comm_approvals = crm_outbound = crm_comms = crm_timeline = crm_profile = crm_csv = None
+        if version >= 27:
+            try:
+                crm_notes = CustomerNotes(auth, state)
+                crm_requirements = CustomerRequirements(auth, state)
+                crm_orders = CustomerOrders(auth, state)
+                crm_projects = CustomerProjects(auth, state)
+                crm_comm_approvals = CommunicationApprovals(auth, state)
+                crm_outbound = OutboundWorkflowConfig(auth, state)
+                crm_comms = CRMCommunications(auth, state)
+                crm_timeline = ActivityTimeline(auth, state)
+                crm_profile = CustomerProfile(auth, state)
+                crm_csv = CustomerCSV(auth, state)
+            except Exception:
+                crm_notes = None
+        _menu(FinancialAssertions(auth, state), token, stdin, out, opp, svc, port, prod, cust, comm, ledg, foll, inv, prov, ai, an, workspace_pkgs, workspace_reqs, workspace_atts, proposals, customer_requests, service_editor, service_templates, portfolio_pres, product_ideas, product_validations, market_research, pricing_suggestions, product_versions, product_files, product_deliverables, product_sales, product_docs, product_editor, crm_notes, crm_requirements, crm_orders, crm_projects, crm_comm_approvals, crm_outbound, crm_comms, crm_timeline, crm_profile, crm_csv)
         return 0
     except (AuthError, StorageError, StateStorageError, ConfigurationError):
         err.write("Tracker could not open or complete the operation. Check your account, private paths and state version; no automatic replacement is performed.\n")
