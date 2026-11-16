@@ -1,6 +1,6 @@
 # Feature Matrix — Ai-earn (actual vs planned)
 
-**Generated:** 2026-11-16, branch `arena/c6693e06-ai-earn` (base `ed79102`), baseline `656 passed / 17 skipped` (Linux Python 3.11.2, incl. v15 opportunity discovery).  
+**Generated:** 2026-11-16, branch `arena/c6693e06-ai-earn` (base `ed79102`), baseline `664 passed / 17 skipped` (Linux Python 3.11.2, incl. v15 opportunity discovery + task runner).  
 **Legend:** `VERIFIED` = automated tests + evidence on Linux + where noted user-reported Windows gate; `PARTIAL` = code exists but not all acceptance criteria tested; `EXPERIMENTAL` = disposable, not production; `NOT_IMPLEMENTED` = no code; `BLOCKED` = needs external credential/service.
 
 | ID | Feature / Acceptance | Implementation path | Tests | Status | Notes |
@@ -16,9 +16,9 @@
 | **DATA-003** | `doctor` diagnostics | `doctor.py`, `doctor_cli.py` | Manual (no dedicated test file) + `test_state_operation_integrity` indirectly | **EXPERIMENTAL** | Read-only, `permission_error` for unsafe parent, `immutable=1` open – wired in PR #37 |
 | **OPP-001** | Opportunity CRUD with source, budget, deadline, etc. | `opportunities.py` (`Opportunities` v15, `ManualConnector`/`FakeConnector`, `Connector` ABC) | `test_opportunities` 15 tests disposable | **EXPERIMENTAL** | Manual import + connector interface, source_url, budget_paise, deadline_at, risk_level, skill_tags, source_type/connector_id, bounded filtering/ranking; ToS/robots respected, no CAPTCHA bypass |
 | **OPP-002** | Verification & ranking | `opportunities.py` (`vetted→pursuing→archived/dismissed` states, `ranked` budget/risk/deadline) + AI draft stubs | `test_opportunities` (state transitions, ranking, filter) | **EXPERIMENTAL** | States visible uncertainty, risk/budget/deadline ranking is draft heuristic; no evidence scoring, no external verification; AI helpers `summarize_draft`/`suggest_skills_draft`/`suggest_price_draft` are stub draft_unverified |
-| **TASK-001** | Durable queue with priority/deadline/retry | `task_queue.py`, `task_plans.py` | `test_task_queue.py` | **PARTIAL** | Planning/scheduling only; no worker, no `authorized_inputs/outputs` |
-| **TASK-002** | Validated outputs + human review | `task_workflows.py` (planned→completed, hash/size) | `test_task_workflows.py` | **PARTIAL** | Syntactic validation only; no human identity, no queue linkage |
-| **TASK-003** | Safe execution & audit | — | — | **NOT_IMPLEMENTED** | No background runner |
+| **TASK-001** | Durable queue with priority/deadline/retry | `task_queue.py`, `task_plans.py` | `test_task_queue.py` | **PARTIAL** | Planning/scheduling only; runner now provides lease-fenced execution but no authorized inputs/outputs, no worker identity |
+| **TASK-002** | Validated outputs + human review | `task_workflows.py` (planned→completed, hash/size) + `task_associations` lease-fenced `submit_pair`/`review_pair` | `test_task_workflows.py`, `test_task_runner.py` (pending_review gate) | **PARTIAL** | Syntactic validation + lease fencing; human review gate is local explicit `review_pair`/`complete_pair` (not OS identity), still no coordinated delivery |
+| **TASK-003** | Safe execution & audit | `task_runner.py` `ManagedTaskRunner` (ThreadPoolExecutor, lease fence, retry/backoff, audit, shutdown, poll loop) | `test_task_runner.py` 8 tests disposable (success, handler fail→retry, lease fence expiry, concurrent claims, background future, polling) | **EXPERIMENTAL** | Lease-fenced ThreadPool, `claim_next_managed` atomic → handler → `submit_pair` (pending_review), handler failure → `retry_pair` (backoff), expiry → fence failure; no production deploy, no external-effect fence, token expiry (30 min) requires provider, `polling` is best-effort |
 | **SERV-001** | Sellable service definition | — | — | **NOT_IMPLEMENTED** | Templates listed but no code |
 | **SERV-002** | Portfolio/demo | — | — | **NOT_IMPLEMENTED** | No genuine portfolio |
 | **PROD-001** | Digital product workspace | — | — | **NOT_IMPLEMENTED** | — |
@@ -38,6 +38,6 @@
 | **OPS-001/002** | Deploy, backups, rollback, runbooks | — | — | **NOT_IMPLEMENTED** | Local Windows path only (trusted drive + ACL) |
 | **LEGAL-001** | No fabricated claims, ToS, etc. | Docs warn, no enforcement code | Manual review | **PARTIAL** | Warnings in `README`/`SECURITY`, no automated policy engine |
 
-**Summary counts (2026-11-16):** VERIFIED 1, PARTIAL 6 (incl. INT-001 framework), EXPERIMENTAL 12 (DATA-001, DATA-002, OPP-001, OPP-002 now experimental), NOT_IMPLEMENTED 15, BLOCKED 2 (PAY-001, PAY-003).
+**Summary counts (2026-11-16):** VERIFIED 1, PARTIAL 6 (TASK-001/002 remain partial), EXPERIMENTAL 13 (TASK-003 + OPP etc now experimental), NOT_IMPLEMENTED 14, BLOCKED 2 (PAY-001, PAY-003).
 
-**How to read:** A feature is not complete because files exist. Use `REQUIREMENTS.md` row `Status` for grouped criteria and this file for evidence. Windows evidence is user-reported for `f26c6b9`/`72241cc`/`cd7f6ff` (pre-v15); v15 Linux evidence 656/17 reproducible via `python -m unittest discover -v`, Windows v15 pending user run.
+**How to read:** A feature is not complete because files exist. Use `REQUIREMENTS.md` row `Status` for grouped criteria and this file for evidence. Windows evidence is user-reported for `f26c6b9`/`72241cc`/`cd7f6ff` (pre-v15/v16); v15/v16 Linux evidence 664/17 reproducible via `python -m unittest discover -v`, Windows v15/v16 pending user run.
