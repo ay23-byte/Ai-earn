@@ -130,11 +130,11 @@ def _key():
 
 def _initialize_state(path):
     # Only initialize a new file; never silently upgrade an existing database.
-    backups = [path.with_name(path.name + f".before-v{version}.sqlite3") for version in range(2, 23)]
+    backups = [path.with_name(path.name + f".before-v{version}.sqlite3") for version in range(2, 25)]
     if path.exists() or path.is_symlink() or any(p.exists() or p.is_symlink() for p in backups):
         raise StateStorageError("State or migration backup already exists; no initialization was attempted.")
     state = StateStorage(path, create=True, confirmed=True)
-    for version, backup in zip(range(2, 23), backups):
+    for version, backup in zip(range(2, 25), backups):
         getattr(state, f"migrate_to_v{version}")(backup, confirmed=True)
     return state
 
@@ -1076,13 +1076,13 @@ def run(action, environ, stdin, out, err):
                 out.write("No files created.\n")
                 return 0
             _initialize_state(path)
-            out.write("New tracker state initialized (v22, 21 backups). Register an account with the auth command if needed.\n")
+            out.write("New tracker state initialized (v24, 23 backups). Register an account with the auth command if needed.\n")
             return 0
         # Open only; missing files are never created during login.
         state = StateStorage(path)
         with state.transaction() as conn:
             version = conn.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (13, 14, 15, 16, 17, 18, 19, 20, 21, 22):
+            if version not in (13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24):
                 raise StateStorageError("Tracker requires an existing version 13, 14, 15, 16, 17, 18, 19, 20, 21 or 22 state file; no upgrade was performed.")
         auth = AuthService(AuthStorage(Path(auth_path), create=False))
         username = _read(stdin, out, "Username: ")

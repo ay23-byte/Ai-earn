@@ -19,7 +19,7 @@ from .auth_storage import AuthStorage, StorageError, _windows_auth_verified
 
 APPLICATION_ID = 0x41494533  # AIE3, distinct from the auth-only database.
 SCHEMA_VERSION = 1  # New files still bootstrap as version 1; upgrades are explicit.
-LATEST_SCHEMA_VERSION = 22
+LATEST_SCHEMA_VERSION = 24
 SUPPORTED_STATE_VERSIONS = frozenset(range(1, LATEST_SCHEMA_VERSION + 1))
 
 
@@ -436,6 +436,76 @@ _V22_SCHEMA = {
 )""" ,
 }
 
+
+_V23_PROJECT_TASKS_INDEX = "CREATE UNIQUE INDEX project_tasks_id_owner_idx ON project_tasks(id, owner_id)"
+_V23_DEPENDS_INDEX = "CREATE INDEX task_dependencies_task_idx ON task_dependencies(task_id, owner_id)"
+_V23_LOGS_INDEX = "CREATE INDEX task_execution_logs_task_idx ON task_execution_logs(task_id, owner_id)"
+_V23_SCHEMA = {
+    "project_tasks": """CREATE TABLE project_tasks (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    opportunity_id TEXT CHECK(opportunity_id IS NULL OR (length(opportunity_id)=32 AND opportunity_id NOT GLOB '*[^0-9a-f]*')),
+    parent_task_id TEXT CHECK(parent_task_id IS NULL OR (length(parent_task_id)=32 AND parent_task_id NOT GLOB '*[^0-9a-f]*')),
+    title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 200 AND length(trim(title)) > 0),
+    description TEXT NOT NULL CHECK(length(description) BETWEEN 0 AND 2000),
+    priority INTEGER NOT NULL CHECK(priority BETWEEN 0 AND 9),
+    deadline_at INTEGER NOT NULL CHECK(deadline_at BETWEEN 0 AND 4102444800),
+    estimated_duration_seconds INTEGER NOT NULL CHECK(estimated_duration_seconds BETWEEN 0 AND 31536000),
+    actual_duration_seconds INTEGER NOT NULL CHECK(actual_duration_seconds BETWEEN 0 AND 31536000),
+    status TEXT NOT NULL CHECK(status IN ('draft','pending_review','approved','scheduled','in_progress','completed','failed','cancelled','rejected')),
+    created_at INTEGER NOT NULL CHECK(created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(updated_at >= created_at)
+)""",
+    "task_dependencies": """CREATE TABLE task_dependencies (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    task_id TEXT NOT NULL CHECK(length(task_id)=32 AND task_id NOT GLOB '*[^0-9a-f]*'),
+    depends_on_task_id TEXT NOT NULL CHECK(length(depends_on_task_id)=32 AND depends_on_task_id NOT GLOB '*[^0-9a-f]*'),
+    created_at INTEGER NOT NULL CHECK(created_at >= 0),
+    UNIQUE(task_id, depends_on_task_id, owner_id),
+    CHECK(task_id != depends_on_task_id)
+)""",
+    "task_execution_logs": """CREATE TABLE task_execution_logs (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    task_id TEXT NOT NULL CHECK(length(task_id)=32 AND task_id NOT GLOB '*[^0-9a-f]*'),
+    message TEXT NOT NULL CHECK(length(message) BETWEEN 1 AND 2000),
+    created_at INTEGER NOT NULL CHECK(created_at >= 0)
+)""",
+}
+
+_V24_LEASE_COL = "lease_id TEXT CHECK(lease_id IS NULL OR (length(lease_id)=32 AND lease_id NOT GLOB '*[^0-9a-f]*'))"
+_V24_UNTIL_COL = "lease_until INTEGER CHECK(lease_until IS NULL OR (lease_until BETWEEN 0 AND 4102444800))"
+_V24_ATTEMPTS_COL = "attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts BETWEEN 0 AND 10)"
+_V24_MAX_ATTEMPTS_COL = "max_attempts INTEGER NOT NULL DEFAULT 3 CHECK(max_attempts BETWEEN 1 AND 10)"
+_V24_BACKOFF_COL = "backoff_seconds INTEGER NOT NULL DEFAULT 60 CHECK(backoff_seconds BETWEEN 0 AND 86400)"
+_V24_AVAILABLE_COL = "available_at INTEGER NOT NULL DEFAULT 0 CHECK(available_at BETWEEN 0 AND 4102444800)"
+
+
+_V24_SCHEMA = {
+    "project_tasks": """CREATE TABLE project_tasks (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    opportunity_id TEXT CHECK(opportunity_id IS NULL OR (length(opportunity_id)=32 AND opportunity_id NOT GLOB '*[^0-9a-f]*')),
+    parent_task_id TEXT CHECK(parent_task_id IS NULL OR (length(parent_task_id)=32 AND parent_task_id NOT GLOB '*[^0-9a-f]*')),
+    title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 200 AND length(trim(title)) > 0),
+    description TEXT NOT NULL CHECK(length(description) BETWEEN 0 AND 2000),
+    priority INTEGER NOT NULL CHECK(priority BETWEEN 0 AND 9),
+    deadline_at INTEGER NOT NULL CHECK(deadline_at BETWEEN 0 AND 4102444800),
+    estimated_duration_seconds INTEGER NOT NULL CHECK(estimated_duration_seconds BETWEEN 0 AND 31536000),
+    actual_duration_seconds INTEGER NOT NULL CHECK(actual_duration_seconds BETWEEN 0 AND 31536000),
+    status TEXT NOT NULL CHECK(status IN ('draft','pending_review','approved','scheduled','in_progress','completed','failed','cancelled','rejected')),
+    created_at INTEGER NOT NULL CHECK(created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(updated_at >= created_at),
+    lease_id TEXT CHECK(lease_id IS NULL OR (length(lease_id)=32 AND lease_id NOT GLOB '*[^0-9a-f]*')),
+    lease_until INTEGER CHECK(lease_until IS NULL OR (lease_until BETWEEN 0 AND 4102444800)),
+    attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts BETWEEN 0 AND 10),
+    max_attempts INTEGER NOT NULL DEFAULT 3 CHECK(max_attempts BETWEEN 1 AND 10),
+    backoff_seconds INTEGER NOT NULL DEFAULT 60 CHECK(backoff_seconds BETWEEN 0 AND 86400),
+    available_at INTEGER NOT NULL DEFAULT 0 CHECK(available_at BETWEEN 0 AND 4102444800)
+)""",
+}
+
 _V20_SCHEMA = {
     "invoices": """CREATE TABLE invoices (
     id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
@@ -657,6 +727,28 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         expected_columns["ai_emergency"] = [
             ("owner_id", "TEXT", 1, 1), ("stopped", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0), ("reason", "TEXT", 1, 0),
         ]
+    if version >= 23:
+        expected_columns["project_tasks"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("opportunity_id", "TEXT", 0, 0), ("parent_task_id", "TEXT", 0, 0),
+            ("title", "TEXT", 1, 0), ("description", "TEXT", 1, 0), ("priority", "INTEGER", 1, 0), ("deadline_at", "INTEGER", 1, 0),
+            ("estimated_duration_seconds", "INTEGER", 1, 0), ("actual_duration_seconds", "INTEGER", 1, 0), ("status", "TEXT", 1, 0),
+            ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["task_dependencies"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("task_id", "TEXT", 1, 0), ("depends_on_task_id", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["task_execution_logs"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("task_id", "TEXT", 1, 0), ("message", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+        ]
+    if version >= 24:
+        # v24 adds lease and retry columns to project_tasks
+        expected_columns["project_tasks"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("opportunity_id", "TEXT", 0, 0), ("parent_task_id", "TEXT", 0, 0),
+            ("title", "TEXT", 1, 0), ("description", "TEXT", 1, 0), ("priority", "INTEGER", 1, 0), ("deadline_at", "INTEGER", 1, 0),
+            ("estimated_duration_seconds", "INTEGER", 1, 0), ("actual_duration_seconds", "INTEGER", 1, 0), ("status", "TEXT", 1, 0),
+            ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0), ("lease_id", "TEXT", 0, 0), ("lease_until", "INTEGER", 0, 0),
+            ("attempts", "INTEGER", 1, 0), ("max_attempts", "INTEGER", 1, 0), ("backoff_seconds", "INTEGER", 1, 0), ("available_at", "INTEGER", 1, 0),
+        ]
     if version >= 20:
         expected_columns["invoices"] = [
             ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("order_id", "TEXT", 1, 0),
@@ -692,6 +784,10 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         expected_objects.append(("index", "payment_provider_events_id_owner_idx"))
     if version >= 22:
         expected_objects.append(("index", "ai_approvals_id_owner_idx"))
+    if version >= 23:
+        expected_objects.append(("index", "project_tasks_id_owner_idx"))
+        expected_objects.append(("index", "task_dependencies_task_idx"))
+        expected_objects.append(("index", "task_execution_logs_task_idx"))
     if version >= 20:
         expected_objects.append(("index", "invoices_id_owner_idx"))
         expected_objects.append(("index", "invoices_number_owner_idx"))
@@ -749,6 +845,16 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='ai_approvals_id_owner_idx'").fetchone()
         if row is None or row[0] != _V22_APPROVAL_INDEX:
             raise StateStorageError("State database schema constraints are incompatible.")
+    if version >= 23:
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='project_tasks_id_owner_idx'").fetchone()
+        if row is None or row[0] != _V23_PROJECT_TASKS_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='task_dependencies_task_idx'").fetchone()
+        if row is None or row[0] != _V23_DEPENDS_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='task_execution_logs_task_idx'").fetchone()
+        if row is None or row[0] != _V23_LOGS_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
     if version >= 20:
         row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='invoices_id_owner_idx'").fetchone()
         if row is None or row[0] != _V20_INVOICE_INDEX:
@@ -803,8 +909,17 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         schemas.append(_V21_SCHEMA)
     if version >= 22:
         schemas.append(_V22_SCHEMA)
+    if version >= 23:
+        schemas.append(_V23_SCHEMA)
+    if version >= 24:
+        schemas.append(_V24_SCHEMA)
     for schema in schemas:
         for name, statement in schema.items():
+            # v24 alters project_tasks via ALTER TABLE; sql formatting differs from CREATE literal, so rely on PRAGMA table_info instead
+            if version >= 24 and name == "project_tasks":
+                continue
+            if version >= 24 and name == "project_tasks" and statement == _V23_SCHEMA.get("project_tasks"):
+                continue
             row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()
             if row is None or row[0] != statement:
                 raise StateStorageError("State database schema constraints are incompatible.")
@@ -977,6 +1092,27 @@ def _apply_v22(conn: sqlite3.Connection) -> None:
     conn.execute(_V22_APPROVAL_INDEX)
     conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (22, int(time.time())))
     conn.execute("PRAGMA user_version = 22")
+
+
+def _apply_v23(conn: sqlite3.Connection) -> None:
+    for statement in _V23_SCHEMA.values():
+        conn.execute(statement)
+    conn.execute(_V23_PROJECT_TASKS_INDEX)
+    conn.execute(_V23_DEPENDS_INDEX)
+    conn.execute(_V23_LOGS_INDEX)
+    conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (23, int(time.time())))
+    conn.execute("PRAGMA user_version = 23")
+
+
+def _apply_v24(conn: sqlite3.Connection) -> None:
+    conn.execute("ALTER TABLE project_tasks ADD COLUMN lease_id TEXT CHECK(lease_id IS NULL OR (length(lease_id)=32 AND lease_id NOT GLOB '*[^0-9a-f]*'))")
+    conn.execute("ALTER TABLE project_tasks ADD COLUMN lease_until INTEGER CHECK(lease_until IS NULL OR (lease_until BETWEEN 0 AND 4102444800))")
+    conn.execute("ALTER TABLE project_tasks ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts BETWEEN 0 AND 10)")
+    conn.execute("ALTER TABLE project_tasks ADD COLUMN max_attempts INTEGER NOT NULL DEFAULT 3 CHECK(max_attempts BETWEEN 1 AND 10)")
+    conn.execute("ALTER TABLE project_tasks ADD COLUMN backoff_seconds INTEGER NOT NULL DEFAULT 60 CHECK(backoff_seconds BETWEEN 0 AND 86400)")
+    conn.execute("ALTER TABLE project_tasks ADD COLUMN available_at INTEGER NOT NULL DEFAULT 0 CHECK(available_at BETWEEN 0 AND 4102444800)")
+    conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (24, int(time.time())))
+    conn.execute("PRAGMA user_version = 24")
 
 
 def _check_managed_pairs(conn: sqlite3.Connection, owner=None, queue_id=None, workflow_id=None, association_id=None) -> None:
@@ -1863,6 +1999,32 @@ class StateStorage:
             self.backup_to(backup, confirmed=True)
             _apply_v22(conn)
             if _validate_schema(conn) != 22:
+                raise StateStorageError("Migration produced an incompatible schema.")
+            _check_integrity(conn)
+
+    def migrate_to_v23(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 22 only after a checked non-overwriting backup."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 22:
+                raise StateStorageError("Only version 22 can be upgraded to version 23.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v23(conn)
+            if _validate_schema(conn) != 23:
+                raise StateStorageError("Migration produced an incompatible schema.")
+            _check_integrity(conn)
+
+    def migrate_to_v24(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 23 only after a checked non-overwriting backup."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 23:
+                raise StateStorageError("Only version 23 can be upgraded to version 24.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v24(conn)
+            if _validate_schema(conn) != 24:
                 raise StateStorageError("Migration produced an incompatible schema.")
             _check_integrity(conn)
 
