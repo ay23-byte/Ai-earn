@@ -1,0 +1,69 @@
+# Security Review — Ai-earn (2026-11-16)
+
+**Branch:** `arena/c6693e06-ai-earn` (base `ed79102`, post-#37)  
+**Baseline tests:** `636 passed / 17 skipped` (Linux)  
+**Scope:** Offline local CLI + SQLite, no network listener, no provider credentials in repo. This review is a point-in-time assessment, not a certification.
+
+## Summary verdict
+
+**NOT READY for production or real customer/financial data.** Phase 1+2 passed offline scope with documented limitations; Phase 3 `IN_PROGRESS`. Preserve all warnings in `README.md`, `SECURITY.md`, `PHASE_STATUS.md`.
+
+## Implemented controls (verified where noted)
+
+- **Configuration:** `config.py` validates `AI_EARN_ENV`/`LOG_LEVEL`/`AUTH_DB`/`STATE_DB` without logging raw values; `load_database_paths` checks absolute paths before any file open. `ConfigurationError` leaks only variable name.
+- **Auth storage:** `auth_storage.py` `create=True` vs `create=False` semantics (register may init, login/recover must not), `_check_parent` + `_ensure_file` (POSIX 0700/0600, Windows `verify_private_path`), `PRAGMA user_version` schema gate, `BEGIN IMMEDIATE` transactions, `mode=rw` URI prevents recreation race.
+- **Password hashing:** `auth.py` `PASSWORD_ITERATIONS 600_000` PBKDF2-HMAC-SHA256 + 16-byte salt, `hmac.compare_digest` for hash & recovery hash, dummy derivation when account missing to avoid timing oracle, recovery hash is `sha256(token)` not plaintext.
+- **Sessions:** 43-char urlsafe token (`secrets.token_urlsafe(32)`), stored as `token_hash`, 30-min expiry, revocation via `revoked_at`, `profile`/`logout`/`replace_recovery_code` re-check expiry after lock, separate `auth` then `state` lock order.
+- **Rate limiting:** `auth_attempts` per-action per-subject + global window 15 min, `rate_limited` audit throttled, `RateLimitError` generic.
+- **State storage:** `state_storage.py` distinct `APPLICATION_ID`, explicit backup-first migrations to new path, `validate_schema`/`check_integrity` (quick_check, foreign_key_check, creation-event, terminal-transition, multi-step replay, queue consistency, etc.), `_PrivateFiles` reuse, `closing` + `read-only immutable` opens for `doctor` and `backup_to`.
+- **Authorization:** `state_authorization._authorized_transaction` derives actor from live session, checks `user_version` in (2..14), re-checks expiry before state commit. All domain services (`opportunity_drafts`…`durable_sandbox_payments`) use it and add `WHERE owner_id=?`.
+- **Input validation:** Bounded titles 1..200 trimmed, amount paise 0..1e12, INR only, currency checks, bounded UTF-8 workflow output without control chars, HMAC amount/currency/timestamp/event-order checks in `durable_sandbox_payments`, duplicate/extra field rejection in `payment_sandbox`.
+- **Idempotency:** `state_operations` `(owner_id, operation_key)` PK, `request_hash` (sha256 of canonical JSON), collision-checked generated child keys; exact retry returns original ID even after state change (caller must check `get_lease`).
+- **Audit:** `state_audit` and `auth_audit` append-only (no update/delete in services), owner-scoped reads. Not tamper-evident.
+- **Doctor:** `doctor.py` read-only `mode=ro&immutable=1`, parent privacy before file existence, file mode/ACL enforcement, `integrity_check`, no secret read.
+- **Dashboard:** `dashboard_metrics.get` is read-only transaction, no token/username/title in snapshot, exclusive `O_EXCL|O_NOFOLLOW` create (POSIX) / `create_private_file` (Windows), `connected.html` loads file locally, `snapshot.js` 1-MB limit, no API.
+- **Logging:** `events.py` allowlist `Event` enum only, no arbitrary message/exception; `write_event` respects `minimum_level`.
+
+## Gaps & risks (what is NOT done)
+
+| Area | Gap | Risk | Required fixing milestone |
+|---|---|---|---|
+| **Web / cookies / CSRF** | No HTTP server, no cookies, no CSRF | N/A now, but any future web must add `Secure`, `HttpOnly`, `SameSite`, CSRF tokens | M14 |
+| **File uploads** | No upload handling | Traversal/execution/resource exhaustion | M6/M14 |
+| **Auth/state atomicity** | Separate commits, ambiguous on crash after state commit | Stale lease or duplicate external effect if retried naïvely | M2 – document, add recovery comparison before replay |
+| **Audit tamper-evidence** | `DELETE FROM state_audit` + coordinated `state_operations` deletion can hide marker (rehearsal demonstrates) | Coordinated DB edit evades checks | M2 – accept limitation or add hash chain (out-of-scope for local MVP) |
+| **Legacy association bypass** | Unadopted legacy `task_associations` remain independently mutable (`TaskQueue`/`TaskWorkflows` direct) | Bypass of paired lifecycle | M2 – migrate or document; managed opt-in already denies direct for fresh |
+| **Stale snapshot replay** | Restored old copy lacks later `operation_key`, can create second lease | Duplicate work if old copy replayed | M2 – never auto-replay, `compare_snapshot` is accountability only |
+| **Payment verification** | `payment_observations` + synthetic sandbox are not provider verification | Treating screenshot as proof | M9 – real Razorpay webhook HMAC + reconciliation |
+| **Secrets** | No vault, env-only, `.env` not loaded | Accidental commit | M15 – secret manager, `.env.example` redacted (already), CI secret scan |
+| **Dependencies** | No lockfile (stdlib only) | Supply-chain risk when deps added | M2 – review, pin, lock |
+| **Windows** | ACL checks rely on `Win32` + fixed drive + persistent ACLs; `nt` fallback disabled if `_windows_auth_verified()` false | Unsafe dir/file if check skipped | M2 – gate already fails closed, user-reported `72241cc`/`f26c6b9` skips accepted |
+| **Rate limit is local** | Not a network defense | Brute force if process hostile | Accepted for local MVP; future server needs Redis/DB-backed limit |
+
+## Threat model (condensed)
+
+- **Assumptions:** Local OS account trusted, private dir not shared, `AI_EARN_*_DB` absolute paths, process not compromised. Anyone with DB read/write can bypass local authorization – not an OS sandbox.
+- **Attackers:** Local other OS user with file access, malicious process, compromised backup, network attacker (if future web exposed).
+- **Mitigations in place:** Parent/file privacy gates fail closed, absolute-path check, symlink rejection, sidecar existence check before create, operation-key child collision check, foreign keys, checked `allow_admin_owner` only for sidecar inside verified dir.
+
+## Test coverage of security properties (this baseline)
+
+- Unauthorized & cross-account denial: `test_auth`, `test_state_authorization`, `test_task_associations`, `test_task_queue`, etc. – all include `wrong_owner`/`invalid_session` cases.
+- Expired/revoked session: `test_auth` expiry, `test_windows_auth` session expiry after lock.
+- Permission escalation: `test_state_authorization` same-DB hard-link refusal (POSIX-only).
+- Injection: bounded titles (trim), `length(title)` + `GLOB` checks in schema, parameterized queries everywhere, JSON field strictness in `durable_sandbox_payments`.
+- Leakage: `test_state_snapshot_integrity`, `test_durable_sandbox_payments` `no_plaintext_*` tests (output hash not plaintext), `doctor` never prints path value, `auth` dummy derivation, `dashboard` no token.
+- Failing closed: `test_windows_security` 4 tests for ACL policy, `test_state_operation_integrity` for removed audit rows, etc.
+
+All above passed in 636/17 baseline.
+
+## Recommendations (prioritized)
+
+1. **M2:** Complete Phase 3 recovery drills (temp DBs, `os._exit` before/after commit, thread+process races) and document `BACKUP_AND_RECOVERY.md`; keep `production_ready:false`.
+2. **M2:** Add `docs/DATABASE.md` with ER diagram, state machines, transaction boundaries, and `doctor` usage.
+3. **Before any web:** Design session cookies (`Secure; HttpOnly; SameSite=Lax; __Host-`), CSRF, rate limit backed by DB, and per-record authorization tests (blocked by M14).
+4. **Before any live money:** Razorpay webhook signature + reconciliation + `compare_snapshot` for ledger, checklist in `PAYMENTS.md` (blocked until M9/M11).
+
+## Change log of this review
+
+- 2026-11-16: Initial `SECURITY_REVIEW.md` created from `SECURITY.md` + `THREAT_MODEL.md` + audit of `auth.py`, `state_storage.py`, `doctor.py`, `windows_security.py`, and 636-test baseline. Replaces informal “security implications” scattered in `PHASE_STATUS.md` but does not delete `SECURITY.md` (history preserved).

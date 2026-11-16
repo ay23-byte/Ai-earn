@@ -1,0 +1,43 @@
+# Feature Matrix — Ai-earn (actual vs planned)
+
+**Generated:** 2026-11-16, branch `arena/c6693e06-ai-earn` (base `ed79102`), baseline `636 passed / 17 skipped` (Linux Python 3.11.2).  
+**Legend:** `VERIFIED` = automated tests + evidence on Linux + where noted user-reported Windows gate; `PARTIAL` = code exists but not all acceptance criteria tested; `EXPERIMENTAL` = disposable, not production; `NOT_IMPLEMENTED` = no code; `BLOCKED` = needs external credential/service.
+
+| ID | Feature / Acceptance | Implementation path | Tests | Status | Notes |
+|---|---|---|---|---|---|
+| **CORE-000** | Repo audit, inventory | `docs/PROJECT_AUDIT.md`, `ARCHITECTURE.md` | file inventory, `git log`, secret-pattern scan (limited) | **VERIFIED** (limitations documented) | Not a security certification |
+| **CORE-001** | Reproducible install/start, env validation | `README.md`, `.env.example`, `ai_earn/config.py` (`Settings`, `DatabasePaths`) | `tests/test_config.py`, `test_cli.py` (15 tests) | **PARTIAL / UNVERIFIED in full** | stdlib only, no lockfile needed yet; labels don't isolate DBs; Windows install is docs-only |
+| **CORE-002** | Structured logs, error handling, response schemas | `ai_earn/events.py` (allowlist), `responses.py`, `__main__.py` | `test_events.py`, `test_cli.py` | **PARTIAL** | CLI envelope only; no HTTP API yet |
+| **SEC-001** | Auth: register/login/logout, hashing, session, recovery, rate limit | `auth.py` (PBKDF2 600k, 30-min), `auth_storage.py`, `auth_cli.py`, `windows_security.py` | `test_auth.py` (incl. concurrency), `test_auth_cli.py`, `test_windows_auth` (14 skipped on Linux) | **EXPERIMENTAL / UNVERIFIED in full** | User-reported Windows 92-test gate `72241cc` with skips; not production, no web CSRF/cookies |
+| **SEC-002** | Authorization, isolation, audit | `state_authorization.py` (`_authorized_transaction`), `state_audit.py` | `test_state_authorization.py`, `test_state_audit.py`, cross-owner denial tests | **EXPERIMENTAL** | Owner isolation per-service, not whole-DB; auth/state separate commits; no server |
+| **SEC-003** | Upload validation | — | — | **NOT_IMPLEMENTED** | No upload design |
+| **DATA-001** | Constrained owned records & state machines (opportunity, task, order, invoice, payment) | `opportunity_drafts`, `task_plans`, `order_drafts`, `invoice_drafts`, `task_queue`, `task_workflows`, `task_associations`, `payment_observations`, `financial_draft_workflows`, `financial_assertions` | `test_opportunity_drafts` etc. disposable tests | **EXPERIMENTAL** | All `draft`/`planned` slices; no discovery, execution, verified completion |
+| **DATA-002** | Durable tasks, transactions, idempotency, migrations, backup/restore | `state_storage.py` (v1→v14, `backup_to`), `state_recovery_comparison.py`, migrations `migrate_to_v*` | `test_state_storage`, `test_state_migration`, `test_state_crash_recovery`, `test_state_recovery_comparison`, etc. | **EXPERIMENTAL** | V14 synthetic journal Linux-tested, user-reported Windows `f26c6b9`; real-data recovery unverified |
+| **DATA-003** | `doctor` diagnostics | `doctor.py`, `doctor_cli.py` | Manual (no dedicated test file) + `test_state_operation_integrity` indirectly | **EXPERIMENTAL** | Read-only, `permission_error` for unsafe parent, `immutable=1` open – wired in PR #37 |
+| **OPP-001** | Opportunity CRUD with source, budget, deadline, etc. | — | — | **NOT_IMPLEMENTED** | Only `opportunity_drafts` title+`archived`; manual discovery missing |
+| **OPP-002** | Verification & ranking | — | — | **NOT_IMPLEMENTED** | No evidence/risk scoring |
+| **TASK-001** | Durable queue with priority/deadline/retry | `task_queue.py`, `task_plans.py` | `test_task_queue.py` | **PARTIAL** | Planning/scheduling only; no worker, no `authorized_inputs/outputs` |
+| **TASK-002** | Validated outputs + human review | `task_workflows.py` (planned→completed, hash/size) | `test_task_workflows.py` | **PARTIAL** | Syntactic validation only; no human identity, no queue linkage |
+| **TASK-003** | Safe execution & audit | — | — | **NOT_IMPLEMENTED** | No background runner |
+| **SERV-001** | Sellable service definition | — | — | **NOT_IMPLEMENTED** | Templates listed but no code |
+| **SERV-002** | Portfolio/demo | — | — | **NOT_IMPLEMENTED** | No genuine portfolio |
+| **PROD-001** | Digital product workspace | — | — | **NOT_IMPLEMENTED** | — |
+| **CRM-001** | Customers/leads/proposals | — | — | **NOT_IMPLEMENTED** | — |
+| **CRM-002** | Evidence-grounded drafts & approval | — | — | **NOT_IMPLEMENTED** | — |
+| **FIN-001** | Orders/quotes/expenses | `order_drafts`, `invoice_drafts`, `financial_draft_workflows` (proposed snapshots) | `test_order_drafts`, `test_invoice_drafts`, `test_financial_draft_workflows` | **EXPERIMENTAL** | Draft snapshots only; no ledger, no issued invoice |
+| **FIN-002** | 11-concept ledger (proposed→net) | `financial_assertions.py` (unverified stages) | `test_financial_assertions.py` | **EXPERIMENTAL** | `asserted_not_revenue`; no confirmed/settled, no net calc |
+| **PAY-001** | Provider selection (Razorpay) | — | — | **BLOCKED** | Razorpay candidate noted in `DECISIONS.md`, no adapter |
+| **PAY-002** | Sandbox webhook, reconcile, idempotency | `payment_sandbox.py` (in-memory), `durable_sandbox_payments.py` (synthetic) | `test_payment_sandbox.py`, `test_durable_sandbox_payments.py` | **EXPERIMENTAL** | Synthetic HMAC, prefixed `sandbox_`; no real provider |
+| **PAY-003** | Live readiness | — | — | **NOT_IMPLEMENTED / BLOCKED** | No KYC, no prod approval |
+| **INT-001** | Connectors (Gmail/Drive/GitHub) | — | — | **NOT_IMPLEMENTED / BLOCKED** | No credentials, no framework |
+| **AUTO-001/002** | AI tool permissions & approval | — | — | **NOT_IMPLEMENTED** | No `ToolRegistry` |
+| **COST-001** | Cost limits | — | — | **NOT_IMPLEMENTED** | — |
+| **UI-001** | Dashboard (17 sections) | `dashboard/connected.html` + `snapshot.js` + `dashboard_cli`/`dashboard_metrics` | `test_dashboard_export.py`, `test_dashboard_metrics.py` | **EXPERIMENTAL** | Static snapshot loader only; metrics from real DB but no HTTP API, no navigation |
+| **FLOW-001/002** | End-to-end workflows | — | — | **NOT_IMPLEMENTED** | Depends on OPP/TASK/SERV/CRM/FIN |
+| **ANALYTICS-001** | Reports (funnel, MRR) | — | — | **NOT_IMPLEMENTED** | No real-data reports |
+| **OPS-001/002** | Deploy, backups, rollback, runbooks | — | — | **NOT_IMPLEMENTED** | Local Windows path only (trusted drive + ACL) |
+| **LEGAL-001** | No fabricated claims, ToS, etc. | Docs warn, no enforcement code | Manual review | **PARTIAL** | Warnings in `README`/`SECURITY`, no automated policy engine |
+
+**Summary counts (2026-11-16):** VERIFIED 1, PARTIAL 6, EXPERIMENTAL 10, NOT_IMPLEMENTED 17, BLOCKED 3 (PAY-001, PAY-003, INT-001).
+
+**How to read:** A feature is not complete because files exist. Use `REQUIREMENTS.md` row `Status` for grouped criteria and this file for evidence. Windows evidence is user-reported for `f26c6b9`/`72241cc`/`cd7f6ff`; Linux evidence is reproducible via `python -m unittest discover -v`.

@@ -1,6 +1,18 @@
 # Architecture: baseline and proposed boundaries
 
-## Observed baseline
+## Current snapshot (2026-11-16, branch arena/c6693e06-ai-earn, base ed79102)
+
+- **Runtime:** Python 3.11+ stdlib only (`python -m ai_earn status`), no HTTP listener. Entry `ai_earn/__main__.py` dispatches `status|auth|tracker|dashboard|doctor`. Config from env only (`config.py` + `DatabasePaths`), validated without logging values.
+- **Auth:** `auth_storage.py` (SQLite `user_version 1`, private POSIX 0700/0600 or Windows ACL via `windows_security.py`), `auth.py` (PBKDF2 600k, 30-min sessions, `token_hash`, rate limits, recovery-code replacement), `auth_cli.py` (hidden input). Experimental local, not OS sandbox, not production.
+- **State:** `state_storage.py` separate DB `APPLICATION_ID 0x41494533`, `LATEST 14`, explicit backup-first migrations `v1→v14` with 13 `before-v*.sqlite3` backups, `validate_schema`/`check_integrity` (creation-event, terminal-transition, multi-step replay, queue consistency, sandbox binding). `tracker_cli._initialize_state` creates v1→v14 in one `YES`-confirmed step.
+- **Authorization:** `state_authorization._authorized_transaction` (auth lock → state lock → recheck expiry) + per-service `WHERE owner_id=?`, `state_audit` owner-relative pagination, `state_recovery_comparison` owner-scoped snapshots.
+- **Domain:** `opportunity_drafts` (v3), `task_plans` (v4), `order_drafts` (v5 INR), `invoice_drafts` (v6 FK), `task_queue` (v7 lease), `task_workflows` (v8 hash/size), `payment_observations` (v9), `task_associations` (v10) + `paired_completions` (v11) + `managed_task_pairs` (v12, `claim_next_managed` atomic) + `financial_assertions` (v13 unverified) + `sandbox_payments` (v14 synthetic HMAC). `financial_draft_workflows` + `durable_sandbox_payments` + `payment_sandbox` (in-memory).
+- **Dashboard/doctor:** `dashboard_metrics` read-only aggregates, `dashboard_cli` exclusive snapshot beside state DB, `dashboard/connected.html` static loader (no token). `doctor`/`doctor_cli` read-only `immutable=1` opens, parent privacy before file, `permission_error` for unsafe paths.
+- **Tests/tools:** 636 tests (17 skipped Windows ACL), `tools/windows_phase3_gate` sanitized ID reporting.
+
+Historical baseline below is preserved for audit provenance.
+
+## Observed baseline (Phase 0, commit 16bd10f)
 
 The repository has no running application or architecture: only a README existed at the audited commit. There are no frontend/backend routes, authentication mechanisms, data stores, workers, APIs, payment components, integrations, or deployment configuration. Consequently there is no data flow or schema to assert as implemented.
 
