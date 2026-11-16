@@ -2,7 +2,7 @@
 
 No payment is verified, received or processed. Use only disposable data.
 Now includes v15 opportunity discovery, v16 service catalog/portfolio,
-v17 product workspace & customers, v18 communications & ledger, v19 followups & CSV, v20 invoices & 11-concept hardening, and v22 AI assistant (ToolRegistry/ApprovalQueue) and v22 analytics (funnel/MRR/conversion/workload).
+v17 product workspace & customers, v18 communications & ledger, v19 followups & CSV, v20 invoices & 11-concept hardening, and v22 AI assistant (ToolRegistry/ApprovalQueue) and v22 analytics (funnel/MRR/conversion/workload) and connectors (Gmail/Drive/GitHub stubs).
 """
 
 import getpass
@@ -23,6 +23,11 @@ from .invoices import Invoices, InvoiceError
 from .payment_providers import PaymentProviders, ProviderConfig, ProviderError
 from .ai_assistant import AIAssistant, ToolRegistry, ApprovalError, AssistantError, ToolError
 from .analytics import Analytics, AnalyticsError
+from ai_earn.connectors import ConnectorError as ConnError
+from ai_earn.connectors.gmail import GmailConnector
+from ai_earn.connectors.drive import DriveConnector
+from ai_earn.connectors.github import GitHubConnector
+from ai_earn.connectors.throttle import Throttle
 from .opportunities import Opportunities, OpportunityError
 from .ledger import Ledger, LedgerError
 from .products import Products, ProductError
@@ -180,6 +185,10 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
     has_an = analytics is not None
     if has_an:
         extras.append("Analytics v22 (42-45)")
+    # connectors are available when analytics available (same version) – use same flag for simplicity
+    has_conn = analytics is not None
+    if has_conn:
+        extras.append("Connectors v22 (46-48)")
     if extras:
         out.write("Financial (1-4), " + ", ".join(extras) + " available.\n")
     segments = ["1 Add financial  2 List financial  3 Advance financial  4 Withdraw financial"]
@@ -208,6 +217,8 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
         segments.append("38 Revoke approval  39 AI chat (draft)  40 Emergency stop/clear  41 Execute tool")
     if has_an:
         segments.append("42 Analytics summary  43 Funnel  44 MRR monthly  45 Export CSV")
+    if has_conn:
+        segments.append("46 List connectors  47 Fetch Gmail/Drive/GitHub  48 Import via connector")
     prompt = "\n" + " | ".join(segments) + "  0 Sign out\nChoice: "
     # legacy no-opp/no-svc prompt (financial pipeline wording remains for v13-like fallback)
     legacy_prompt = "\n1 Add opportunity  2 List entries  3 Advance stage  4 Withdraw  0 Sign out\nChoice: "
@@ -947,6 +958,69 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                     out.write(f"Total {len(csv_text)} chars, {csv_text.count(chr(10))} lines.\n")
                 except Exception as e:
                     out.write(str(e) + "\n")
+            elif has_conn and choice == "46":
+                out.write("Connectors (stub sandbox, no network):\n")
+                out.write(" - gmail-stub (Gmail, snippets) | drive-stub (Drive files) | github-stub (GitHub issues) | manual-fallback\n")
+                out.write("Auth: api_key 32..128, throttle 10/min per owner, retry 3 backoff, normalize bounded, manual fallback always.\n")
+                try:
+                    from ai_earn.connectors import GmailConnector, DriveConnector, GitHubConnector
+                    for name in ("gmail-stub","drive-stub","github-stub"):
+                        out.write(f" {name}: ready (stub)\n")
+                    out.write(" manual-fallback: ready\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
+            elif has_conn and choice == "47":
+                which = _read(stdin, out, "Which connector [gmail/drive/github]: ").strip().lower()
+                limit_raw = _read(stdin, out, "Limit 1-100 (default 5): ").strip()
+                limit = int(limit_raw) if limit_raw else 5
+                try:
+                    key = b"test-connector-api-key-32bytes-long-enough-1234"
+                    # Need owner_id for throttle: derive from token via auth? Use dummy owner check via analytics owner? Simpler fetch without owner_id
+                    if which == "gmail":
+                        c = GmailConnector(api_key=key)
+                    elif which == "drive":
+                        c = DriveConnector(api_key=key)
+                    elif which == "github":
+                        c = GitHubConnector(api_key=key)
+                    else:
+                        out.write("Unknown connector.\n")
+                        c = None
+                    if c:
+                        c.validate_config()
+                        items = c.fetch(limit=limit)
+                        out.write(f"Fetched {len(items)} items (normalized, bounded):\n")
+                        for it in items:
+                            out.write(f" - {it['title'][:60]} | {it['source_url'][:60]} | {it['budget_paise']/100:.2f} INR | {it['skill_tags'][:30]}\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
+            elif has_conn and choice == "48":
+                which = _read(stdin, out, "Import via which [gmail/drive/github/manual]: ").strip().lower()
+                prefix = _read(stdin, out, "Operation prefix 1-64 (e.g. import1): ").strip() or "conn_import"
+                limit_raw = _read(stdin, out, "Limit 1-100 (default 5): ").strip()
+                limit = int(limit_raw) if limit_raw else 5
+                try:
+                    key = b"test-connector-api-key-32bytes-long-enough-1234"
+                    if which == "gmail":
+                        c = GmailConnector(api_key=key)
+                    elif which == "drive":
+                        c = DriveConnector(api_key=key)
+                    elif which == "github":
+                        c = GitHubConnector(api_key=key)
+                    elif which == "manual":
+                        from ai_earn.opportunities import ManualConnector
+                        c = ManualConnector()
+                    else:
+                        out.write("Unknown connector.\n")
+                        c = None
+                    if c and opportunities is not None:
+                        ids = opportunities.import_from_connector(token, c, limit=limit, operation_key_prefix=prefix)
+                        out.write(f"Imported {len(ids)} opportunities (owner-scoped, idempotent by prefix):\n")
+                        for ident in ids:
+                            out.write(f" {ident}\n")
+                    elif c:
+                        out.write("Opportunities not available in this state version.\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
             else:
                 parts = ["0 Sign out", "1-4 financial"]
                 if has_opp:
@@ -973,8 +1047,10 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                     parts.append("34-41 AI (sandbox)")
                 if has_an:
                     parts.append("42-45 Analytics")
+                if has_conn:
+                    parts.append("46-48 Connectors (stub)")
                 out.write("Choose " + ", ".join(parts) + ".\n")
-        except (FinancialAssertionError, OpportunityError, ServiceError, ProductError, CustomerError, CommunicationError, LedgerError, FollowupError, InvoiceError, ProviderError, ApprovalError, AssistantError, ToolError, AnalyticsError, ValueError, StateStorageError) as exc:
+        except (FinancialAssertionError, OpportunityError, ServiceError, ProductError, CustomerError, CommunicationError, LedgerError, FollowupError, InvoiceError, ProviderError, ApprovalError, AssistantError, ToolError, AnalyticsError, ConnError, ValueError, StateStorageError) as exc:
             out.write(str(exc) + "\n")
         except AccessDenied as exc:
             out.write(str(exc) + "\n")

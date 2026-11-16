@@ -530,8 +530,23 @@ class Opportunities:
         Each imported item gets a distinct operation key derived from the prefix.
         Caller must provide a stable prefix per import batch for idempotency.
         """
-        if not isinstance(connector, Connector):
+        # Accept any connector with connector_id and fetch (duck-typed) to support connectors framework stubs
+        if not hasattr(connector, "connector_id") or not hasattr(connector, "fetch") or not callable(getattr(connector, "fetch", None)):
             raise OpportunityError("Invalid connector.")
+        # Validate connector id via shared helper
+        try:
+            # property may raise
+            cid = connector.connector_id
+            if isinstance(cid, str):
+                from ai_earn.connectors.base import _connector_id as _cid_check
+                _cid_check(cid)
+            else:
+                raise OpportunityError("Invalid connector.")
+        except Exception as exc:
+            # Preserve original error type for validation failures
+            if isinstance(exc, OpportunityError):
+                raise
+            raise OpportunityError("Invalid connector.") from exc
         if type(limit) is not int or not 1 <= limit <= 100:
             raise OpportunityError("Invalid limit.")
         _key(operation_key_prefix)  # validate base
