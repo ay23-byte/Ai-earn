@@ -19,7 +19,7 @@ from .auth_storage import AuthStorage, StorageError, _windows_auth_verified
 
 APPLICATION_ID = 0x41494533  # AIE3, distinct from the auth-only database.
 SCHEMA_VERSION = 1  # New files still bootstrap as version 1; upgrades are explicit.
-LATEST_SCHEMA_VERSION = 20
+LATEST_SCHEMA_VERSION = 21
 SUPPORTED_STATE_VERSIONS = frozenset(range(1, LATEST_SCHEMA_VERSION + 1))
 
 
@@ -386,6 +386,34 @@ _V19_CUSTOMER_INDEX = "CREATE UNIQUE INDEX customers_id_owner_idx ON customers(i
 _V19_INDEX = "CREATE UNIQUE INDEX followups_id_owner_idx ON followups(id, owner_id)"
 _V20_INVOICE_INDEX = "CREATE UNIQUE INDEX invoices_id_owner_idx ON invoices(id, owner_id)"
 _V20_INVOICE_NUMBER_INDEX = "CREATE UNIQUE INDEX invoices_number_owner_idx ON invoices(invoice_number, owner_id)"
+_V21_PROVIDER_ORDERS_ID_OWNER_IDX = "CREATE UNIQUE INDEX payment_provider_orders_id_owner_idx ON payment_provider_orders(id, owner_id)"
+_V21_PROVIDER_ORDERS_PROVIDER_IDX = "CREATE UNIQUE INDEX payment_provider_orders_provider_order_idx ON payment_provider_orders(provider_order_id, owner_id)"
+_V21_PROVIDER_EVENTS_ID_IDX = "CREATE UNIQUE INDEX payment_provider_events_id_owner_idx ON payment_provider_events(event_id, owner_id)"
+
+_V21_SCHEMA = {
+    "payment_provider_orders": """CREATE TABLE payment_provider_orders (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    provider TEXT NOT NULL CHECK(provider IN ('razorpay','stripe')),
+    mode TEXT NOT NULL CHECK(mode IN ('sandbox','live')),
+    amount_paise INTEGER NOT NULL CHECK(typeof(amount_paise)='integer' AND amount_paise BETWEEN 0 AND 1000000000000),
+    currency TEXT NOT NULL CHECK(currency='INR'),
+    status TEXT NOT NULL CHECK(status IN ('created','authorized','captured','settled','refunded','failed')),
+    provider_order_id TEXT NOT NULL CHECK(length(provider_order_id) BETWEEN 1 AND 64 AND provider_order_id NOT GLOB '*[^A-Za-z0-9_-]*'),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at)
+)""",
+    "payment_provider_events": """CREATE TABLE payment_provider_events (
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    event_id TEXT PRIMARY KEY NOT NULL CHECK(length(event_id) BETWEEN 1 AND 64 AND event_id NOT GLOB '*[^A-Za-z0-9_-]*'),
+    order_id TEXT NOT NULL CHECK(length(order_id)=32 AND order_id NOT GLOB '*[^0-9a-f]*'),
+    event_type TEXT NOT NULL CHECK(event_type IN ('authorized','captured','failed','refunded','settled')),
+    amount_paise INTEGER NOT NULL CHECK(typeof(amount_paise)='integer' AND amount_paise BETWEEN 0 AND 1000000000000),
+    raw_body_hash BLOB NOT NULL CHECK(typeof(raw_body_hash)='blob' AND length(raw_body_hash)=32),
+    received_at INTEGER NOT NULL CHECK(typeof(received_at)='integer' AND received_at >= 0),
+    FOREIGN KEY(order_id, owner_id) REFERENCES payment_provider_orders(id, owner_id)
+)""",
+}
 
 _V20_SCHEMA = {
     "invoices": """CREATE TABLE invoices (
@@ -590,6 +618,16 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
             ("due_at", "INTEGER", 1, 0), ("note", "TEXT", 1, 0), ("status", "TEXT", 1, 0),
             ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
         ]
+    if version >= 21:
+        expected_columns["payment_provider_orders"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("provider", "TEXT", 1, 0), ("mode", "TEXT", 1, 0),
+            ("amount_paise", "INTEGER", 1, 0), ("currency", "TEXT", 1, 0), ("status", "TEXT", 1, 0), ("provider_order_id", "TEXT", 1, 0),
+            ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["payment_provider_events"] = [
+            ("owner_id", "TEXT", 1, 0), ("event_id", "TEXT", 1, 1), ("order_id", "TEXT", 1, 0),
+            ("event_type", "TEXT", 1, 0), ("amount_paise", "INTEGER", 1, 0), ("raw_body_hash", "BLOB", 1, 0), ("received_at", "INTEGER", 1, 0),
+        ]
     if version >= 20:
         expected_columns["invoices"] = [
             ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("order_id", "TEXT", 1, 0),
@@ -619,6 +657,10 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
     if version >= 19:
         expected_objects.append(("index", "customers_id_owner_idx"))
         expected_objects.append(("index", "followups_id_owner_idx"))
+    if version >= 21:
+        expected_objects.append(("index", "payment_provider_orders_id_owner_idx"))
+        expected_objects.append(("index", "payment_provider_orders_provider_order_idx"))
+        expected_objects.append(("index", "payment_provider_events_id_owner_idx"))
     if version >= 20:
         expected_objects.append(("index", "invoices_id_owner_idx"))
         expected_objects.append(("index", "invoices_number_owner_idx"))
@@ -661,6 +703,16 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
             raise StateStorageError("State database schema constraints are incompatible.")
         row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='followups_id_owner_idx'").fetchone()
         if row is None or row[0] != _V19_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+    if version >= 21:
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='payment_provider_orders_id_owner_idx'").fetchone()
+        if row is None or row[0] != _V21_PROVIDER_ORDERS_ID_OWNER_IDX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='payment_provider_orders_provider_order_idx'").fetchone()
+        if row is None or row[0] != _V21_PROVIDER_ORDERS_PROVIDER_IDX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='payment_provider_events_id_owner_idx'").fetchone()
+        if row is None or row[0] != _V21_PROVIDER_EVENTS_ID_IDX:
             raise StateStorageError("State database schema constraints are incompatible.")
     if version >= 20:
         row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='invoices_id_owner_idx'").fetchone()
@@ -710,6 +762,8 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         schemas.append(_V18_SCHEMA)
     if version >= 19:
         schemas.append(_V19_SCHEMA)
+    if version >= 21:
+        schemas.append(_V21_SCHEMA)
     if version >= 20:
         schemas.append(_V20_SCHEMA)
     for schema in schemas:
@@ -870,6 +924,16 @@ def _apply_v20(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA user_version = 20")
 
 
+def _apply_v21(conn: sqlite3.Connection) -> None:
+    for statement in _V21_SCHEMA.values():
+        conn.execute(statement)
+    conn.execute(_V21_PROVIDER_ORDERS_ID_OWNER_IDX)
+    conn.execute(_V21_PROVIDER_ORDERS_PROVIDER_IDX)
+    conn.execute(_V21_PROVIDER_EVENTS_ID_IDX)
+    conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (21, int(time.time())))
+    conn.execute("PRAGMA user_version = 21")
+
+
 def _check_managed_pairs(conn: sqlite3.Connection, owner=None, queue_id=None, workflow_id=None, association_id=None) -> None:
     """Check managed-parent state combinations, not history authenticity."""
     invalid = conn.execute("""
@@ -972,6 +1036,7 @@ _OPERATION_RESULTS = (
     (18, "ledger_entry", "ledger_entries"),
     (19, "followup", "followups"),
     (20, "invoice", "invoices"),
+    (21, "provider_order", "payment_provider_orders"),
 )
 
 
@@ -1044,6 +1109,7 @@ _CREATION_EVENTS = (
     (18, "ledger_entries", "ledger_entry", "ledger_entry_created"),
     (19, "followups", "followup", "followup_created"),
     (20, "invoices", "invoice", "invoice_created"),
+    (21, "payment_provider_orders", "provider_order", "provider_order_created"),
 )
 
 
@@ -1201,6 +1267,17 @@ _MULTI_STEP_HISTORIES = (
         ("issued", "invoice_voided"): "void",
         ("overdue", "invoice_paid"): "paid",
         ("overdue", "invoice_voided"): "void",
+    }),
+    (21, "payment_provider_orders", "provider_order", {
+        (None, "provider_order_created"): "created",
+        ("created", "provider_order_authorized"): "authorized",
+        ("created", "provider_order_failed"): "failed",
+        ("authorized", "provider_order_captured"): "captured",
+        ("authorized", "provider_order_failed"): "failed",
+        ("captured", "provider_order_settled"): "settled",
+        ("captured", "provider_order_refunded"): "refunded",
+        ("settled", "provider_order_refunded"): "refunded",
+        ("captured", "provider_order_failed"): "failed",
     }),
 )
 
@@ -1705,6 +1782,19 @@ class StateStorage:
             self.backup_to(backup, confirmed=True)
             _apply_v20(conn)
             if _validate_schema(conn) != 20:
+                raise StateStorageError("Migration produced an incompatible schema.")
+            _check_integrity(conn)
+
+    def migrate_to_v21(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 20 only after a checked non-overwriting backup."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 20:
+                raise StateStorageError("Only version 20 can be upgraded to version 21.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v21(conn)
+            if _validate_schema(conn) != 21:
                 raise StateStorageError("Migration produced an incompatible schema.")
             _check_integrity(conn)
 

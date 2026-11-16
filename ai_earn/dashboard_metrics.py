@@ -294,4 +294,38 @@ class DashboardMetrics:
                     "net_realized_synthetic": {"amount_paise": net_realized, "verification": "synthetic", "note": "settled(synthetic)-refunds-fees-expenses, not bank-verified"},
                     "note": "11-concept separation: verified income is 0; all others unverified/synthetic.",
                 }
+            if version >= 21:
+                prov_rows = conn.execute(
+                    "SELECT provider, status, COUNT(*), COALESCE(SUM(amount_paise),0) FROM payment_provider_orders WHERE owner_id=? GROUP BY provider, status",
+                    (owner,),
+                ).fetchall()
+                # aggregate by status and provider
+                prov_statuses = {}
+                prov_providers = {}
+                total_cnt = 0
+                total_amt = 0
+                for prov, status, cnt, amt in prov_rows:
+                    prov_statuses.setdefault(status, {"count": 0, "amount_paise": 0})
+                    prov_statuses[status]["count"] += cnt
+                    prov_statuses[status]["amount_paise"] += amt
+                    prov_providers.setdefault(prov, {"count": 0, "amount_paise": 0})
+                    prov_providers[prov]["count"] += cnt
+                    prov_providers[prov]["amount_paise"] += amt
+                    total_cnt += cnt
+                    total_amt += amt
+                result["provider_orders"] = {
+                    "count": total_cnt,
+                    "amount_paise": total_amt,
+                    "statuses": prov_statuses,
+                    "providers": prov_providers,
+                    "verification": "sandbox_only",
+                    "note": "Sandbox provider orders; HMAC verified, not live settlement.",
+                }
+                # webhook events
+                evt_cnt = conn.execute("SELECT COUNT(*) FROM payment_provider_events WHERE owner_id=?", (owner,)).fetchone()[0]
+                result["provider_events"] = {
+                    "count": evt_cnt,
+                    "verification": "sandbox_only",
+                    "note": "HMAC verified webhook events, idempotent by event_id.",
+                }
             return result

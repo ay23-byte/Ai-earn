@@ -2,7 +2,7 @@
 
 No payment is verified, received or processed. Use only disposable data.
 Now includes v15 opportunity discovery, v16 service catalog/portfolio,
-v17 product workspace & customers, v18 communications & ledger, v19 followups & CSV, and v20 invoices & 11-concept hardening.
+v17 product workspace & customers, v18 communications & ledger, v19 followups & CSV, v20 invoices & 11-concept hardening, and v21 provider sandbox.
 """
 
 import getpass
@@ -20,6 +20,7 @@ from .customers import Customers, CustomerError
 from .financial_assertions import FinancialAssertions, FinancialAssertionError
 from .followups import Followups, FollowupError
 from .invoices import Invoices, InvoiceError
+from .payment_providers import PaymentProviders, ProviderConfig, ProviderError
 from .opportunities import Opportunities, OpportunityError
 from .ledger import Ledger, LedgerError
 from .products import Products, ProductError
@@ -80,6 +81,14 @@ _INVOICE_STATUS_LABELS = {
     "overdue": "overdue (unverified)",
     "void": "void",
 }
+_PROVIDER_STATUS_LABELS = {
+    "created": "created (sandbox)",
+    "authorized": "authorized (HMAC)",
+    "captured": "captured (HMAC)",
+    "settled": "settled (sandbox)",
+    "refunded": "refunded",
+    "failed": "failed",
+}
 
 
 def _read(stdin, out, prompt):
@@ -107,11 +116,11 @@ def _key():
 
 def _initialize_state(path):
     # Only initialize a new file; never silently upgrade an existing database.
-    backups = [path.with_name(path.name + f".before-v{version}.sqlite3") for version in range(2, 21)]
+    backups = [path.with_name(path.name + f".before-v{version}.sqlite3") for version in range(2, 22)]
     if path.exists() or path.is_symlink() or any(p.exists() or p.is_symlink() for p in backups):
         raise StateStorageError("State or migration backup already exists; no initialization was attempted.")
     state = StateStorage(path, create=True, confirmed=True)
-    for version, backup in zip(range(2, 21), backups):
+    for version, backup in zip(range(2, 22), backups):
         getattr(state, f"migrate_to_v{version}")(backup, confirmed=True)
     return state
 
@@ -121,8 +130,8 @@ def _csv_preview(text: str, limit: int = 500) -> str:
     return sample + ("..." if len(text) > limit else "")
 
 
-def _menu(service, token, stdin, out, opportunities=None, services=None, portfolio=None, products=None, customers=None, communications=None, ledger=None, followups=None, invoices=None):
-    # service = FinancialAssertions, opportunities = Opportunities, services/portfolio = v16, products/customers = v17, comm/ledger = v18, followups = v19, invoices = v20
+def _menu(service, token, stdin, out, opportunities=None, services=None, portfolio=None, products=None, customers=None, communications=None, ledger=None, followups=None, invoices=None, provider_orders=None):
+    # service = FinancialAssertions, opportunities = Opportunities, services/portfolio = v16, products/customers = v17, comm/ledger = v18, followups = v19, invoices = v20, provider_orders = v21
     out.write("Local tracker: all entries are UNVERIFIED. No payment processing or settlement.\n")
     has_opp = opportunities is not None
     has_svc = services is not None and portfolio is not None
@@ -132,6 +141,7 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
     has_ledger = ledger is not None
     has_follow = followups is not None
     has_inv = invoices is not None
+    has_prov = provider_orders is not None
     extras = []
     if has_opp:
         extras.append("Opportunities v15 (5-8)")
@@ -153,6 +163,8 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
         extras.append("Followups v19 (23-25) + CSV 26-27" if has_cust else "Followups v19 (23-25)")
     if has_inv:
         extras.append("Invoices v20 (28-30)")
+    if has_prov:
+        extras.append("Provider v21 (31-33 sandbox)")
     if extras:
         out.write("Financial (1-4), " + ", ".join(extras) + " available.\n")
     segments = ["1 Add financial  2 List financial  3 Advance financial  4 Withdraw financial"]
@@ -174,11 +186,13 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
             segments.append("26 Import CSV  27 Export CSV")
     if has_inv:
         segments.append("28 Add invoice  29 List invoices  30 Manage invoice")
+    if has_prov:
+        segments.append("31 Add provider order  32 List provider orders  33 Webhook")
     prompt = "\n" + " | ".join(segments) + "  0 Sign out\nChoice: "
     # legacy no-opp/no-svc prompt (financial pipeline wording remains for v13-like fallback)
     legacy_prompt = "\n1 Add opportunity  2 List entries  3 Advance stage  4 Withdraw  0 Sign out\nChoice: "
     while True:
-        if not has_opp and not has_svc and not has_prod and not has_cust and not has_comm and not has_ledger and not has_follow and not has_inv:
+        if not has_opp and not has_svc and not has_prod and not has_cust and not has_comm and not has_ledger and not has_follow and not has_inv and not has_prov:
             choice = _read(stdin, out, legacy_prompt).strip()
         else:
             choice = _read(stdin, out, prompt).strip()
@@ -718,6 +732,38 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                         out.write(str(e) + "\n")
                 else:
                     out.write("Invalid choice.\n")
+            elif has_prov and choice == "31":
+                provider = _read(stdin, out, "Provider [razorpay/stripe]: ").strip() or "razorpay"
+                amt_raw = _read(stdin, out, "Amount INR (e.g. 5000 or 2500.50): ").strip()
+                amt = _paise(amt_raw)
+                ident = provider_orders.create_order(token, amt, operation_key=_key())
+                out.write(f"Created provider order ({provider}): {ident}\n")
+            elif has_prov and choice == "32":
+                status_f = _read(stdin, out, "Filter status [created/authorized/captured/settled/refunded/failed or empty]: ").strip()
+                if status_f == "":
+                    status_f = None
+                cursor = None
+                while True:
+                    entries = provider_orders.list(token, after_id=cursor, limit=50, status=status_f)
+                    for item in entries:
+                        out.write(f"{item['id']} | {item['provider_order_id']} | {item['provider']}/{item['mode']} | INR {item['amount_paise'] // 100}.{item['amount_paise'] % 100:02d} | {item['status']}\n")
+                    if len(entries) < 50:
+                        break
+                    if _read(stdin, out, "More? Type YES: ").strip() != "YES":
+                        break
+                    cursor = entries[-1]["id"]
+                if cursor is None and not entries:
+                    out.write("No provider orders.\n")
+            elif has_prov and choice == "33":
+                out.write("Webhook: paste raw JSON body (single line). Signature must be HMAC of raw body.\n")
+                body_raw = _read(stdin, out, "Raw body: ")
+                sig = _read(stdin, out, "Signature (hex for razorpay, t=...,v1=... for stripe): ").strip()
+                try:
+                    raw = body_raw.encode('utf-8')
+                    result = provider_orders.handle_webhook(token, raw, sig, operation_key=_key())
+                    out.write(f"Webhook processed: event {result['event_id']} -> {result['new_status']} for order {result['order_id'][:8]}\n")
+                except Exception as e:
+                    out.write(str(e) + "\n")
             else:
                 parts = ["0 Sign out", "1-4 financial"]
                 if has_opp:
@@ -738,8 +784,10 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                         parts.append("26-27 CSV")
                 if has_inv:
                     parts.append("28-30 invoices")
+                if has_prov:
+                    parts.append("31-33 provider(sandbox)")
                 out.write("Choose " + ", ".join(parts) + ".\n")
-        except (FinancialAssertionError, OpportunityError, ServiceError, ProductError, CustomerError, CommunicationError, LedgerError, FollowupError, InvoiceError, ValueError, StateStorageError) as exc:
+        except (FinancialAssertionError, OpportunityError, ServiceError, ProductError, CustomerError, CommunicationError, LedgerError, FollowupError, InvoiceError, ProviderError, ValueError, StateStorageError) as exc:
             out.write(str(exc) + "\n")
         except AccessDenied as exc:
             out.write(str(exc) + "\n")
@@ -765,19 +813,19 @@ def run(action, environ, stdin, out, err):
                 out.write("No files created.\n")
                 return 0
             _initialize_state(path)
-            out.write("New tracker state initialized (v20, 19 backups). Register an account with the auth command if needed.\n")
+            out.write("New tracker state initialized (v21, 20 backups). Register an account with the auth command if needed.\n")
             return 0
         # Open only; missing files are never created during login.
         state = StateStorage(path)
         with state.transaction() as conn:
             version = conn.execute("PRAGMA user_version").fetchone()[0]
-            if version not in (13, 14, 15, 16, 17, 18, 19, 20):
-                raise StateStorageError("Tracker requires an existing version 13, 14, 15, 16, 17, 18, 19 or 20 state file; no upgrade was performed.")
+            if version not in (13, 14, 15, 16, 17, 18, 19, 20, 21):
+                raise StateStorageError("Tracker requires an existing version 13, 14, 15, 16, 17, 18, 19, 20 or 21 state file; no upgrade was performed.")
         auth = AuthService(AuthStorage(Path(auth_path), create=False))
         username = _read(stdin, out, "Username: ")
         password = _secret("Password: ", err)
         token = auth.login(username, password)
-        # Opportunities available on 15+, services/portfolio on 16+, products/customers on 17+, comm/ledger on 18+, followups on 19+, invoices on 20+
+        # Opportunities available on 15+, services/portfolio on 16+, products/customers on 17+, comm/ledger on 18+, followups on 19+, invoices on 20+, provider sandbox on 21+
         opp = Opportunities(auth, state) if version >= 15 else None
         svc = Services(auth, state) if version >= 16 else None
         port = Portfolio(auth, state) if version >= 16 else None
@@ -787,7 +835,18 @@ def run(action, environ, stdin, out, err):
         ledg = Ledger(auth, state) if version >= 18 else None
         foll = Followups(auth, state) if version >= 19 else None
         inv = Invoices(auth, state) if version >= 20 else None
-        _menu(FinancialAssertions(auth, state), token, stdin, out, opp, svc, port, prod, cust, comm, ledg, foll, inv)
+        # Provider orders use sandbox config by default (razorpay, sandbox, fixed test secret for local demo)
+        prov = None
+        if version >= 21:
+            # In tracker, use a deterministic sandbox secret derived from owner for demo — never live
+            # The secret is not stored; it is derived per-session for the demo and must match webhook generation
+            demo_secret = b"tracker-demo-sandbox-secret-32bytes-long-1234"
+            try:
+                cfg = ProviderConfig(provider="razorpay", mode="sandbox", webhook_secret=demo_secret)
+                prov = PaymentProviders(auth, state, cfg)
+            except ProviderError:
+                prov = None
+        _menu(FinancialAssertions(auth, state), token, stdin, out, opp, svc, port, prod, cust, comm, ledg, foll, inv, prov)
         return 0
     except (AuthError, StorageError, StateStorageError, ConfigurationError):
         err.write("Tracker could not open or complete the operation. Check your account, private paths and state version; no automatic replacement is performed.\n")

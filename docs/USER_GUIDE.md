@@ -11,8 +11,8 @@ mkdir -m 700 ~/.ai-earn-private
 export AI_EARN_AUTH_DB=~/.ai-earn-private/auth.sqlite3
 export AI_EARN_STATE_DB=~/.ai-earn-private/state.sqlite3
 .venv/bin/python -m ai_earn auth register   # hidden password, save one-time code
-.venv/bin/python -m ai_earn tracker init    # type YES, creates state.sqlite3 + 19 before-v*.sqlite3 (v2→v20)
-.venv/bin/python -m ai_earn tracker open    # login: 1-4 financial, 5-8 opportunities, 9-12 services/portfolio, 13-30 full menu, 0=logout
+.venv/bin/python -m ai_earn tracker init    # type YES, creates state.sqlite3 + 20 before-v*.sqlite3 (v2→v21)
+.venv/bin/python -m ai_earn tracker open    # login: 1-4 financial, 5-8 opportunities, 9-12 services/portfolio, 13-33 full menu, 0=logout
 ```
 
 Windows: same via PowerShell `create_private_directory` (see `README.md`). The private dir must be on a fixed NTFS drive, not a reparse point; never reuse an untrusted ancestor.
@@ -36,6 +36,7 @@ Windows: same via PowerShell `create_private_directory` (see `README.md`). The p
 - **Ledger 11-concept (v20):** `Ledger.eleven_concepts` / `DashboardMetrics.ledger_11` / `dashboard` `11-CONCEPT` — 11 buckets: proposed, quoted, contracted, invoiced_asserted, invoiced_drafts, invoices_issued (PDF stub), payment_initiated (all unverified), payment_received_verified (`not_implemented` 0), payment_settled (`synthetic`), refunds/expenses/fees (unverified), ledger_net_unverified, net_realized_synthetic = settled(synthetic) - refunds - fees - costs (not bank-verified).
 - **Add followup (v19):** `23` → customer ID → due timestamp 0..4102444800 → note 0-500. Stored as `pending` (unverified). `24` list (customer/status filters, pages 50), `25` complete/cancel (1 completed, 2 cancelled, requires YES).
 - **CSV (v19):** `26` import (paste lines, end with `.`, prefix 1-64 for idempotency, header name,contact,source, 1000-row/1M limit), `27` export (CSV to terminal).
+- **Provider sandbox (v21):** `31` create order (amount INR, generates `order_...` sandbox), `32` list (provider/status filters), `33` webhook (paste JSON + sig, verified HMAC raw-body before parse, amount binding, idempotent event_id).
 - **List services:** `10` → optional status filter draft/published/archived → pages 50.
 - **Manage service:** `11` → ID → 1 publish / 2 archive → YES (transitions `draft→published→archived` etc, `draft→archived` allowed).
 - **Portfolio:** `12` → 1 add item (service ID + title + description) / 2 list items (service filter, pages 50). Items are demo only, linked via FK `service_id`.
