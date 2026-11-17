@@ -83,7 +83,9 @@ class ProviderConfig:
         if type(self.webhook_secret) is not bytes or not 32 <= len(self.webhook_secret) <= 128:
             raise ProviderError("Invalid webhook secret.")
         if self.mode == "live":
-            raise ProviderError("Live mode is not enabled; sandbox only until explicit approval.")
+            # Phase 11 gate: live remains blocked until production readiness checklist
+            # (docs/PRODUCTION_READINESS.md) is signed and ai_earn/production_readiness.evaluate() passes.
+            raise ProviderError("Live mode is not enabled; sandbox only until explicit approval. See docs/PRODUCTION_READINESS.md and ai_earn/production_readiness.evaluate().")
 
 
 def _input(validator, value):
