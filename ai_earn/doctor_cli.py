@@ -35,6 +35,7 @@ def _report_to_dict(report: dict) -> dict:
             "schema_version": state.schema_version,
             "account_count": state.account_count,
         } if state else None,
+        "stale": report.get("stale"),
     }
 
 
@@ -79,6 +80,70 @@ def _print_plan(out: TextIO) -> None:
 
 
 def run(args: Sequence[str], environ: Mapping[str, str], out: TextIO, err: TextIO) -> int:
+    # --check-stale handling (read-only, compares auth_audit timestamps)
+    # Supported: --check-stale, --check-stale --json, --check-stale <abs-path>, --check-stale <path> --json
+    _raw = list(args)
+    _check_stale = False
+    _stale_path = None
+    _want_json_stale = False
+    # Simple parse: look for --check-stale / --check_stale / -check-stale
+    stale_flags = {"--check-stale", "--check_stale", "-check-stale", "check-stale", "--stale"}
+    json_flags = {"--json", "-j", "json"}
+    remaining = []
+    i = 0
+    while i < len(_raw):
+        a = _raw[i].strip()
+        if a in stale_flags:
+            _check_stale = True
+            # peek next arg as path if it looks like absolute path
+            if i + 1 < len(_raw) and _raw[i+1].strip().startswith("/"):
+                _stale_path = _raw[i+1].strip()
+                i += 1
+            elif i + 1 < len(_raw) and not _raw[i+1].strip().startswith("-") and _raw[i+1].strip() not in json_flags and _raw[i+1].strip() not in stale_flags:
+                # treat next as path if not a flag
+                cand = _raw[i+1].strip()
+                if cand and cand not in {"diagnose", "--diagnose", "--plan-init", "plan-init"}:
+                    # Only accept if it contains / or .sqlite
+                    if "/" in cand or cand.endswith(".sqlite3"):
+                        _stale_path = cand
+                        i += 1
+        elif a in json_flags:
+            _want_json_stale = True
+            remaining.append(a)
+        else:
+            remaining.append(a)
+        i += 1
+    if _check_stale:
+        # Build environ override with stale path if provided
+        eff_environ = dict(environ)
+        if _stale_path:
+            eff_environ["AI_EARN_AUTH_BACKUP"] = _stale_path
+        # Perform diagnose and isolate stale report
+        try:
+            from .doctor import diagnose as _diag
+            report = _diag(eff_environ)
+            payload = _report_to_dict(report)
+            stale = report.get("stale") or {}
+        except Exception:
+            err.write("Doctor stale check could not complete; no files were changed.\n")
+            return 1
+        if _want_json_stale or "--json" in remaining:
+            out.write(json.dumps({"stale": stale, "environment": payload.get("environment")}, indent=2, sort_keys=True) + "\n")
+            return 0 if stale.get("status") != "stale" else 1
+        # Human-readable
+        out.write("Doctor stale check (read-only, compares auth_audit MAX(occurred_at)):\n")
+        out.write(f"  status: {stale.get('status')}\n")
+        out.write(f"  detail: {stale.get('detail')}\n")
+        if stale.get("delta_seconds") is not None:
+            out.write(f"  delta_seconds: {stale.get('delta_seconds')}\n")
+        if stale.get("status") == "stale":
+            out.write("  action: revoke sessions on restored copy and rotate recovery code (confirmed=True)\n")
+            out.write("  hint: python -c \"from ai_earn.backup import revoke_all_sessions; revoke_all_sessions(Path('/path/to/restored.sqlite3'), confirmed=True)\"\n")
+        out.write("\n--- json ---\n")
+        out.write(json.dumps({"stale": stale}, indent=2, sort_keys=True) + "\n")
+        return 0 if stale.get("status") != "stale" else 1
+        # end check-stale
+
     # Accept both 'doctor' with no args and explicit sub-options.
     # Canonical: `python -m ai_earn doctor`  -> diagnose
     #            `python -m ai_earn doctor --plan-init` -> plan
@@ -147,10 +212,12 @@ def run(args: Sequence[str], environ: Mapping[str, str], out: TextIO, err: TextI
         return 0
 
     if normalized in (["--help"], ["-h"], ["help"]):
-        out.write("Usage: python -m ai_earn doctor [--plan-init|--json]\n")
+        out.write("Usage: python -m ai_earn doctor [--plan-init|--json|--check-stale]\n")
         out.write("  No arguments  : diagnose both stores (read-only) and show actions.\n")
         out.write("  --plan-init   : show explicit, confirmation-required recovery steps.\n")
         out.write("  --json        : emit machine-readable JSON only.\n")
+        out.write("  --check-stale : compare auth_audit MAX(occurred_at) between AI_EARN_AUTH_DB and AI_EARN_AUTH_BACKUP (or path arg)\n")
+        out.write("                : stale -> requires session revocation + recovery code rotation\n")
         return 0
 
     # Single dash handling for combined args like ["diagnose", "--json"]
@@ -166,5 +233,5 @@ def run(args: Sequence[str], environ: Mapping[str, str], out: TextIO, err: TextI
         out.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
         return 0
 
-    err.write("Usage: python -m ai_earn doctor [--plan-init|--json]\n")
+    err.write("Usage: python -m ai_earn doctor [--plan-init|--json|--check-stale]\n")
     return 2

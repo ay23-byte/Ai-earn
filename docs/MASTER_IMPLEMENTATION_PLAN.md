@@ -1,7 +1,7 @@
 # Master Implementation Plan — Ai-earn
 
 **Date:** 2026-11-17 (UTC)  
-**Branch:** `arena/a2b30614-ai-earn` based on `9d77101a0853e5d8bd0d42d880ff1e8ebef5575d` (merge of PR #37, which wired `doctor` CLI and hardened diagnostics).  
+**Branch:** `arena/4bd4230e-ai-earn` based on `6cd8b36b9550869bce59d9f58c9029a726dc119b` (PR41 offline-ready, P0-2 YES tip + 27-backup fix) (merge of PR #37, which wired `doctor` CLI and hardened diagnostics).  
 **Auditor:** autonomous principal agent (this session).  
 **Mode:** local-first, single-user, disposable-data, Windows-compatible, no live payments.
 
@@ -38,7 +38,7 @@ This plan preserves all existing work and does **not** rewrite the repository. I
 - **CLI adapters:** `tracker_cli` (financial_assertions menu), `dashboard_cli` (HMAC-checked snapshot beside state DB, exclusive create), `doctor` + `doctor_cli` (read-only classify, `permission_error` for unsafe parent, `immutable=1` open), `auth_cli`.
 - **Dashboard:** `dashboard/connected.html` + `snapshot.js` – static file input, no API/token, `rupees()`/`count()` rendering, 1-MB limit, `Clear data` wipes memory.
 - **Tools:** `windows_phase3_gate`, `windows_candidate_smoke`, `windows_terminal_smoke` – disposable temp dirs, sanitized test-ID reporting, 4 allowed POSIX skips.
-- **Tests:** 963 tests (current, `python -m unittest discover -v` 2026-11-17, Linux, Python 3.11.2), 17 Windows-only skipped, 0 failed. Coverage includes auth, storage, migrations, crash recovery (`os._exit`), concurrency (`ThreadPoolExecutor`), payment sandbox. See §0.3.
+- **Tests:** 1014 tests (current, `python -m unittest discover -v` 2026-11-17, Linux, Python 3.11.2), 17 Windows-only skipped, 0 failed. Coverage includes auth, storage, migrations, crash recovery (`os._exit`), concurrency (`ThreadPoolExecutor`), payment sandbox. See §0.3.
 - **Docs:** `README.md` (now mentions tracker+dashboard+doctor), `docs/` 9 files (see inventory above), phase register says Phase 1+2 `PASS_WITH_DOCUMENTED_LIMITATIONS`, Phase 3 `IN_PROGRESS`, remaining `NOT_STARTED`.
 
 ### 0.2 What is incomplete / unsafe / disconnected

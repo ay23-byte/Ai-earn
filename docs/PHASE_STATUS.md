@@ -582,4 +582,63 @@ Each phase depends on the immediately previous phase passing (including document
 
 - **Continuation:** DoD 1-20 PASS experimental local (item 13 live sandbox only). Next is production hardening sign-off or live payment enablement after `PRODUCTION_READINESS.md` 11/11 PASS + independent disposable verification + code gate change, or continuous improvement per `MASTER_IMPLEMENTATION_PLAN` M16. This file is the continuation point.
 
+## P0-2 — Tracker YES helper + 27-backup chain fix (2026-11-17, arena/4bd4230e-ai-earn)
+
+- **Branch:** `arena/4bd4230e-ai-earn` at `4a8da62`, `LATEST 28`, `1014 tests OK / 17 skipped` (Linux 3.11.2, 272s), `compileall OK`, `security_check` clean.
+- **Motivation:** First-time setup papercut — `tracker init` required exact `YES` but `yes` gave generic “No files created” with no hint, and `_initialize_state` used hardcoded `range(2,28)` → 26 backups missing `before-v28`, causing `health --with-backups` `incomplete` for tracker-init DBs.
+- **Implementation:**
+  - `ai_earn/tracker_cli.py` add `_confirm_yes(stdin,out,prompt)` — exact `YES` true, case-variant `yes/Yes` → `Tip: use exact uppercase YES (you typed 'yes'). No change.` + return False; 32 prompts now use it, init now says `Please run tracker init again and type YES exactly (uppercase).`
+  - `ai_earn/tracker_cli.py:_initialize_state` now uses `LATEST_SCHEMA_VERSION` for `range(2, LATEST+1)` → 27 backups, message now `f"v{LATEST} {LATEST-1} backups"` (was `v27 26` hardcoded); import `LATEST_SCHEMA_VERSION`.
+  - `ai_earn/health.py:check_with_backups` now counts both plain `before-v*.sqlite3` and prefixed `*.before-v*.sqlite3` (tracker creates `state.sqlite3.before-v*.sqlite3`) via `set(plain)|set(prefixed)` → `expected 27` now ok for both manual and tracker DBs.
+- **Verification:**
+  - Disposable: `yes` → Tip + no file, `YES` → `v28 27 backups` + `health backups ok:27` (was 0 before health fix)
+  - `python -m unittest tests.test_tracker_cli -v` 6 OK, `tests.test_health` 9 OK, full `discover` 1014 OK 17 skipped
+- **Docs:** This PHASE_STATUS entry; `MASTER_IMPLEMENTATION_PLAN` branch/test sync; `SECURITY_REVIEW` branch/tests sync; `ARCHITECTURE` branch sync.
+- **Limitations:** Helper does not auto-accept case-variant (still fail-closed); no auto-recovery wizard yet (manual retry). Health now tolerates both naming schemes but not arbitrary nested dirs.
+
+## P0-1 — Central readiness (offline vs live) (2026-11-17, arena/4bd4230e-ai-earn)
+
+- **Branch:** `arena/4bd4230e-ai-earn` at `e0caf61`, `LATEST 28`, `1014 OK / 17 skipped`.
+- **Motivation:** `status` (capability) vs `health` (health) vs `production_readiness` (11 checks) vs `production_config` (hardening) each computed `production_ready` differently → `status:true` / `health:false` on fresh install confusing; audit §11 flagged lack of single source.
+- **Implementation:**
+  - New `ai_earn/readiness.py` (124 LOC) — `LIVE_BLOCKED=True`, `_is_capability_ready`, `_is_health_ok`, `_is_offline_ready` (via `evaluate`), `_is_live_ready`, `overall()` returning `{capability_ready, health_ok, offline_ready, composed_offline_ready, production_ready (alias), live_blocked, live_ready, guidance}`. Never raises, never logs secrets, no DB creation.
+  - `ai_earn/health.py` imports central for docs, keeps fast `production_ready = ok` (no heavy evaluate per call) — central `overall()` available for CLI/docs.
+  - `ai_earn/status.py` kept original `auth_available` logic to preserve `test_windows_status_respects_disabled_gate` patch semantics; central `_is_capability_ready` mirrors same check for future unification.
+- **Verification:** `status`/`health --json` unchanged, `readiness.overall({})` returns `health_ok:false offline_ready:true composed:false live_blocked:true`, with disposable healthy DB `health_ok:true offline:true composed:true`; full `discover` 1014 OK 17 skipped.
+- **Docs:** This entry; `readiness.py` is single source for offline/live docs.
+
+## P0-3 — Backup encryption & retention (2026-11-17, arena/4bd4230e-ai-earn)
+
+- **Branch:** `arena/4bd4230e-ai-earn` at `e732bd8`, `LATEST 28`, `1014 OK / 17 skipped` (273s), `compileall OK`, `security_check --audit` clean.
+- **Motivation:** Audit P0-3: `RETENTION_DAYS=30` guidance only, no enforcement; `*.sqlite3` + `dashboard-snapshot-*.json` plaintext 0600; no verified encrypt->decrypt drill; `health --with-backups` showed 21 vs 27 drift.
+- **Implementation:**
+  - `ai_earn/backup.py` 118→524 LOC: add STUB authenticated encryption (stdlib HMAC-SHA256 keystream, NOT production) `encrypt_backup(path, key|key_id, confirmed)` -> `.enc`/`.age` (50MB cap, never overwrite/logs, `AI_EARN_BACKUP_KEY_{id}`/`AI_EARN_BACKUP_KEY` via `secrets.validate_secret`), `decrypt_backup(enc, dest, key|key_id, confirmed)` HMAC+hash verified, never overwrites; `list_prunable_backups` (ephemeral `*.backup-*`/`*.bak`/`dashboard-snapshot-*.json` sorted by mtime, excludes `before-v*.sqlite3`/`state.sqlite3`/`auth.sqlite3`/`*.enc/.age`), `prune_backups(keep=7, dry_run=True, confirmed)` dry-run→actual, chain never deleted, `backup_retention_status`.
+  - `docs/BACKUP_AND_RECOVERY.md` retention & encryption section (P0-3): chain 27 protected forever, prunable set, dry-run drill, `keep=27+7` model (27 chain protected + 7 ephemeral kept), stub `encrypt_backup` example, `expected 27` fix.
+- **Verification:** Disposable private `state.sqlite3` v28 (27 chain) + 5 `*.backup-*` + snapshots → `prune keep=2 dry_run 3 would` → `pruned 3` chain 27 intact; `state.sqlite3 -> state.sqlite3.enc` (839k) -> decrypt -> `verify_backup ok` + `StateStorage` ok; `auth.sqlite3` encrypt via `key_id` env -> decrypt -> `AuthStorage` ok; wrong key -> HMAC fail; `snapshot.json` round-trip ok; existing destinations never overwritten; full `discover` 1014 OK 17 skipped.
+- **Docs:** This entry; `BACKUP_AND_RECOVERY.md` is retention authority; `backup.py` is retention enforcement source.
+
+## P0-4 — Stale backup revival mitigation (2026-11-17, arena/4bd4230e-ai-earn)
+
+- **Branch:** `arena/4bd4230e-ai-earn` at `P0-4`, `LATEST 28`, `1014 OK / 17 skipped` (290s), `compileall OK`, `security_check --audit` clean.
+- **Motivation:** Stale `backup_to` restores revive old `password_hash`/`recovery_hash`/sessions and lose later `operation_key`s → second lease on same key; audit P0-4 flagged no detection or forced rotation.
+- **Implementation:**
+  - `ai_earn/backup.py` 524→~750 LOC: add `_auth_audit_max`/`_state_audit_max` read-only `MAX(occurred_at)`, `detect_stale_auth_backup(primary, backup)` and `detect_stale_state_backup` (read-only, `is_stale` when `backup MAX < primary MAX`, `delta_seconds`, `requires_rotation`), `revoke_all_sessions(auth_db, confirmed)` (`UPDATE sessions SET revoked_at=now`, audit `stale_restore_sessions_revoked`), `handle_stale_restore(primary, backup, restored, confirmed)` (detect+revoke+warning).
+  - `ai_earn/health.py` add `_check_stale(environ)` and `checks.stale` (`AI_EARN_AUTH_BACKUP`/`AI_EARN_STATE_BACKUP` env, `stale`/`ok`/`not_checked`/`invalid_configuration`, `requires_rotation`, `delta_seconds`) — `ok` still true but warns; `ai_earn/health_cli.py` displays stale and allows `--check-stale` flag.
+  - `ai_earn/doctor.py` add `_check_stale` and `report["stale"]` with `problems`/`actions` when stale; `ai_earn/doctor_cli.py` handles `doctor --check-stale[/path] [--json]` (env override, human+JSON, exit 1 when stale, never writes), `_report_to_dict` includes `stale`, help updated.
+  - `ai_earn/__main__.py` usage updated for `doctor --check-stale` / `health --check-stale`.
+  - `docs/BACKUP_AND_RECOVERY.md` new § Stale backup revival mitigation (P0-4): detection, health/doctor usage, 5-step mitigation flow, acceptance drill.
+- **Verification:** Disposable `auth.sqlite3` (register alice, login token1 1800000000, backup, recover 100s later revoking token1) → `detect_stale` `is_stale true delta 100s` → restore backup → token1 revives + old password works → `health checks.stale:stale requires_rotation:true` and `doctor stale:stale` and `doctor --check-stale` rc1 human+JSON → `handle_stale_restore(..., confirmed=True)` revokes 2 sessions → token1 denied → `revoke_all_sessions` also works; `health` without backup → `not_checked`; explicit path via `--check-stale /path` works; full `discover` 1014 OK 17 skipped.
+- **Docs:** This entry; `BACKUP_AND_RECOVERY.md` is stale-mitigation authority; `backup.py` is enforcement source.
+
+## P0-5 — Username display name separation (2026-11-17, arena/4bd4230e-ai-earn)
+
+- **Branch:** `arena/4bd4230e-ai-earn` at `P0-5`, `LATEST 28`, `1014 OK / 17 skipped` (288s), `compileall OK`.
+- **Motivation:** `_USERNAME` `[a-z0-9_]{3,32}` rejects real names like `Ayush Test`; audit P0-5 flagged need for UI display name separate from login/isolation.
+- **Implementation:**
+  - `ai_earn/auth_storage.py` `SCHEMA 1` still version 1: added `display_name TEXT CHECK(display_name IS NULL OR (length BETWEEN 1 AND 64 AND trim>0))` to `_SCHEMA` and migration `ALTER TABLE ADD COLUMN` for existing v1 DBs (version stays 1, backward compat, 0600/ACL retained).
+  - `ai_earn/auth.py` added `_display_name` validator (1..64, not whitespace), `register(username, password, display_name=None)` inserts `display_name`, `profile(token)` now returns `{"id","username","display_name"}`, new `set_display_name(token, display_name, confirmed=True)` with audit `display_name_updated` (confirmed gate, never used for `login`/`_subject` isolation).
+  - `ai_earn/dashboard_metrics.py` `DashboardMetrics.get` now fetches `display_name`/`username` via `profile` before locks (avoids deadlock with `_authorized_transaction`) and includes `result["account"]={"id":owner,"username":username,"display_name":display_name}` (owner_id remains `account.id`, never display_name).
+  - `ai_earn/dashboard_cli.py` snapshot already includes `metrics.account` (no extra change needed, display_name flows through).
+- **Verification:** Disposable `private` dir: `register alice display_name="Ayush Test"` ok, `register bobby` no display_name ok, empty/"x"*65/whitespace blocked, uppercase `Ayush_test` username blocked, `login Ayush Test` blocked (must use `alice`), `profile` shows `display_name:"Ayush Test"`, `bobby` None, `set_display_name` + `clear` + `DashboardMetrics.get` returns `account:{username:alice, display_name:Ayush Test}` and `id` is owner_id (not display_name), old DB without display_name column auto-migrates on open and then registers with display_name; full `discover` 1014 OK 17 skipped.
+- **Docs:** This entry; `auth_storage`/`auth` are source; `dashboard_metrics` includes UI name only.
 

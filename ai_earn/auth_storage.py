@@ -9,9 +9,11 @@ from typing import Iterator
 
 
 SCHEMA_VERSION = 1
+# P0-5 display_name added as nullable, 1..64 chars, whitespace trimmed, never used for isolation
 _SCHEMA = (
     """CREATE TABLE accounts (
         id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE,
+        display_name TEXT CHECK(display_name IS NULL OR (length(display_name) BETWEEN 1 AND 64 AND length(trim(display_name)) > 0)),
         password_salt BLOB NOT NULL, password_hash BLOB NOT NULL,
         password_iterations INTEGER NOT NULL, recovery_hash BLOB NOT NULL,
         created_at INTEGER NOT NULL
@@ -65,6 +67,13 @@ class AuthStorage:
                     connection.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
                 elif version != SCHEMA_VERSION:
                     raise StorageError("Unsupported authentication database schema; no changes made.")
+                # P0-5: ensure display_name column exists for existing v1 DBs (version stays 1, no bump)
+                try:
+                    cols = [row[1] for row in connection.execute("PRAGMA table_info(accounts)").fetchall()]
+                    if "display_name" not in cols:
+                        connection.execute("ALTER TABLE accounts ADD COLUMN display_name TEXT CHECK(display_name IS NULL OR (length(display_name) BETWEEN 1 AND 64 AND length(trim(display_name)) > 0))")
+                except sqlite3.Error:
+                    pass
         except sqlite3.Error as exc:
             raise StorageError("Authentication database could not be initialized.") from exc
 

@@ -37,6 +37,20 @@ def _username(value: str) -> str:
     return value
 
 
+def _display_name(value: str | None) -> str | None:
+    """Validate UI display name (1..64 chars, not whitespace-only), never used for isolation."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise AuthError("Display name must be 1–64 characters.")
+    if not 1 <= len(value) <= 64:
+        raise AuthError("Display name must be 1–64 characters.")
+    if len(value.strip()) == 0:
+        raise AuthError("Display name must not be empty or whitespace only.")
+    # Control chars disallowed? Keep simple: allow any printable unicode, bound length already.
+    return value
+
+
 def _password(value: str) -> bytes:
     if not isinstance(value, str) or not 12 <= len(value) <= 256:
         raise AuthError("Password must contain 12–256 characters.")
@@ -92,9 +106,11 @@ class AuthService:
         self.storage = storage
         self.clock = clock
 
-    def register(self, username: str, password: str) -> str:
+    def register(self, username: str, password: str, display_name: str | None = None) -> str:
         username = _username(username)
         secret = _password(password)
+        # display_name is UI only, never used for login or isolation
+        display_name = _display_name(display_name)
         recovery = secrets.token_urlsafe(32)
         result = "ok"
         with self.storage.transaction() as conn:
@@ -109,8 +125,8 @@ class AuthService:
                 salt = secrets.token_bytes(16)
                 password_hash = _derive(secret, salt, PASSWORD_ITERATIONS)
                 conn.execute(
-                    "INSERT INTO accounts(id,username,password_salt,password_hash,password_iterations,recovery_hash,created_at) VALUES(?,?,?,?,?,?,?)",
-                    (account_id, username, salt, password_hash, PASSWORD_ITERATIONS, _token_hash(recovery), now),
+                    "INSERT INTO accounts(id,username,display_name,password_salt,password_hash,password_iterations,recovery_hash,created_at) VALUES(?,?,?,?,?,?,?,?)",
+                    (account_id, username, display_name, salt, password_hash, PASSWORD_ITERATIONS, _token_hash(recovery), now),
                 )
                 _audit(conn, now, "registration", account_id)
         if result == "limited":
@@ -153,14 +169,14 @@ class AuthService:
             raise AuthError("Invalid username or password.")
         return token
 
-    def profile(self, token: str, account_id: str | None = None) -> dict[str, str]:
+    def profile(self, token: str, account_id: str | None = None) -> dict[str, str | None]:
         digest = _token_hash(token)
         if digest is None:
             raise AccessDenied("Authentication required.")
         with self.storage.transaction() as conn:
             now = int(self.clock())
             session = conn.execute(
-                "SELECT accounts.id, accounts.username FROM sessions JOIN accounts ON accounts.id=sessions.account_id WHERE sessions.token_hash=? AND sessions.revoked_at IS NULL AND sessions.expires_at>?",
+                "SELECT accounts.id, accounts.username, accounts.display_name FROM sessions JOIN accounts ON accounts.id=sessions.account_id WHERE sessions.token_hash=? AND sessions.revoked_at IS NULL AND sessions.expires_at>?",
                 (digest, now),
             ).fetchone()
             if not session or (account_id is not None and session["id"] != account_id):
@@ -168,10 +184,30 @@ class AuthService:
                 denied = True
             else:
                 denied = False
-                result = {"id": session["id"], "username": session["username"]}
+                result = {"id": session["id"], "username": session["username"], "display_name": session["display_name"]}
         if denied:
             raise AccessDenied("Access denied.")
         return result
+
+    def set_display_name(self, token: str, display_name: str | None, *, confirmed: bool = False) -> None:
+        """Update display name for the signed-in account (UI only, no isolation change)."""
+        if confirmed is not True:
+            raise AuthError("Explicit confirmation is required.")
+        display_name = _display_name(display_name)
+        digest = _token_hash(token)
+        if digest is None:
+            raise AccessDenied("Authentication required.")
+        with self.storage.transaction() as conn:
+            now = int(self.clock())
+            account = conn.execute(
+                "SELECT accounts.id FROM sessions JOIN accounts ON accounts.id=sessions.account_id WHERE sessions.token_hash=? AND sessions.revoked_at IS NULL AND sessions.expires_at>?",
+                (digest, now),
+            ).fetchone()
+            if not account:
+                _audit_throttled(conn, now, "access_denied")
+                raise AccessDenied("Access denied.")
+            conn.execute("UPDATE accounts SET display_name=? WHERE id=?", (display_name, account["id"]))
+            _audit(conn, now, "display_name_updated", account["id"])
 
     def logout(self, token: str) -> None:
         digest = _token_hash(token)
