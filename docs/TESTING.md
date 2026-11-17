@@ -392,12 +392,42 @@ All new tests assert failure conditions via `assertRaises` (`AccessDenied`, `Pro
 | End-to-end tests | `test_e2e_journey`, `test_phase3_recovery_rehearsal`, `test_tracker_cli`, `test_phase3_completion` | full flow register→opp→service→customer→ledger→analytics→payment webhook→AI approval→snapshot→backup restores, plus `AccessDenied`/`ProviderError` etc. |
 | Windows-specific tests | `test_windows_security`, `test_windows_auth`, `test_windows_phase3_gate`, `test_windows_terminal_*` | unsafe ACL fails closed, junction/reparse rejected, sidecar inherits private ACL, non-Windows skips, dirty checkout refused; **skipped on Linux (17)** is not pass |
 
-**Full suite run after Phase 16 (this branch `arena/a2b30614-ai-earn`, LATEST 28):**
+**Full suite run after Phase 16 + DoD final (this branch `arena/a2b30614-ai-earn`, LATEST 28):**
 
 - Command: `python -m compileall -q ai_earn tests tools && python -m unittest discover -s tests -v` (also `python -m tools.security_check` + `--audit` and `python -m ai_earn health --json` in CI)
 - Platform: `Linux e2b.local 6.1.158+ #1 SMP PREEMPT_DYNAMIC Mon May 11 18:48:24 UTC 2026 x86_64 GNU/Linux`, `Python 3.11.2`, `STD-library only, no requirements.txt`
-- Commit: `40a16c9966d6af9226075ed5631ccd769a91aead` (`40a16c9`) on branch `arena/a2b30614-ai-earn` — `LATEST 28`, `python -m compileall -q ai_earn tests tools` OK
-- Result: **Ran 963 tests in 176.692s — OK (skipped=17)** on Linux sandbox at that commit (verified before push; CI re-runs). `Passed 946`, `Failed 0`, `Skipped 17`, `Total 963`. `compileall` OK, `tools/security_check` pass (secret scan + `0.0.0.0` guard), `health --json` `production_ready:false`.
+- Commit: `40a16c9966d6af9226075ed5631ccd769a91aead` (`40a16c9`) on branch `arena/a2b30614-ai-earn` — `LATEST 28`, `python -m compileall -q ai_earn tests tools` OK (Phase 16)
+- Result (Phase 16): **Ran 963 tests in 176.692s — OK (skipped=17)** `Passed 946` `Failed 0` `Skipped 17` `Total 963`.
+
+**Full suite run after DoD final (LATEST 28 + 20 DoD):**
+
+- Command: `python -m unittest discover -s tests -v` + `tests.test_dod_final` 20 tests
+- Platform: `Linux e2b.local 6.1.158+` Python 3.11.2
+- Result: **Ran 983 tests in 199.132s — OK (skipped=17)** `Passed 966` `Failed 0` `Skipped 17` `Total 983`. `compileall OK`, `tools/security_check` pass, `health --json production_ready:false`. DoD final 20 tests prove 20 workflows end-to-end with failure conditions (AccessDenied, ProviderError, ApprovalError, etc.), no fabricated data (empty bob metrics 0, draft_unverified, synthetic vs verified separation, no hardcoded amounts, no auto-send).
+
+**DoD final coverage (20 items → test_dod_final.py 20 tests):**
+1 Register/login → test_01 (wrong pass, bad token, logout)
+2 Manage account/private data → test_02 (replace_recovery_code confirmed, export redacted, health no leak)
+3 Discover genuine opportunities → test_03 (manual create, evidence_score, ToS reject, ranked+explain, isolation)
+4 Services → test_04 (create/publish/archive, invalid price, isolation)
+5 Proposals → test_05 (packages, proposals draft with delivery_days, idempotency, conflict)
+6 Customers → test_06 (create/contacted/converted, CSV, notes)
+7 Projects → test_07 (from opportunity, subtasks, review/approve, cycle detection)
+8 Execute/track tasks → test_08 (runner claim_next, logs, complete)
+9 AI drafts → test_09 (draft_unverified, injection isolation, read_only)
+10 Approve consequential → test_10 (requires approval, confirmed flag, emergency stop)
+11 Orders → test_11 (customer_orders create/confirm/fulfill + order_drafts)
+12 Invoices → test_12 (create/issued pdf_hash/paid, invalid re-issue)
+13 Payment events → test_13 (HMAC, reconcile, amount/sig fails, live blocked at ProviderConfig)
+14 Expenses/fees → test_14 (ledger net, eleven_concepts verified/synthetic, isolation)
+15 Verified reports → test_15 (funnel, revenue_analytics, MRR, empty zeros, time-range)
+16 Connect external → test_16 (available_connectors, create_connector api_key, normalize bounded, never log token, manual fallback)
+17 Recover backups → test_17 (backup_to never overwrite, list 27, verify, health with_backups, StateRecoveryComparison)
+18 Dashboard → test_18 (snapshot read_only 1MB, format, html/css/js router, aria, no fetch)
+19 Export → test_19 (export_user_data redacted 50MB, isolation, bad token)
+20 No fabricated/unsafe → test_20 (empty metrics 0, draft_unverified, managed pair direct claim fails, ledger synthetic)
+All 20 assert failure via `assertRaises` and success via equality; no existing assertion weakened; disposable tempfile + PASSWORD_ITERATIONS=1000 only in test setup.
+
 - Windows: `17` skipped tests are `test_windows_auth` 17 cases requiring Win32 ACL APIs and a local ACL-capable drive; they are not executed on Linux. A skipped test is not a passing test. Windows verification requires `python -m unittest discover -v` on a clean Windows checkout (NTFS fixed drive, `create_private_directory`, Python 3.11/3.13) plus `tools/windows_phase3_gate` / `tools/windows_candidate_smoke` as documented in `docs/WINDOWS_TESTING.md`. Latest user-reported Windows gate was at `f26c6b9` (pre-Phase 16, 611 tests 564 passed 47 skipped); Phase 16 Windows gate not yet user-reported.
 
 **Known limitations (not weakened):** Suite is disposable-data only (temporary `private` dirs, never real user data). Audit is not tamper-evident; coordinated raw DB edits can evade checks. `auth`/`state` are separate commits, so ambiguity after `state` commit remains (retry with same `operation_key` acknowledges). Financial amounts are owner-asserted/local `unverified`, payment is Razorpay/Stripe sandbox HMAC-only (no bank settlement, live blocked). AI tools are stub drafts (`draft_unverified`), require explicit `ApprovalQueue` for consequential. Health `production_ready` stays `false` until `docs/PRODUCTION_READINESS.md` 11-item manual sign-off. `pip-audit` placeholder reports clean because `stdlib-only`. Windows ACL and recovery not verified on Linux. No network, no external secret vault, no `GET /healthz` listener yet.
