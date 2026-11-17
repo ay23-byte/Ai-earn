@@ -607,3 +607,13 @@ Each phase depends on the immediately previous phase passing (including document
 - **Verification:** `status`/`health --json` unchanged, `readiness.overall({})` returns `health_ok:false offline_ready:true composed:false live_blocked:true`, with disposable healthy DB `health_ok:true offline:true composed:true`; full `discover` 1014 OK 17 skipped.
 - **Docs:** This entry; `readiness.py` is single source for offline/live docs.
 
+## P0-3 — Backup encryption & retention (2026-11-17, arena/4bd4230e-ai-earn)
+
+- **Branch:** `arena/4bd4230e-ai-earn` at `e732bd8`, `LATEST 28`, `1014 OK / 17 skipped` (273s), `compileall OK`, `security_check --audit` clean.
+- **Motivation:** Audit P0-3: `RETENTION_DAYS=30` guidance only, no enforcement; `*.sqlite3` + `dashboard-snapshot-*.json` plaintext 0600; no verified encrypt->decrypt drill; `health --with-backups` showed 21 vs 27 drift.
+- **Implementation:**
+  - `ai_earn/backup.py` 118→524 LOC: add STUB authenticated encryption (stdlib HMAC-SHA256 keystream, NOT production) `encrypt_backup(path, key|key_id, confirmed)` -> `.enc`/`.age` (50MB cap, never overwrite/logs, `AI_EARN_BACKUP_KEY_{id}`/`AI_EARN_BACKUP_KEY` via `secrets.validate_secret`), `decrypt_backup(enc, dest, key|key_id, confirmed)` HMAC+hash verified, never overwrites; `list_prunable_backups` (ephemeral `*.backup-*`/`*.bak`/`dashboard-snapshot-*.json` sorted by mtime, excludes `before-v*.sqlite3`/`state.sqlite3`/`auth.sqlite3`/`*.enc/.age`), `prune_backups(keep=7, dry_run=True, confirmed)` dry-run→actual, chain never deleted, `backup_retention_status`.
+  - `docs/BACKUP_AND_RECOVERY.md` retention & encryption section (P0-3): chain 27 protected forever, prunable set, dry-run drill, `keep=27+7` model (27 chain protected + 7 ephemeral kept), stub `encrypt_backup` example, `expected 27` fix.
+- **Verification:** Disposable private `state.sqlite3` v28 (27 chain) + 5 `*.backup-*` + snapshots → `prune keep=2 dry_run 3 would` → `pruned 3` chain 27 intact; `state.sqlite3 -> state.sqlite3.enc` (839k) -> decrypt -> `verify_backup ok` + `StateStorage` ok; `auth.sqlite3` encrypt via `key_id` env -> decrypt -> `AuthStorage` ok; wrong key -> HMAC fail; `snapshot.json` round-trip ok; existing destinations never overwritten; full `discover` 1014 OK 17 skipped.
+- **Docs:** This entry; `BACKUP_AND_RECOVERY.md` is retention authority; `backup.py` is retention enforcement source.
+
