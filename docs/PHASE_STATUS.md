@@ -449,3 +449,28 @@ Each phase depends on the immediately previous phase passing (including document
 - **Status:** PASS_WITH_DOCUMENTED_LIMITATIONS. Phase 16 production hardening shipped at `9812b80` (127.0.0.1-only `production_config`, `secrets` generate/validate/redact, `structured_logging` allowlist, `error_reporting` SafeError 8-hex, `backup` verified 27 chain, `monitoring` poll, `data_export` 50MB redacted 0o600, `account_deletion` DELETE <8>, `data_cli` export/delete, `security_check` secret+0.0.0.0+pipaudit, CI hardening, `health`/`doctor`/`dashboard snapshot` actual). API contract 14 + E2E 2 added at `40a16c9`/`6f4bacc` (15 categories, failure `assertRaises` never weaken). Full suite 963/17. This doc-sync pass (2026-11-17) refreshes all 15 required docs to `arena/a2b30614-ai-earn` LATEST 28, 963 tests, disposable local CLI only, no live payments, without claiming planned as done. Verified `python -m compileall -q ai_earn tests tools` OK, `python -m unittest discover` 963 OK skipped=17 176.692s, `tools.security_check`+`--audit` OK, `health --json production_ready:false`.
 - **Files changed:** `docs/MASTER_IMPLEMENTATION_PLAN.md`, `ARCHITECTURE.md`, `FEATURE_MATRIX.md`, `PHASE_STATUS.md`, `SECURITY_REVIEW.md`, `DATABASE.md`, `API.md`, `AI_ASSISTANT.md`, `PAYMENTS.md`, `INTEGRATIONS.md`, `DEPLOYMENT.md`, `BACKUP_AND_RECOVERY.md`, `USER_GUIDE.md`, `README.md`, plus prior `TESTING.md` Phase 16 append. No source change in this doc-sync pass.
 - **Auditor:** autonomous principal agent (arena/a2b30614-ai-earn, base 9d77101, LATEST 28).
+## Milestone 1 — Repository audit and baseline tests (re-audit 2026-11-17, controlled execution)
+
+- **Status:** PASS_WITH_DOCUMENTED_LIMITATIONS (re-audited). Branch `arena/a2b30614-ai-earn` base `9d77101`, LATEST 28, `python -m compileall -q ai_earn tests tools` OK, `tools.security_check` + `--audit` OK, `health --json` `production_ready:false`, full suite **963 OK skipped=17** (946 passed) Linux Python 3.11.2, 27 docs present, 15 required docs describe actual not planned. No dangerous rewrite, no branch creation, no overwrite of uncommitted work (working tree clean). This milestone satisfies Execution Strategy M1 steps 1-10.
+- **Steps executed (2026-11-17):**
+  1. Relevant tests: `python -m compileall -q ai_earn tests tools` OK; `python -m unittest discover -s tests 2>&1 | tail` 963 OK.
+  2. Full suite: 963 tests 177.805s OK skipped=17 (see `docs/TESTING.md` Phase 16 section).
+  3. Regressions: none; 17 skips are expected Windows ACL (not counted as pass).
+  4. Documentation: verified 15 required docs present and current (LATEST 28, 963, disposable CLI, no live payments); `README.md` 125L, `ARCHITECTURE.md` header 2026-11-17 LATEST 28, `FEATURE_MATRIX.md` 963/28, `DATABASE.md` v1→28, `API.md` no HTTP actual CLI, etc. No rewrite, only this additive entry.
+  5. PHASE_STATUS.md: this entry appended, Updated line already 2026-11-17 LATEST 28.
+  6. FEATURE_MATRIX.md: already 2026-11-17 Generated LATEST 28 963, no change needed.
+  7. Security review: `tools/security_check` forbids `BEGIN PRIVATE`/`sk-`/`0.0.0.0` exposure, `production_config` validates 127.0.0.1-only, secrets redacted, health `production_ready:false` until 11-item sign-off; see `docs/SECURITY_REVIEW.md` + `PRODUCTION_READINESS.md` (all 11 unchecked, live blocked).
+  8. Completed: verified inventory (`ai_earn/` 44 modules incl. connectors, `tests/` 38 suites, `dashboard/` SPA, `docs/` 27 files, `tools/security_check`), baseline green, no uncommitted work overwritten, git status clean before and after.
+  9. Remaining limitations: 17 Windows ACL tests skipped on Linux (require NTFS + Win32), audit not tamper-evident (coordinated DB edit can evade), auth/state commits separate (ambiguous after state commit, retry same `operation_key`), financial amounts local unverified/synthetic (11-concept `net_realized_synthetic` not bank-verified, sandbox HMAC only, live blocked), no HTTP API, no external secret vault, no `GET /healthz` listener, Windows Phase 16 gate not yet user-reported, real-data recovery disposable-only, `production_ready:false`.
+  10. Commit: this entry committed as `Milestone 1: repository audit and baseline tests (963 tests)` with evidence above. Next milestone: M2 Phase 3 database/state/auditability completion (already DONE experimental hardened per table, but re-verified here; no new migration in this step, order preserved per dependencies).
+- **Evidence commands (reproduced this session):**
+  ```
+  git status # clean
+  python -m compileall -q ai_earn tests tools # OK
+  python -m tools.security_check && python -m tools.security_check --audit # OK
+  python -m unittest discover -s tests -v 2>&1 | tail -n 5 # Ran 963 OK skipped=17
+  python -m ai_earn health --json # production_ready:false LATEST 28
+  ls docs/*.md README.md | wc -l # 27 + overview
+  ```
+- **Architectural dependency note:** Order not adjusted; M1 has no deps, M2 already shipped (v28) but was built incrementally after M1 per plan, preserving backup-first migrations (`v1→v28` 27 backups). No rewrite, migrations not skipped.
+
