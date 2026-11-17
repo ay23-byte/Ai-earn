@@ -1,3 +1,4 @@
-# Pinned static-analysis tools; runtime remains Python-stdlib-only.
+# Pinned development quality and security tools; runtime remains Python-stdlib-only.
 ruff==0.17.5
 mypy==2.4.1
+pip-audit==2.10.1
