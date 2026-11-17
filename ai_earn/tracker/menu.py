@@ -216,351 +216,74 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                 from .ledger import handle_ledger
                 handle_ledger(ledger, token, stdin, out)
             elif has_follow and choice == "23":
-                cid = _read(stdin, out, "Customer ID: ").strip()
-                due_raw = _read(stdin, out, "Due at unix timestamp (0 for none): ").strip()
-                if due_raw == "":
-                    due_raw = "0"
-                try:
-                    due = int(due_raw)
-                except ValueError:
-                    raise ValueError("Due must be integer timestamp or 0.")
-                note = _read(stdin, out, "Note (0-500, empty for none): ")
-                ident = followups.create(token, cid, due, note, operation_key=_key())
-                out.write(f"Created followup pending: {ident}\n")
+                from .followups import handle_add_followup
+                handle_add_followup(followups, token, stdin, out)
             elif has_follow and choice == "24":
-                cid_f = _read(stdin, out, "Filter customer ID (empty for all): ").strip()
-                if cid_f == "":
-                    cid_f = None
-                status_f = _read(stdin, out, "Filter status [pending/completed/cancelled or empty]: ").strip()
-                if status_f == "":
-                    status_f = None
-                cursor = None
-                while True:
-                    entries = followups.list(token, after_id=cursor, limit=50, customer_id=cid_f, status=status_f)
-                    for item in entries:
-                        out.write(f"{item['id']} | cust:{item['customer_id'][:8]} | due:{item['due_at']} | {item['status']} | {item['note'][:40]}\n")
-                    if len(entries) < 50:
-                        break
-                    if not _confirm_yes(stdin, out, "More? Type YES: "):
-                        break
-                    cursor = entries[-1]["id"]
-                if cursor is None and not entries:
-                    out.write("No followups.\n")
+                from .followups import handle_list_followups
+                handle_list_followups(followups, token, stdin, out)
             elif has_follow and choice == "25":
-                ident = _read(stdin, out, "Followup ID: ").strip()
-                item = followups.get(token, ident)
-                out.write(f"Current: cust:{item['customer_id'][:8]} | due:{item['due_at']} | {item['status']} | {item['note'][:40]}\n")
-                out.write("Transitions: 1 completed  2 cancelled\n")
-                tchoice = _read(stdin, out, "Choose (1-2) or empty to cancel: ").strip()
-                if tchoice == "":
-                    out.write("No change.\n")
-                    continue
-                if tchoice == "1":
-                    out.write("Complete followup?\n")
-                    if not _confirm_yes(stdin, out, "Type YES to confirm: "):
-                        out.write("No change.\n")
-                        continue
-                    followups.completed(token, ident, operation_key=_key())
-                    out.write("Followup completed.\n")
-                elif tchoice == "2":
-                    out.write("Cancel followup?\n")
-                    if not _confirm_yes(stdin, out, "Type YES to confirm: "):
-                        out.write("No change.\n")
-                        continue
-                    followups.cancelled(token, ident, operation_key=_key())
-                    out.write("Followup cancelled.\n")
-                else:
-                    out.write("Invalid choice.\n")
+                from .followups import handle_manage_followup
+                handle_manage_followup(followups, token, stdin, out)
             elif has_follow and has_cust and choice == "26":
-                out.write("Paste CSV text (header name,contact,source). End with a line containing only '.'\n")
-                lines = []
-                while True:
-                    line = _read(stdin, out, "")
-                    if line == ".":
-                        break
-                    lines.append(line)
-                csv_text = "\n".join(lines)
-                if not csv_text.strip():
-                    out.write("No CSV provided.\n")
-                else:
-                    pref = _read(stdin, out, "Operation key prefix (1-64, for idempotency): ").strip()
-                    if pref == "":
-                        pref = "csv_import"
-                    result = customers.import_csv(token, csv_text, operation_key_prefix=pref)
-                    out.write(f"CSV import: {len(result['created'])} created\n")
-                    for ident in result["created"]:
-                        out.write(f"  {ident}\n")
+                from .followups import handle_import_csv
+                handle_import_csv(customers, token, stdin, out)
             elif has_follow and has_cust and choice == "27":
-                csv_text = customers.export_csv(token)
-                out.write("CSV export:\n")
-                out.write(csv_text + "\n")
+                from .followups import handle_export_csv
+                handle_export_csv(customers, token, stdin, out)
             elif has_inv and choice == "28":
-                oid = _read(stdin, out, "Order ID (order_drafts): ").strip()
-                ident = invoices.create(token, oid, operation_key=_key())
-                out.write(f"Created invoice draft: {ident}\n")
+                from .invoices import handle_add_invoice
+                handle_add_invoice(invoices, token, stdin, out)
             elif has_inv and choice == "29":
-                status_f = _read(stdin, out, "Filter status [draft/issued/paid/overdue/void or empty]: ").strip()
-                if status_f == "":
-                    status_f = None
-                oid_f = _read(stdin, out, "Filter order ID (empty for all): ").strip()
-                if oid_f == "":
-                    oid_f = None
-                cursor = None
-                while True:
-                    entries = invoices.list(token, after_id=cursor, limit=50, status=status_f, order_id=oid_f)
-                    for item in entries:
-                        pdf_note = "PDF" if item['pdf_hash'] is not None else "no PDF"
-                        out.write(f"{item['id']} | {item['invoice_number']} | order:{item['order_id'][:8]} | INR {item['amount_paise'] // 100}.{item['amount_paise'] % 100:02d} | {item['status']} | {pdf_note}\n")
-                    if len(entries) < 50:
-                        break
-                    if not _confirm_yes(stdin, out, "More? Type YES: "):
-                        break
-                    cursor = entries[-1]["id"]
-                if cursor is None and not entries:
-                    out.write("No invoices.\n")
+                from .invoices import handle_list_invoices
+                handle_list_invoices(invoices, token, stdin, out)
             elif has_inv and choice == "30":
-                ident = _read(stdin, out, "Invoice ID: ").strip()
-                item = invoices.get(token, ident)
-                pdf_note = "PDF stub available" if item['pdf_hash'] is not None else "no PDF (draft/void)"
-                out.write(f"Current: {item['invoice_number']} | order:{item['order_id'][:8]} | INR {item['amount_paise'] // 100}.{item['amount_paise'] % 100:02d} | {item['status']} | {pdf_note}\n")
-                out.write("Transitions: 1 issued  2 paid  3 overdue  4 void  5 pdf\n")
-                tchoice = _read(stdin, out, "Choose (1-5) or empty to cancel: ").strip()
-                if tchoice == "":
-                    out.write("No change.\n")
-                    continue
-                if tchoice == "1":
-                    out.write("Issue invoice? PDF stub hash will be stored.\n")
-                    if not _confirm_yes(stdin, out, "Type YES to confirm: "):
-                        out.write("No change.\n")
-                        continue
-                    invoices.issued(token, ident, operation_key=_key())
-                    out.write("Invoice issued (PDF stub).\n")
-                elif tchoice == "2":
-                    out.write("Mark paid?\n")
-                    if not _confirm_yes(stdin, out, "Type YES to confirm: "):
-                        out.write("No change.\n")
-                        continue
-                    invoices.paid(token, ident, operation_key=_key())
-                    out.write("Invoice paid.\n")
-                elif tchoice == "3":
-                    out.write("Mark overdue?\n")
-                    if not _confirm_yes(stdin, out, "Type YES to confirm: "):
-                        out.write("No change.\n")
-                        continue
-                    invoices.overdue(token, ident, operation_key=_key())
-                    out.write("Invoice overdue.\n")
-                elif tchoice == "4":
-                    out.write("Void invoice?\n")
-                    if not _confirm_yes(stdin, out, "Type YES to confirm: "):
-                        out.write("No change.\n")
-                        continue
-                    invoices.voided(token, ident, operation_key=_key())
-                    out.write("Invoice voided.\n")
-                elif tchoice == "5":
-                    try:
-                        stub = invoices.pdf_stub(token, ident)
-                        out.write(f"PDF stub ({len(stub)} bytes):\n")
-                        out.write(stub.decode('utf-8', errors='replace') + "\n")
-                        out.write(f"Hash {item['pdf_hash'].hex() if item['pdf_hash'] else 'none'}\n")
-                    except Exception as e:
-                        out.write(str(e) + "\n")
-                else:
-                    out.write("Invalid choice.\n")
+                from .invoices import handle_manage_invoice
+                handle_manage_invoice(invoices, token, stdin, out)
             elif has_prov and choice == "31":
-                provider = _read(stdin, out, "Provider [razorpay/stripe]: ").strip() or "razorpay"
-                amt_raw = _read(stdin, out, "Amount INR (e.g. 5000 or 2500.50): ").strip()
-                amt = _paise(amt_raw)
-                ident = provider_orders.create_order(token, amt, operation_key=_key())
-                out.write(f"Created provider order ({provider}): {ident}\n")
+                from .providers import handle_add_provider
+                handle_add_provider(provider_orders, token, stdin, out)
             elif has_prov and choice == "32":
-                status_f = _read(stdin, out, "Filter status [created/authorized/captured/settled/refunded/failed or empty]: ").strip()
-                if status_f == "":
-                    status_f = None
-                cursor = None
-                while True:
-                    entries = provider_orders.list(token, after_id=cursor, limit=50, status=status_f)
-                    for item in entries:
-                        out.write(f"{item['id']} | {item['provider_order_id']} | {item['provider']}/{item['mode']} | INR {item['amount_paise'] // 100}.{item['amount_paise'] % 100:02d} | {item['status']}\n")
-                    if len(entries) < 50:
-                        break
-                    if not _confirm_yes(stdin, out, "More? Type YES: "):
-                        break
-                    cursor = entries[-1]["id"]
-                if cursor is None and not entries:
-                    out.write("No provider orders.\n")
+                from .providers import handle_list_providers
+                handle_list_providers(provider_orders, token, stdin, out)
             elif has_prov and choice == "33":
-                out.write("Webhook: paste raw JSON body (single line). Signature must be HMAC of raw body.\n")
-                body_raw = _read(stdin, out, "Raw body: ")
-                sig = _read(stdin, out, "Signature (hex for razorpay, t=...,v1=... for stripe): ").strip()
-                try:
-                    raw = body_raw.encode('utf-8')
-                    result = provider_orders.handle_webhook(token, raw, sig, operation_key=_key())
-                    out.write(f"Webhook processed: event {result['event_id']} -> {result['new_status']} for order {result['order_id'][:8]}\n")
-                except Exception as e:
-                    out.write(str(e) + "\n")
+                from .providers import handle_webhook
+                handle_webhook(provider_orders, token, stdin, out)
             elif has_ai and choice == "34":
-                try:
-                    tools = ai_assistant.registry.list()
-                    for tl in tools:
-                        out.write(f"{tl['name']} | {tl['scope']} | {tl['description'][:80]}\n")
-                    if not tools:
-                        out.write("No tools registered.\n")
-                except Exception as e:
-                    out.write(str(e) + "\n")
+                from .ai import handle_list_tools
+                handle_list_tools(ai_assistant, token, stdin, out)
             elif has_ai and choice == "35":
-                tname = _read(stdin, out, "Tool name (consequential only, e.g. publish_service): ").strip()
-                args_raw = _read(stdin, out, "Args JSON (e.g. {\"service_id\": \"...\"}): ").strip()
-                import json as _json
-                try:
-                    args = _json.loads(args_raw) if args_raw else {}
-                    apid = ai_assistant.queue.request(token, tname, args, operation_key=_key())
-                    out.write(f"Approval requested: {apid} (pending, expires in 15m)\n")
-                    out.write("Use 37 to approve/reject; 41 to execute after approval.\n")
-                except Exception as e:
-                    out.write(str(e) + "\n")
+                from .ai import handle_request_approval
+                handle_request_approval(ai_assistant, token, stdin, out)
             elif has_ai and choice == "36":
-                filt = _read(stdin, out, "Filter status [pending/approved/rejected/expired/revoked or empty]: ").strip()
-                if filt == "":
-                    filt = None
-                cursor = None
-                try:
-                    while True:
-                        entries = ai_assistant.queue.list(token, after_id=cursor, limit=20, status=filt)
-                        for item in entries:
-                            out.write(f"{item['id']} | {item['tool_name']} | {item['status']}->{item['effective_status']} | expires:{item['expires_at']} | {item['args_json'][:60]}\n")
-                        if len(entries) < 20:
-                            break
-                        if not _confirm_yes(stdin, out, "More? Type YES: "):
-                            break
-                        cursor = entries[-1]["id"]
-                    if cursor is None and not entries:
-                        out.write("No approvals.\n")
-                except Exception as e:
-                    out.write(str(e) + "\n")
+                from .ai import handle_list_approvals
+                handle_list_approvals(ai_assistant, token, stdin, out)
             elif has_ai and choice == "37":
-                apid = _read(stdin, out, "Approval ID: ").strip()
-                dec = _read(stdin, out, "Decision [approved/rejected]: ").strip()
-                try:
-                    out.write(f"Confirm {dec} for {apid}? This is explicit approval.\n")
-                    if not _confirm_yes(stdin, out, "Type YES to confirm: "):
-                        out.write("No change.\n")
-                    else:
-                        ai_assistant.queue.decide(token, apid, dec, confirmed=True, operation_key=_key())
-                        out.write(f"Approval {dec}.\n")
-                except Exception as e:
-                    out.write(str(e) + "\n")
+                from .ai import handle_decide_approval
+                handle_decide_approval(ai_assistant, token, stdin, out)
             elif has_ai and choice == "38":
-                apid = _read(stdin, out, "Approval ID to revoke: ").strip()
-                try:
-                    out.write(f"Revoke {apid}? This prevents future execution.\n")
-                    if not _confirm_yes(stdin, out, "Type YES to confirm: "):
-                        out.write("No change.\n")
-                    else:
-                        ai_assistant.queue.revoke(token, apid, operation_key=_key())
-                        out.write("Approval revoked.\n")
-                except Exception as e:
-                    out.write(str(e) + "\n")
+                from .ai import handle_revoke_approval
+                handle_revoke_approval(ai_assistant, token, stdin, out)
             elif has_ai and choice == "39":
-                prompt = _read(stdin, out, "Prompt (1-4096): ")
-                ext = _read(stdin, out, "External content (untrusted, empty for none): ")
-                if ext == "":
-                    ext = None
-                try:
-                    result = ai_assistant.chat(token, prompt, external_content=ext)
-                    out.write(f"AI draft (unverified, {result['model']}): {result['output'][:500]}\n")
-                    out.write(f"Policy: {result['policy']}\n")
-                    out.write("Note: external content treated as data, never as instruction; no consequential tool auto-executed.\n")
-                except Exception as e:
-                    out.write(str(e) + "\n")
+                from .ai import handle_ai_chat
+                handle_ai_chat(ai_assistant, token, stdin, out)
             elif has_ai and choice == "40":
-                out.write("Emergency: 1 stop  2 clear  (requires explicit YES)\n")
-                sub = _read(stdin, out, "Choice (1-2): ").strip()
-                try:
-                    if sub == "1":
-                        reason = _read(stdin, out, "Reason (0-500, empty for none): ")
-                        if not _confirm_yes(stdin, out, "Type YES to confirm EMERGENCY STOP: "):
-                            out.write("No change.\n")
-                        else:
-                            ai_assistant.queue.emergency_stop(token, confirmed=True, reason=reason, operation_key=_key())
-                            out.write("Emergency stop ACTIVE; consequential actions blocked.\n")
-                    elif sub == "2":
-                        if not _confirm_yes(stdin, out, "Type YES to confirm CLEAR emergency: "):
-                            out.write("No change.\n")
-                        else:
-                            ai_assistant.queue.emergency_clear(token, confirmed=True, operation_key=_key())
-                            out.write("Emergency cleared.\n")
-                    else:
-                        out.write("Invalid emergency choice.\n")
-                except Exception as e:
-                    out.write(str(e) + "\n")
+                from .ai import handle_emergency
+                handle_emergency(ai_assistant, token, stdin, out)
             elif has_ai and choice == "41":
-                tname = _read(stdin, out, "Tool name: ").strip()
-                args_raw = _read(stdin, out, "Args JSON: ").strip()
-                apid = _read(stdin, out, "Approval ID (required for consequential): ").strip()
-                if apid == "":
-                    apid = None
-                import json as _json2
-                try:
-                    args = _json2.loads(args_raw) if args_raw else {}
-                    result = ai_assistant.registry.execute(token, tname, args, ai_assistant._auth, ai_assistant._state, approval_id=apid)
-                    out.write(f"Executed {tname} -> {result.get('result','ok')} (verification:{result.get('verification')})\n")
-                    if 'note' in result:
-                        out.write(result['note'] + "\n")
-                except Exception as e:
-                    out.write(str(e) + "\n")
+                from .ai import handle_execute_tool
+                handle_execute_tool(ai_assistant, token, stdin, out)
             elif has_an and choice == "42":
-                from_ts = _read(stdin, out, "From unix ts (0 for all time): ").strip()
-                to_ts = _read(stdin, out, "To unix ts (empty for now): ").strip()
-                try:
-                    fts = int(from_ts) if from_ts else 0
-                    tts = int(to_ts) if to_ts else 4102444800
-                    summ = analytics.summary(token, from_ts=fts, to_ts=tts)
-                    out.write(f"Analytics summary {fts}->{tts} generated {summ['funnel']['generated_at']}\n")
-                    out.write(f"Funnel opp {summ['funnel'].get('opportunities', {}).get('total',0)} cust {summ['funnel'].get('customers', {}).get('total',0)} invoices {summ['funnel'].get('invoices', {}).get('total',0)}\n")
-                    out.write(f"Conversion opp vetted {summ['conversion'].get('opportunities', {}).get('vetted_rate',0):.2f} cust converted {summ['conversion'].get('customers', {}).get('converted_over_lead',0):.2f}\n")
-                    out.write(f"MRR total {summ['mrr']['total_paise']/100:.2f} INR over {summ['mrr']['months_with_income']} months avg {summ['mrr']['average_per_month_paise']/100:.2f}\n")
-                    out.write(f"Workload queued {summ['workload'].get('queued_tasks',0)} pending follow {summ['workload'].get('pending_followups',0)} net {summ['workload'].get('ledger_net_paise',0)/100:.2f}\n")
-                    out.write(f"Verification: {summ['funnel']['verification']} / {summ['mrr']['verification']} — no fabricated data.\n")
-                except Exception as e:
-                    out.write(str(e) + "\n")
+                from .analytics import handle_summary
+                handle_summary(analytics, token, stdin, out)
             elif has_an and choice == "43":
-                from_ts = _read(stdin, out, "From unix ts (0): ").strip()
-                to_ts = _read(stdin, out, "To unix ts (empty for max): ").strip()
-                try:
-                    fts = int(from_ts) if from_ts else 0
-                    tts = int(to_ts) if to_ts else 4102444800
-                    fun = analytics.funnel(token, from_ts=fts, to_ts=tts)
-                    out.write(f"Funnel {fts}->{tts}:\n")
-                    for k in ("opportunities","customers","invoices","provider_orders","services","communications"):
-                        if k in fun:
-                            out.write(f" {k}: {fun[k].get('total',0)} by {fun[k].get('by_status', fun[k].get('by_kind', {}))}\n")
-                except Exception as e:
-                    out.write(str(e) + "\n")
+                from .analytics import handle_funnel
+                handle_funnel(analytics, token, stdin, out)
             elif has_an and choice == "44":
-                from_ts = _read(stdin, out, "From unix ts (0): ").strip()
-                to_ts = _read(stdin, out, "To unix ts (empty for max): ").strip()
-                try:
-                    fts = int(from_ts) if from_ts else 0
-                    tts = int(to_ts) if to_ts else 4102444800
-                    mrr = analytics.mrr(token, from_ts=fts, to_ts=tts)
-                    out.write(f"MRR {fts}->{tts} total {mrr['total_paise']/100:.2f} INR months {mrr['months_with_income']} avg {mrr['average_per_month_paise']/100:.2f}\n")
-                    for mon, amt in sorted(mrr['monthly_buckets'].items()):
-                        out.write(f" {mon}: {amt/100:.2f}\n")
-                    out.write(mrr['note'] + "\n")
-                except Exception as e:
-                    out.write(str(e) + "\n")
+                from .analytics import handle_mrr
+                handle_mrr(analytics, token, stdin, out)
             elif has_an and choice == "45":
-                from_ts = _read(stdin, out, "From unix ts (0): ").strip()
-                to_ts = _read(stdin, out, "To unix ts (empty for max): ").strip()
-                try:
-                    fts = int(from_ts) if from_ts else 0
-                    tts = int(to_ts) if to_ts else 4102444800
-                    csv_text = analytics.export_csv(token, from_ts=fts, to_ts=tts)
-                    out.write("CSV export (first 2000 chars):\n")
-                    out.write(csv_text[:2000] + ("...\n" if len(csv_text)>2000 else "\n"))
-                    out.write(f"Total {len(csv_text)} chars, {csv_text.count(chr(10))} lines.\n")
-                except Exception as e:
-                    out.write(str(e) + "\n")
+                from .analytics import handle_export_analytics
+                handle_export_analytics(analytics, token, stdin, out)
             elif has_conn and choice == "46":
                 out.write("Connectors (stub sandbox, no network):\n")
                 out.write(" - gmail-stub (Gmail, snippets) | drive-stub (Drive files) | github-stub (GitHub issues) | manual-fallback\n")
