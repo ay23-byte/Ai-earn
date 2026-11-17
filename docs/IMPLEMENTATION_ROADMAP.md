@@ -158,6 +158,13 @@ P0 (Critical) → P1 (Core) → P2 (Business) ─┬─→ P3 (AI) ─┐
 
 ---
 
+## Execution log (updated 2026-11-16)
+
+- **P0-1 through P0-5:** completed in prior reviewed work on the active PR lineage (central readiness contract, fail-closed recovery/setup, backup/security hardening, stale-backup controls, display-name separation). See merged commits and the audit trail for exact implementation details.
+- **P1-1:** completed. `ai_earn/tracker_cli.py` is a compatibility shim; the 1–82 tracker menu is split among focused modules under `ai_earn/tracker/`.
+- **P1-2:** completed in this stage. Schema DDL/indexes and apply operations for upgrades v2–v28 are now in immutable `ai_earn/migrations/vNN.py` modules. The `StateStorage` validation/locking/backup boundary is unchanged; `_apply_vN` aliases remain for controlled fault-injection compatibility. Added `tests/test_migration_modules.py` and `docs/STATE_MIGRATIONS.md`. Focused migration, crash-recovery, recovery-drill, task, and core workflow tests pass. Full suite verification is pending at the end of this implementation stage.
+- **P1-3 onward / P2–P5:** still open; no claim of overall completion or production readiness is made.
+
 ## Effort & Dependencies
 
 | Phase | Effort | Depends | Risk if skipped |
