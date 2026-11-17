@@ -1,4 +1,4 @@
-"""Tests for M14 Frontend SPA (vanilla hash router, 17 sections, real snapshot data, a11y, theme)."""
+"""Tests for M14+M15 Frontend SPA (vanilla hash router, 17 sections, real snapshot data, a11y, theme)."""
 import os
 import re
 import unittest
@@ -10,12 +10,20 @@ APP_JS = ROOT / "dashboard" / "app.js"
 APP_CSS = ROOT / "dashboard" / "app.css"
 INDEX_HTML = ROOT / "dashboard" / "index.html"
 
+# Phase 15 premium navigation — 17 SaaS sections (replaces M14 legacy routes via aliases)
 EXPECTED_ROUTES = [
-    "overview", "opportunities", "services", "portfolio", "products",
-    "customers", "communications", "followups", "ledger", "invoices",
-    "provider", "analytics", "ai-approvals", "connectors", "queue",
-    "workflows", "diagnostics",
+    "dashboard", "opportunities", "services", "proposals",
+    "customers", "projects", "tasks", "ai-assistant",
+    "digital-products", "orders", "invoices", "payments",
+    "expenses", "analytics", "integrations", "settings", "security",
 ]
+# Legacy aliases still routed (overview→dashboard, portfolio→proposals, etc.) for backwards compat
+LEGACY_ALIASES = {
+    "overview": "dashboard", "portfolio": "proposals", "products": "digital-products",
+    "communications": "customers", "followups": "tasks", "ledger": "expenses",
+    "provider": "payments", "ai-approvals": "ai-assistant", "connectors": "integrations",
+    "queue": "tasks", "workflows": "projects", "diagnostics": "security",
+}
 
 class FrontendSPAStructureTests(unittest.TestCase):
     def test_files_exist(self):
@@ -89,6 +97,9 @@ class FrontendSPAStructureTests(unittest.TestCase):
         self.assertIn("ROUTES", js)
         for route in EXPECTED_ROUTES:
             self.assertIn(f'"{route}"', js)
+        # legacy aliases preserved for backwards compat
+        for alias in LEGACY_ALIASES:
+            self.assertIn(f'"{alias}"', js)
 
     def test_js_handles_snapshot_validation_and_size(self):
         js = APP_JS.read_text(encoding="utf-8")
@@ -99,7 +110,7 @@ class FrontendSPAStructureTests(unittest.TestCase):
     def test_js_no_network_fetch(self):
         js = APP_JS.read_text(encoding="utf-8")
         # must not fetch from localhost or external CDN
-        self.assertNotIn("fetch(\"http", js)
+        self.assertNotIn('fetch("http', js)
         self.assertNotIn("fetch('http", js)
         self.assertNotIn("localhost", js)
         self.assertNotIn("127.0.0.1", js)
