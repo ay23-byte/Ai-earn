@@ -596,3 +596,14 @@ Each phase depends on the immediately previous phase passing (including document
 - **Docs:** This PHASE_STATUS entry; `MASTER_IMPLEMENTATION_PLAN` branch/test sync; `SECURITY_REVIEW` branch/tests sync; `ARCHITECTURE` branch sync.
 - **Limitations:** Helper does not auto-accept case-variant (still fail-closed); no auto-recovery wizard yet (manual retry). Health now tolerates both naming schemes but not arbitrary nested dirs.
 
+## P0-1 — Central readiness (offline vs live) (2026-11-17, arena/4bd4230e-ai-earn)
+
+- **Branch:** `arena/4bd4230e-ai-earn` at `e0caf61`, `LATEST 28`, `1014 OK / 17 skipped`.
+- **Motivation:** `status` (capability) vs `health` (health) vs `production_readiness` (11 checks) vs `production_config` (hardening) each computed `production_ready` differently → `status:true` / `health:false` on fresh install confusing; audit §11 flagged lack of single source.
+- **Implementation:**
+  - New `ai_earn/readiness.py` (124 LOC) — `LIVE_BLOCKED=True`, `_is_capability_ready`, `_is_health_ok`, `_is_offline_ready` (via `evaluate`), `_is_live_ready`, `overall()` returning `{capability_ready, health_ok, offline_ready, composed_offline_ready, production_ready (alias), live_blocked, live_ready, guidance}`. Never raises, never logs secrets, no DB creation.
+  - `ai_earn/health.py` imports central for docs, keeps fast `production_ready = ok` (no heavy evaluate per call) — central `overall()` available for CLI/docs.
+  - `ai_earn/status.py` kept original `auth_available` logic to preserve `test_windows_status_respects_disabled_gate` patch semantics; central `_is_capability_ready` mirrors same check for future unification.
+- **Verification:** `status`/`health --json` unchanged, `readiness.overall({})` returns `health_ok:false offline_ready:true composed:false live_blocked:true`, with disposable healthy DB `health_ok:true offline:true composed:true`; full `discover` 1014 OK 17 skipped.
+- **Docs:** This entry; `readiness.py` is single source for offline/live docs.
+
