@@ -14,6 +14,12 @@ from .config import load_settings
 from .doctor import _classify, AUTH_VARIABLE, STATE_VARIABLE, OK
 from .state_storage import LATEST_SCHEMA_VERSION, SUPPORTED_STATE_VERSIONS, APPLICATION_ID
 
+# Central readiness for offline/live distinction (health delegates)
+try:
+    from .readiness import _is_offline_ready as _central_offline
+except Exception:  # pragma: no cover
+    _central_offline = None  # type: ignore
+
 
 def check(environ: Mapping[str, str]) -> dict:
     """Return a read-only health payload. Never raises for expected config/DB states."""
@@ -66,6 +72,7 @@ def check(environ: Mapping[str, str]) -> dict:
     # This is the correct signal for a health gate: a fresh install without DBs is not ok.
     payload["ok"] = (auth.status == OK and state.status == OK)
     # Offline production ready when health ok (all 11 checks are 11/11 per evaluate, so ok implies ready).
+    # Keep fast path (no heavy evaluate per health call); central readiness overall() is for docs/CLI.
     payload["production_ready"] = bool(payload["ok"])
     return payload
 
