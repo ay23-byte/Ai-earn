@@ -84,7 +84,11 @@ def check_with_backups(environ: Mapping[str, str]) -> dict:
             base["checks"]["backups"] = {"status": "unknown", "detail": "state parent not a directory"}
             return base
         # Count before-v*.sqlite3 files; expect LATEST-1 backups after a fresh init (v2..LATEST).
-        backups = sorted(parent.glob("before-v*.sqlite3"))
+        # Tracker creates prefixed backups like state.sqlite3.before-v*.sqlite3; manual tests use plain before-v*.sqlite3.
+        plain = list(parent.glob("before-v*.sqlite3"))
+        prefixed = list(parent.glob("*.before-v*.sqlite3"))
+        # Use set to deduplicate (Path equality)
+        backups = sorted(set(plain) | set(prefixed))
         expected = LATEST_SCHEMA_VERSION - 1  # v2..LATEST inclusive
         base["checks"]["backups"] = {
             "status": "ok" if len(backups) >= expected else "incomplete",

@@ -36,7 +36,7 @@ from .opportunities import Opportunities, OpportunityError
 from .ledger import Ledger, LedgerError
 from .products import Products, ProductError
 from .services import Services, Portfolio, ServiceError
-from .state_storage import StateStorage, StateStorageError
+from .state_storage import LATEST_SCHEMA_VERSION, StateStorage, StateStorageError
 
 _STAGES = {"potential": "potential opportunity", "quote_asserted": "quote (unverified)",
            "contract_asserted": "contract (unverified)", "invoice_asserted": "invoice (unverified)",
@@ -118,6 +118,20 @@ def _read(stdin, out, prompt):
     return line.rstrip("\r\n")
 
 
+def _confirm_yes(stdin, out, prompt: str) -> bool:
+    """Require exact uppercase YES; give helpful hint on case-variant.
+
+    Returns True only for exactly "YES". For "yes"/"Yes"/"yES" etc, writes a
+    tip and returns False so callers show "No change" without creating files.
+    """
+    raw = _read(stdin, out, prompt).strip()
+    if raw == "YES":
+        return True
+    if raw.lower() == "yes":
+        out.write(f"Tip: use exact uppercase YES (you typed '{raw}'). No change.\n")
+    return False
+
+
 def _paise(value):
     if re.fullmatch(r"(?:0|[1-9][0-9]{0,10})(?:\.[0-9]{1,2})?", value) is None:
         raise ValueError("Enter a non-negative INR amount, with at most two decimal places.")
@@ -134,11 +148,12 @@ def _key():
 
 def _initialize_state(path):
     # Only initialize a new file; never silently upgrade an existing database.
-    backups = [path.with_name(path.name + f".before-v{version}.sqlite3") for version in range(2, 28)]
+    # Use LATEST_SCHEMA_VERSION so backup chain stays correct as schema evolves.
+    backups = [path.with_name(path.name + f".before-v{version}.sqlite3") for version in range(2, LATEST_SCHEMA_VERSION + 1)]
     if path.exists() or path.is_symlink() or any(p.exists() or p.is_symlink() for p in backups):
         raise StateStorageError("State or migration backup already exists; no initialization was attempted.")
     state = StateStorage(path, create=True, confirmed=True)
-    for version, backup in zip(range(2, 28), backups):
+    for version, backup in zip(range(2, LATEST_SCHEMA_VERSION + 1), backups):
         getattr(state, f"migrate_to_v{version}")(backup, confirmed=True)
     return state
 
@@ -269,7 +284,7 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                         out.write(f"{item['id']} | {item['title']} | INR {amount // 100}.{amount % 100:02d} | {_STAGES[item['stage']]}\n")
                     if len(entries) < 100:
                         break
-                    if _read(stdin, out, "More entries? Type YES: ").strip() != "YES":
+                    if not _confirm_yes(stdin, out, "More entries? Type YES: "):
                         break
                     cursor = entries[-1]["id"]
                 if cursor is None and not entries:
@@ -282,7 +297,7 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                     out.write("No further change is available.\n")
                     continue
                 out.write(f"Record {_STAGES[stage]}? This is only your unverified assertion.\n")
-                if _read(stdin, out, "Type YES to confirm: ").strip() != "YES":
+                if not _confirm_yes(stdin, out, "Type YES to confirm: "):
                     out.write("No change.\n")
                     continue
                 if choice == "3":
@@ -336,7 +351,7 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                         out.write(f"{item['id']} | {item['title']} | {item['source_url'][:60]} | INR {item['budget_paise'] // 100}.{item['budget_paise'] % 100:02d} | {_OPP_STATUS_LABELS.get(item['status'], item['status'])} | risk:{item['risk_level']} | skills:{item['skill_tags'][:40]}\n")
                     if len(entries) < 50:
                         break
-                    if _read(stdin, out, "More? Type YES: ").strip() != "YES":
+                    if not _confirm_yes(stdin, out, "More? Type YES: "):
                         break
                     cursor = entries[-1]["id"]
                 if cursor is None and not entries:
@@ -355,7 +370,7 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                     continue
                 target, _event = _OPP_TRANSITIONS[tchoice]
                 out.write(f"Change to {_OPP_STATUS_LABELS.get(target, target)}? This is unverified.\n")
-                if _read(stdin, out, "Type YES to confirm: ").strip() != "YES":
+                if not _confirm_yes(stdin, out, "Type YES to confirm: "):
                     out.write("No change.\n")
                     continue
                 if target == "vetted":
@@ -404,7 +419,7 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                         out.write(f"{item['id']} | {item['title']} | INR {item['price_paise'] // 100}.{item['price_paise'] % 100:02d} | rev:{item['revisions']} | {item['status']} | scope:{item['scope'][:40]}\n")
                     if len(entries) < 50:
                         break
-                    if _read(stdin, out, "More? Type YES: ").strip() != "YES":
+                    if not _confirm_yes(stdin, out, "More? Type YES: "):
                         break
                     cursor = entries[-1]["id"]
                 if cursor is None and not entries:
@@ -420,14 +435,14 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                     continue
                 if tchoice == "1":
                     out.write("Publish service? This is unverified local draft.\n")
-                    if _read(stdin, out, "Type YES to confirm: ").strip() != "YES":
+                    if not _confirm_yes(stdin, out, "Type YES to confirm: "):
                         out.write("No change.\n")
                         continue
                     services.publish(token, ident, operation_key=_key())
                     out.write("Service published (unverified).\n")
                 elif tchoice == "2":
                     out.write("Archive service? This is unverified.\n")
-                    if _read(stdin, out, "Type YES to confirm: ").strip() != "YES":
+                    if not _confirm_yes(stdin, out, "Type YES to confirm: "):
                         out.write("No change.\n")
                         continue
                     services.archive(token, ident, operation_key=_key())
@@ -454,7 +469,7 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                             out.write(f"{item['id']} | svc:{item['service_id'][:8]} | {item['title']} | {item['description'][:60]}\n")
                         if len(entries) < 50:
                             break
-                        if _read(stdin, out, "More? Type YES: ").strip() != "YES":
+                        if not _confirm_yes(stdin, out, "More? Type YES: "):
                             break
                         cursor = entries[-1]["id"]
                     if cursor is None and not entries:
@@ -480,7 +495,7 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                         out.write(f"{item['id']} | {item['title']} | v{item['version']} | INR {item['price_paise'] // 100}.{item['price_paise'] % 100:02d} | {item['status']}\n")
                     if len(entries) < 50:
                         break
-                    if _read(stdin, out, "More? Type YES: ").strip() != "YES":
+                    if not _confirm_yes(stdin, out, "More? Type YES: "):
                         break
                     cursor = entries[-1]["id"]
                 if cursor is None and not entries:
@@ -496,14 +511,14 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                     continue
                 if tchoice == "1":
                     out.write("Publish product? This is unverified local draft.\n")
-                    if _read(stdin, out, "Type YES to confirm: ").strip() != "YES":
+                    if not _confirm_yes(stdin, out, "Type YES to confirm: "):
                         out.write("No change.\n")
                         continue
                     products.publish(token, ident, operation_key=_key())
                     out.write("Product published (unverified).\n")
                 elif tchoice == "2":
                     out.write("Archive product? This is unverified.\n")
-                    if _read(stdin, out, "Type YES to confirm: ").strip() != "YES":
+                    if not _confirm_yes(stdin, out, "Type YES to confirm: "):
                         out.write("No change.\n")
                         continue
                     products.archive(token, ident, operation_key=_key())
@@ -527,7 +542,7 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                         out.write(f"{item['id']} | {item['name']} | {item['contact'][:40]} | {item['status']} | src:{item['source'][:30]}\n")
                     if len(entries) < 50:
                         break
-                    if _read(stdin, out, "More? Type YES: ").strip() != "YES":
+                    if not _confirm_yes(stdin, out, "More? Type YES: "):
                         break
                     cursor = entries[-1]["id"]
                 if cursor is None and not entries:
@@ -546,7 +561,7 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                     continue
                 target, _evt = _CUST_TRANSITIONS[tchoice]
                 out.write(f"Change to {_CUST_STATUS_LABELS.get(target, target)}? This is unverified.\n")
-                if _read(stdin, out, "Type YES to confirm: ").strip() != "YES":
+                if not _confirm_yes(stdin, out, "Type YES to confirm: "):
                     out.write("No change.\n")
                     continue
                 if target == "contacted":
@@ -576,7 +591,7 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                         out.write(f"{item['id']} | cust:{item['customer_id'][:8]} | {item['channel']} | {item['status']} | {item['body'][:40]}\n")
                     if len(entries) < 50:
                         break
-                    if _read(stdin, out, "More? Type YES: ").strip() != "YES":
+                    if not _confirm_yes(stdin, out, "More? Type YES: "):
                         break
                     cursor = entries[-1]["id"]
                 if cursor is None and not entries:
@@ -592,14 +607,14 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                     continue
                 if tchoice == "1":
                     out.write("Send communication? Unverified local record.\n")
-                    if _read(stdin, out, "Type YES to confirm: ").strip() != "YES":
+                    if not _confirm_yes(stdin, out, "Type YES to confirm: "):
                         out.write("No change.\n")
                         continue
                     communications.sent(token, ident, operation_key=_key())
                     out.write("Communication sent (unverified).\n")
                 elif tchoice == "2":
                     out.write("Archive communication? Unverified.\n")
-                    if _read(stdin, out, "Type YES to confirm: ").strip() != "YES":
+                    if not _confirm_yes(stdin, out, "Type YES to confirm: "):
                         out.write("No change.\n")
                         continue
                     communications.archive(token, ident, operation_key=_key())
@@ -627,7 +642,7 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                             out.write(f"{item['id']} | {item['kind']} | INR {item['amount_paise'] // 100}.{item['amount_paise'] % 100:02d} | {item['note'][:40]}\n")
                         if len(entries) < 50:
                             break
-                        if _read(stdin, out, "More? Type YES: ").strip() != "YES":
+                        if not _confirm_yes(stdin, out, "More? Type YES: "):
                             break
                         cursor = entries[-1]["id"]
                     if cursor is None and not entries:
@@ -663,7 +678,7 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                         out.write(f"{item['id']} | cust:{item['customer_id'][:8]} | due:{item['due_at']} | {item['status']} | {item['note'][:40]}\n")
                     if len(entries) < 50:
                         break
-                    if _read(stdin, out, "More? Type YES: ").strip() != "YES":
+                    if not _confirm_yes(stdin, out, "More? Type YES: "):
                         break
                     cursor = entries[-1]["id"]
                 if cursor is None and not entries:
@@ -679,14 +694,14 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                     continue
                 if tchoice == "1":
                     out.write("Complete followup?\n")
-                    if _read(stdin, out, "Type YES to confirm: ").strip() != "YES":
+                    if not _confirm_yes(stdin, out, "Type YES to confirm: "):
                         out.write("No change.\n")
                         continue
                     followups.completed(token, ident, operation_key=_key())
                     out.write("Followup completed.\n")
                 elif tchoice == "2":
                     out.write("Cancel followup?\n")
-                    if _read(stdin, out, "Type YES to confirm: ").strip() != "YES":
+                    if not _confirm_yes(stdin, out, "Type YES to confirm: "):
                         out.write("No change.\n")
                         continue
                     followups.cancelled(token, ident, operation_key=_key())
@@ -735,7 +750,7 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                         out.write(f"{item['id']} | {item['invoice_number']} | order:{item['order_id'][:8]} | INR {item['amount_paise'] // 100}.{item['amount_paise'] % 100:02d} | {item['status']} | {pdf_note}\n")
                     if len(entries) < 50:
                         break
-                    if _read(stdin, out, "More? Type YES: ").strip() != "YES":
+                    if not _confirm_yes(stdin, out, "More? Type YES: "):
                         break
                     cursor = entries[-1]["id"]
                 if cursor is None and not entries:
@@ -752,28 +767,28 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                     continue
                 if tchoice == "1":
                     out.write("Issue invoice? PDF stub hash will be stored.\n")
-                    if _read(stdin, out, "Type YES to confirm: ").strip() != "YES":
+                    if not _confirm_yes(stdin, out, "Type YES to confirm: "):
                         out.write("No change.\n")
                         continue
                     invoices.issued(token, ident, operation_key=_key())
                     out.write("Invoice issued (PDF stub).\n")
                 elif tchoice == "2":
                     out.write("Mark paid?\n")
-                    if _read(stdin, out, "Type YES to confirm: ").strip() != "YES":
+                    if not _confirm_yes(stdin, out, "Type YES to confirm: "):
                         out.write("No change.\n")
                         continue
                     invoices.paid(token, ident, operation_key=_key())
                     out.write("Invoice paid.\n")
                 elif tchoice == "3":
                     out.write("Mark overdue?\n")
-                    if _read(stdin, out, "Type YES to confirm: ").strip() != "YES":
+                    if not _confirm_yes(stdin, out, "Type YES to confirm: "):
                         out.write("No change.\n")
                         continue
                     invoices.overdue(token, ident, operation_key=_key())
                     out.write("Invoice overdue.\n")
                 elif tchoice == "4":
                     out.write("Void invoice?\n")
-                    if _read(stdin, out, "Type YES to confirm: ").strip() != "YES":
+                    if not _confirm_yes(stdin, out, "Type YES to confirm: "):
                         out.write("No change.\n")
                         continue
                     invoices.voided(token, ident, operation_key=_key())
@@ -805,7 +820,7 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                         out.write(f"{item['id']} | {item['provider_order_id']} | {item['provider']}/{item['mode']} | INR {item['amount_paise'] // 100}.{item['amount_paise'] % 100:02d} | {item['status']}\n")
                     if len(entries) < 50:
                         break
-                    if _read(stdin, out, "More? Type YES: ").strip() != "YES":
+                    if not _confirm_yes(stdin, out, "More? Type YES: "):
                         break
                     cursor = entries[-1]["id"]
                 if cursor is None and not entries:
@@ -852,7 +867,7 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                             out.write(f"{item['id']} | {item['tool_name']} | {item['status']}->{item['effective_status']} | expires:{item['expires_at']} | {item['args_json'][:60]}\n")
                         if len(entries) < 20:
                             break
-                        if _read(stdin, out, "More? Type YES: ").strip() != "YES":
+                        if not _confirm_yes(stdin, out, "More? Type YES: "):
                             break
                         cursor = entries[-1]["id"]
                     if cursor is None and not entries:
@@ -864,7 +879,7 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                 dec = _read(stdin, out, "Decision [approved/rejected]: ").strip()
                 try:
                     out.write(f"Confirm {dec} for {apid}? This is explicit approval.\n")
-                    if _read(stdin, out, "Type YES to confirm: ").strip() != "YES":
+                    if not _confirm_yes(stdin, out, "Type YES to confirm: "):
                         out.write("No change.\n")
                     else:
                         ai_assistant.queue.decide(token, apid, dec, confirmed=True, operation_key=_key())
@@ -875,7 +890,7 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                 apid = _read(stdin, out, "Approval ID to revoke: ").strip()
                 try:
                     out.write(f"Revoke {apid}? This prevents future execution.\n")
-                    if _read(stdin, out, "Type YES to confirm: ").strip() != "YES":
+                    if not _confirm_yes(stdin, out, "Type YES to confirm: "):
                         out.write("No change.\n")
                     else:
                         ai_assistant.queue.revoke(token, apid, operation_key=_key())
@@ -900,13 +915,13 @@ def _menu(service, token, stdin, out, opportunities=None, services=None, portfol
                 try:
                     if sub == "1":
                         reason = _read(stdin, out, "Reason (0-500, empty for none): ")
-                        if _read(stdin, out, "Type YES to confirm EMERGENCY STOP: ").strip() != "YES":
+                        if not _confirm_yes(stdin, out, "Type YES to confirm EMERGENCY STOP: "):
                             out.write("No change.\n")
                         else:
                             ai_assistant.queue.emergency_stop(token, confirmed=True, reason=reason, operation_key=_key())
                             out.write("Emergency stop ACTIVE; consequential actions blocked.\n")
                     elif sub == "2":
-                        if _read(stdin, out, "Type YES to confirm CLEAR emergency: ").strip() != "YES":
+                        if not _confirm_yes(stdin, out, "Type YES to confirm CLEAR emergency: "):
                             out.write("No change.\n")
                         else:
                             ai_assistant.queue.emergency_clear(token, confirmed=True, operation_key=_key())
@@ -1857,11 +1872,11 @@ def run(action, environ, stdin, out, err):
             raise StateStorageError("Set AI_EARN_AUTH_DB and AI_EARN_STATE_DB to absolute paths in a private directory.")
         path = Path(state_path)
         if action == "init":
-            if _read(stdin, out, "Create a NEW tracker state file and migration backups? Type YES: ").strip() != "YES":
-                out.write("No files created.\n")
+            if not _confirm_yes(stdin, out, "Create a NEW tracker state file and migration backups? Type YES: "):
+                out.write("No files created. Please run `tracker init` again and type YES exactly (uppercase).\n")
                 return 0
             _initialize_state(path)
-            out.write("New tracker state initialized (v27, 26 backups). Register an account with the auth command if needed.\n")
+            out.write(f"New tracker state initialized (v{LATEST_SCHEMA_VERSION}, {LATEST_SCHEMA_VERSION - 1} backups). Register an account with the auth command if needed.\n")
             return 0
         # Open only; missing files are never created during login.
         state = StateStorage(path)
