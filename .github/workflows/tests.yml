@@ -94,11 +94,12 @@ jobs:
           exit $status
 
       - name: Upload test log on failure
-        if: failure()
+        if: failure() && hashFiles('unittest.log') != ''
         uses: actions/upload-artifact@v4
         with:
           name: unittest-log-${{ matrix.os }}-${{ matrix.python-version }}
           path: unittest.log
+          if-no-files-found: ignore
           retention-days: 2
 
       - name: Report failures to PR (bypass blob)
@@ -107,21 +108,23 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Posting failure snippet to PR..."
-          TAIL=$(tail -n 500 unittest.log | head -c 7000)
-          FAILS=$(grep -A 40 -E "^FAIL:|^ERROR:" unittest.log | head -n 700 | head -c 7000 || true)
-          BODY="❌ python -m unittest failed on \`${{ matrix.os }} / ${{ matrix.python-version }}\`
-          tail:
+          echo "Posting CI failure context to PR..."
+          if [ -f unittest.log ]; then
+            TAIL=$(tail -n 500 unittest.log | head -c 7000)
+            FAILS=$(grep -A 40 -E "^FAIL:|^ERROR:" unittest.log | head -n 700 | head -c 7000 || true)
+            BODY="❌ CI failed on \`${{ matrix.os }} / ${{ matrix.python-version }}\`.
+          Unit-test log tail:
           \`\`\`
           $TAIL
           \`\`\`
-          fails:
+          Test failure excerpts:
           \`\`\`
           $FAILS
           \`\`\`"
-          echo "$BODY" | head -c 10000 > /tmp/out.txt
+          else
+            BODY="❌ CI failed on \`${{ matrix.os }} / ${{ matrix.python-version }}\` before a unittest.log was produced. The unit-test step may not have started; inspect the failed workflow step above. This is not being reported as a unit-test failure."
+          fi
           gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments -f body="$BODY" || echo "comment failed"
-          cat /tmp/out.txt | head -n 100
 
       - name: Health and doctor (read-only, no DBs expected on runner)
         run: |
