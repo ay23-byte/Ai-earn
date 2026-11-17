@@ -1,4 +1,4 @@
-# Backup and Recovery — Ai-earn (2026-11-17, M15+M16, LATEST 28)
+# Backup and Recovery — Ai-earn (2026-11-17, M15+M16+P0-3, LATEST 28)
 
 **Status:** Experimental, local SQLite only. No auto-repair. **Do not delete or overwrite files blindly.** M15 adds `health --with-backups` and a disposable restore drill.
 
@@ -16,7 +16,7 @@
   3. `source.backup(destination)` (SQLite online backup), verifies destination.
   4. Leaves partial file on failure for inspection; never replaces.
 - **Migrations:** `migrate_to_vN` does `backup_to` **while holding write lock**, then DDL, then verification, all in one `transaction`. New files start at v1.
-- **Health backup check:** `python -m ai_earn health --json --with-backups` reports `backups: {count, expected:21, status:ok|incomplete}` when state is `ok`; otherwise `not_checked`.
+- **Health backup check:** `python -m ai_earn health --json --with-backups` reports `backups: {count, expected:27, status:ok|incomplete}` when state is `ok`; otherwise `not_checked`.
 
 ## How restores work (manual, human-approved)
 
@@ -42,7 +42,7 @@
   AI_EARN_AUTH_DB="$tmp/auth.sqlite3" AI_EARN_STATE_DB="$tmp/state.sqlite3" python -m ai_earn health --json --with-backups
   AI_EARN_AUTH_DB="$tmp/auth.sqlite3" AI_EARN_STATE_DB="$tmp/state.sqlite3" python -m ai_earn doctor --json
   # Verify backup chain
-  ls -1 "$tmp"/before-v*.sqlite3 2>/dev/null | wc -l  # expect 21 after fresh init
+  ls -1 "$tmp"/before-v*.sqlite3 2>/dev/null | wc -l  # expect 27 after fresh init (LATEST 28)
   # Exercise backup_to to new path (never overwrites)
   python -c "from pathlib import Path, os; from ai_earn.state_storage import StateStorage; s=StateStorage(Path(os.environ['AI_EARN_STATE_DB']), create=False); s.backup_to(Path(os.environ['AI_EARN_STATE_DB']+'.bak2'), confirmed=True)"
   AI_EARN_AUTH_DB="$tmp/auth.sqlite3" AI_EARN_STATE_DB="$tmp/state.sqlite3.bak2" python -m ai_earn health --json
@@ -52,9 +52,35 @@
 - **CI drill:** `tests/test_health.py` (9 tests) does the same on `TemporaryDirectory` with `StateStorage(..., create=True)` → `migrate_to_v28` → `health` + `health --with-backups` + `backup_to(new_path)` verification.
 - Real-data recovery remains unverified; no existing user DB has been migrated (per `PHASE_STATUS.md`).
 
-## Retention
+## Retention & encryption (P0-3, 2026-11-17)
 
-- Keep `before-v*.sqlite3` forever until explicit user deletion; they are the migration audit trail. Git ignores `*.sqlite3*` so they never commit. Snapshots are also gitignored; rotate by deleting old `dashboard-snapshot-*.json` after verifying new one is `ok`.
+- **Chain forever:** Keep `before-v*.sqlite3` forever until explicit user deletion; they are the migration audit trail (27 files for LATEST 28). Git ignores `*.sqlite3*` so they never commit. `prune_backups()` and `list_prunable_backups()` never return this chain — defense in depth even if a `*.backup-*` glob matched.
+- **Ephemeral prunable set:** Only `*.backup-*`, `*.bak`, `*.bak.*`, and `dashboard-snapshot-*.json` are prunable. `state.sqlite3` / `auth.sqlite3` and encrypted `*.enc`/`*.age` are never pruned automatically.
+- **Never auto-delete:** No automatic deletion on init/migration/health. User runs dry-run first:
+  ```python
+  from pathlib import Path
+  from ai_earn.backup import prune_backups, backup_retention_status
+  backup_retention_status(Path("/private/dir"))  # chain 27 expected, prunable counts
+  prune_backups(Path("/private/dir"), keep=7, dry_run=True)   # review would_delete
+  prune_backups(Path("/private/dir"), keep=7, dry_run=False, confirmed=True)  # actually delete oldest
+  ```
+  `keep=27+7` mental model: 27 chain (protected forever) + 7 newest ephemeral kept; `prune_backups(keep=7)` keeps 7 ephemeral newest, oldest deleted. `prune_backups` never overwrites, requires `confirmed=True` when `dry_run=False`, and refuses to delete chain/main DBs.
+- **Plaintext until vault:** `dashboard-snapshot-*.json` + `*.sqlite3` and `*.backup-*` remain plaintext 0600 (POSIX) / explicit ACL (Windows) until age/libsodium or OS keychain approved. Do not store backups on shared/synced drives.
+- **STUB authenticated encryption (stdlib only, NOT production-grade):** `ai_earn.backup.encrypt_backup(path, key=bytes, confirmed=True)` and `decrypt_backup(enc_path, dest, key=...)` provide an HMAC-SHA256 authenticated, PBKDF2-derived keystream wrapper so disposable drills can prove `backup_to -> encrypt (.enc/.age) -> decrypt -> StateStorage verify / integrity_check` without new deps. Never logs keys, never overwrites, 50 MB cap. Real deployment must replace with `age` or `libsodium sealed box` + OS keychain (`AI_EARN_BACKUP_KEY_{key_id}` or `AI_EARN_BACKUP_KEY` env, 32..256 chars via `secrets.validate_secret`). Alternate `suffix=".age"` accepted for docs parity.
+  ```python
+  from pathlib import Path
+  from ai_earn.backup import encrypt_backup, decrypt_backup, verify_backup
+  import secrets
+  key = secrets.token_bytes(32)  # or key_id="prod" -> env AI_EARN_BACKUP_KEY_prod
+  enc = encrypt_backup(Path("/private/dir/state.sqlite3"), key=key, confirmed=True)  # -> state.sqlite3.enc
+  dec = Path("/private/dir/restored.sqlite3")
+  decrypt_backup(enc, dec, key=key, confirmed=True)
+  assert verify_backup(dec)["status"] == "ok"
+  from ai_earn.state_storage import StateStorage
+  StateStorage(dec, create=False)  # validates schema + integrity
+  ```
+  Tampered ciphertext or wrong key -> `StateStorageError: authentication failed`; truncated file -> size/hash mismatch. For `auth.sqlite3` decrypt, verify with `AuthStorage` instead of `StateStorage`.
+- **Snapshots:** `dashboard-snapshot-*.json` beside state DB (counts only, no titles/tokens; 1 MB cap; never overwrite) are also prunable after verifying new snapshot `ok`.
 
 ## Runbook excerpt (local)
 
