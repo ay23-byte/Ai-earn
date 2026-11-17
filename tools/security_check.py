@@ -90,7 +90,7 @@ def audit_dependencies() -> int:
 
     try:
         result = subprocess.run(
-            [sys.executable, "-m", "pip_audit", "--disable-pip"],
+            [sys.executable, "-m", "pip_audit"],
             capture_output=True,
             text=True,
             timeout=120,
