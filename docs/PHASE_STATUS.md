@@ -582,4 +582,17 @@ Each phase depends on the immediately previous phase passing (including document
 
 - **Continuation:** DoD 1-20 PASS experimental local (item 13 live sandbox only). Next is production hardening sign-off or live payment enablement after `PRODUCTION_READINESS.md` 11/11 PASS + independent disposable verification + code gate change, or continuous improvement per `MASTER_IMPLEMENTATION_PLAN` M16. This file is the continuation point.
 
+## P0-2 — Tracker YES helper + 27-backup chain fix (2026-11-17, arena/4bd4230e-ai-earn)
+
+- **Branch:** `arena/4bd4230e-ai-earn` at `4a8da62`, `LATEST 28`, `1014 tests OK / 17 skipped` (Linux 3.11.2, 272s), `compileall OK`, `security_check` clean.
+- **Motivation:** First-time setup papercut — `tracker init` required exact `YES` but `yes` gave generic “No files created” with no hint, and `_initialize_state` used hardcoded `range(2,28)` → 26 backups missing `before-v28`, causing `health --with-backups` `incomplete` for tracker-init DBs.
+- **Implementation:**
+  - `ai_earn/tracker_cli.py` add `_confirm_yes(stdin,out,prompt)` — exact `YES` true, case-variant `yes/Yes` → `Tip: use exact uppercase YES (you typed 'yes'). No change.` + return False; 32 prompts now use it, init now says `Please run tracker init again and type YES exactly (uppercase).`
+  - `ai_earn/tracker_cli.py:_initialize_state` now uses `LATEST_SCHEMA_VERSION` for `range(2, LATEST+1)` → 27 backups, message now `f"v{LATEST} {LATEST-1} backups"` (was `v27 26` hardcoded); import `LATEST_SCHEMA_VERSION`.
+  - `ai_earn/health.py:check_with_backups` now counts both plain `before-v*.sqlite3` and prefixed `*.before-v*.sqlite3` (tracker creates `state.sqlite3.before-v*.sqlite3`) via `set(plain)|set(prefixed)` → `expected 27` now ok for both manual and tracker DBs.
+- **Verification:**
+  - Disposable: `yes` → Tip + no file, `YES` → `v28 27 backups` + `health backups ok:27` (was 0 before health fix)
+  - `python -m unittest tests.test_tracker_cli -v` 6 OK, `tests.test_health` 9 OK, full `discover` 1014 OK 17 skipped
+- **Docs:** This PHASE_STATUS entry; `MASTER_IMPLEMENTATION_PLAN` branch/test sync; `SECURITY_REVIEW` branch/tests sync; `ARCHITECTURE` branch sync.
+- **Limitations:** Helper does not auto-accept case-variant (still fail-closed); no auto-recovery wizard yet (manual retry). Health now tolerates both naming schemes but not arbitrary nested dirs.
 

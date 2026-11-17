@@ -1,6 +1,6 @@
 # Architecture: baseline and proposed boundaries
 
-## Current snapshot (2026-11-17, branch arena/a2b30614-ai-earn, base 9d77101)
+## Current snapshot (2026-11-17, branch arena/4bd4230e-ai-earn, base 9d77101)
 
 - **Runtime:** Python 3.11+ stdlib only (`python -m ai_earn status`), no HTTP listener. Entry `ai_earn/__main__.py` dispatches `status|auth|tracker|dashboard|doctor`. Config from env only (`config.py` + `DatabasePaths`), validated without logging values.
 - **Auth:** `auth_storage.py` (SQLite `user_version 1`, private POSIX 0700/0600 or Windows ACL via `windows_security.py`), `auth.py` (PBKDF2 600k, 30-min sessions, `token_hash`, rate limits, recovery-code replacement), `auth_cli.py` (hidden input). Experimental local, not OS sandbox, not production.

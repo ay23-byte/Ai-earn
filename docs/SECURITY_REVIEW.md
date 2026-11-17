@@ -1,7 +1,7 @@
 # Security Review — Ai-earn (2026-11-17)
 
-**Branch:** `arena/a2b30614-ai-earn` (base `9d77101`, post-#37)  
-**Baseline tests:** `636 passed / 17 skipped` (Linux)  
+**Branch:** `arena/4bd4230e-ai-earn` (base `9d77101`, post-#37)  
+**Baseline tests:** `1014 passed / 17 skipped` (Linux)  
 **Scope:** Offline local CLI + SQLite, no network listener, no provider credentials in repo. This review is a point-in-time assessment, not a certification.
 
 ## Summary verdict
