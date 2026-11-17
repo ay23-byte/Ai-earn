@@ -36,9 +36,8 @@ class FinancialMathTests(unittest.TestCase):
 
     def test_invalid_component_types_and_negative_components_are_rejected(self):
         for invalid in (True, 1.5, "100", -1, None):
-            with self.subTest(invalid=invalid):
-                with self.assertRaises(ValueError):
-                    net_cash_paise(invalid, 0, 0, 0)
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                net_cash_paise(invalid, 0, 0, 0)
 
 
 if __name__ == "__main__":
