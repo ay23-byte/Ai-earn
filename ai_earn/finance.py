@@ -11,6 +11,7 @@ import sqlite3
 from typing import Any
 
 from .auth import AccessDenied, AuthService
+from .financial_math import net_cash_paise
 from .opportunity_drafts import DraftError, _digest as _base_digest, _key, _record_id
 from .state_authorization import _authorized_transaction
 from .state_storage import StateStorage, StateStorageError
@@ -728,8 +729,18 @@ class FinancialReports:
             fees_all = conn.execute("SELECT COUNT(*), COALESCE(SUM(amount_paise),0) FROM fee_records WHERE owner_id=?", (owner,)).fetchone()
             fees_all_d = {"count": fees_all[0], "amount_paise": fees_all[1], "verification": "unverified", "currency": "INR"}
             # 11 Net realized verified = settled_verified - refunds_verified - expenses_verified - fees_verified
-            net_verified = settled_verified["amount_paise"] - refunds_verified["amount_paise"] - expenses_verified["amount_paise"] - fees_verified["amount_paise"]
-            net_all = settled_all_d["amount_paise"] - refunds_all_d["amount_paise"] - expenses_all_d["amount_paise"] - fees_all_d["amount_paise"]
+            net_verified = net_cash_paise(
+                income_paise=settled_verified["amount_paise"],
+                refunds_paise=refunds_verified["amount_paise"],
+                fees_paise=fees_verified["amount_paise"],
+                expenses_paise=expenses_verified["amount_paise"],
+            )
+            net_all = net_cash_paise(
+                income_paise=settled_all_d["amount_paise"],
+                refunds_paise=refunds_all_d["amount_paise"],
+                fees_paise=fees_all_d["amount_paise"],
+                expenses_paise=expenses_all_d["amount_paise"],
+            )
             # Legacy ledger net for comparison
             ledger_rows = conn.execute("SELECT kind, COALESCE(SUM(amount_paise),0), COUNT(*) FROM ledger_entries WHERE owner_id=? GROUP BY kind", (owner,)).fetchall()
             ledger_map = {k: {"amount_paise":0,"count":0} for k in ("income","expense","refund","fee")}
@@ -761,7 +772,12 @@ class FinancialReports:
                 "fees_verified": fees_verified,
                 "net_realized_verified": {"amount_paise": net_verified, "verification": "verified", "currency":"INR", "note": "settled_verified - refunds_verified - expenses_verified - fees_verified"},
                 "net_realized_unverified": {"amount_paise": net_all, "verification": "unverified", "currency":"INR"},
-                "net_realized_synthetic": {"amount_paise": conn.execute("SELECT COALESCE(SUM(amount_paise),0) FROM sandbox_payments WHERE owner_id=? AND stage='sandbox_settled'", (owner,)).fetchone()[0] - refunds_all_d["amount_paise"] - fees_all_d["amount_paise"] - expenses_all_d["amount_paise"], "verification":"synthetic", "currency":"INR", "note":"synthetic settled - refunds - fees - expenses"},
+                "net_realized_synthetic": {"amount_paise": net_cash_paise(
+                    income_paise=conn.execute("SELECT COALESCE(SUM(amount_paise),0) FROM sandbox_payments WHERE owner_id=? AND stage='sandbox_settled'", (owner,)).fetchone()[0],
+                    refunds_paise=refunds_all_d["amount_paise"],
+                    fees_paise=fees_all_d["amount_paise"],
+                    expenses_paise=expenses_all_d["amount_paise"],
+                ), "verification":"synthetic", "currency":"INR", "note":"synthetic settled - refunds - fees - expenses"},
                 "ledger_net_unverified": {"amount_paise": ledger_net, "verification":"unverified", "currency":"INR", "note":"ledger income - expense - refund - fee"},
                 "currency": "INR",
             }
