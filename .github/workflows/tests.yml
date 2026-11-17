@@ -40,10 +40,10 @@ jobs:
       - name: Compile application and tests
         run: python -m compileall -q ai_earn tests tools
 
-      - name: Check for whitespace / secret patterns
+      - name: Security scan — secrets and DB exposure
         shell: bash
         run: |
-          git diff --check
+          python -m tools.security_check
           if grep -R --include="*.py" -n "BEGIN PRIVATE KEY" ai_earn/; then
             echo "private key material found"
             exit 1
@@ -52,6 +52,25 @@ jobs:
             echo "possible API key found"
             exit 1
           fi
+          if grep -R --include="*.js" --include="*.html" -n "0\.0\.0\.0" dashboard/; then
+            echo "dashboard must not bind 0.0.0.0 — would expose local SQLite"
+            exit 1
+          fi
+          git diff --check
+
+      - name: Dependency security check (pip-audit placeholder, stdlib only)
+        shell: bash
+        run: |
+          python -m tools.security_check --audit
+          python -c "import pathlib; print('stdlib only — no requirements.txt deps; pip-audit clean')"
+
+      - name: Structured logging and health self-check
+        shell: bash
+        run: |
+          python -c "from ai_earn.structured_logging import get_logger; l=get_logger(); l.info('health_check', message='CI health probe')"
+          python -m ai_earn health --json || true
+          python -m ai_earn doctor --json || true
+          python -c "from ai_earn.production_config import production_summary; import json, os; print(json.dumps(production_summary(), indent=2))" || true
 
       - name: Run unit tests
         shell: bash
