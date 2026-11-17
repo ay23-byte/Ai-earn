@@ -106,7 +106,7 @@ class FinalDefinitionOfDoneTests(unittest.TestCase):
         res = export_user_data(self.alice, auth_db=self.auth_path, state_db=self.state_path, destination=out)
         self.assertTrue(out.exists())
         self.assertLess(out.stat().st_size, 50 * 1024 * 1024)
-        data = json.loads(out.read_text())
+        data = json.loads(out.read_text(encoding="utf-8"))
         self.assertNotIn("password_hash", json.dumps(data))
         # private paths are validated: health check should not leak
         h = health_check({"AI_EARN_ENV": "development", "AI_EARN_LOG_LEVEL": "INFO", "AI_EARN_AUTH_DB": str(self.auth_path), "AI_EARN_STATE_DB": str(self.state_path)})
@@ -450,13 +450,13 @@ class FinalDefinitionOfDoneTests(unittest.TestCase):
         # dashboard files exist and have responsive CSS + aria
         self.assertTrue((Path("dashboard/app.html")).exists())
         self.assertTrue((Path("dashboard/app.css")).exists())
-        js = Path("dashboard/app.js").read_text()
+        js = Path("dashboard/app.js").read_text(encoding="utf-8")
         self.assertIn("router", js.lower())
         self.assertNotIn("fetch(http", js)
-        html = Path("dashboard/app.html").read_text()
+        html = Path("dashboard/app.html").read_text(encoding="utf-8")
         self.assertIn('aria-live', html)
         # check that SPA has 17 views via html sections or js routes
-        js_routes = Path("dashboard/app.js").read_text()
+        js_routes = Path("dashboard/app.js").read_text(encoding="utf-8")
         # SPA has 17 views via data-view and hash routes
         self.assertIn("data-view", html)
         self.assertIn("dashboard", js_routes)
@@ -469,7 +469,7 @@ class FinalDefinitionOfDoneTests(unittest.TestCase):
         res = export_user_data(self.alice, auth_db=self.auth_path, state_db=self.state_path, destination=out)
         self.assertTrue(out.exists())
         self.assertLess(out.stat().st_size, 50*1024*1024)
-        txt = out.read_text()
+        txt = out.read_text(encoding="utf-8")
         self.assertNotIn("password_hash", txt)
         self.assertNotIn("token_hash", txt)
         # bob export is isolated (does not contain alice income)

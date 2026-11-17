@@ -66,6 +66,12 @@ ROW_LIMIT_PER_TABLE = 10000
 
 def export_user_data(token: str, *, auth_db: Path, state_db: Path, destination: Path | None = None) -> dict:
     """Export all owned rows for token's owner. Returns summary. Never logs secret."""
+    # Validate destination early before transaction so FileExistsError is not wrapped
+    if destination is not None:
+        if destination.exists():
+            raise FileExistsError("Destination already exists; never overwrite.")
+        if destination.parent.resolve() != state_db.parent.resolve():
+            raise ValueError("Export destination must be in the same private directory as state DB.")
     # Validate token/session via existing authorization gate
     auth = AuthService(AuthStorage(auth_db, create=False))
     state = StateStorage(state_db, create=False)
@@ -73,10 +79,14 @@ def export_user_data(token: str, *, auth_db: Path, state_db: Path, destination: 
     # This will raise AccessDenied if token invalid/expired
     with _authorized_transaction(auth, state, token) as (conn, owner_id, now):
         # Integrity gate already checked by _authorized_transaction
+        schema_version = conn.execute("PRAGMA user_version").fetchone()[0]
         result: dict = {
+            "export_version": "1",
+            "schema_version": int(schema_version),
             "owner_id": owner_id,
             "exported_at": int(now),
             "exported_at_iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
+            "included_categories": sorted(EXPORT_TABLES),
             "tables": {},
             "counts": {},
             "verification": "owner-scoped, read-only, secrets redacted",
@@ -150,13 +160,8 @@ def export_user_data(token: str, *, auth_db: Path, state_db: Path, destination: 
         result["estimated_bytes"] = total_bytes
         result["note"] = "This export is private. Do not share. Secrets are redacted. For deletion see docs/PRIVACY.md and ai_earn.account_deletion."
 
-        # Optional file write to private directory (never network)
+        # Optional file write to private directory (never network) — existence already checked pre-transaction
         if destination is not None:
-            if destination.exists():
-                raise FileExistsError("Destination already exists; never overwrite.")
-            # Ensure destination parent is same private dir as state_db
-            if destination.parent.resolve() != state_db.parent.resolve():
-                raise ValueError("Export destination must be in the same private directory as state DB.")
             payload = json.dumps(result, indent=2, sort_keys=True)
             if len(payload.encode()) > MAX_EXPORT_BYTES:
                 raise ValueError("Serialized export exceeds cap")

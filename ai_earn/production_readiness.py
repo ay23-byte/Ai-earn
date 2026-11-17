@@ -104,7 +104,7 @@ def check_security_review() -> ItemResult:
     if passed:
         # content sanity: must mention security or threat
         try:
-            text = (root / "docs/SECURITY_REVIEW.md").read_text(errors="ignore")
+            text = (root / "docs/SECURITY_REVIEW.md").read_text(encoding="utf-8", errors="ignore")
             if "Security Review" not in text or len(text) < 500:
                 passed = False
                 detail = "SECURITY_REVIEW.md too small or missing header."

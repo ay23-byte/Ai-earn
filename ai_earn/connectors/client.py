@@ -22,10 +22,13 @@ class BaseAPIClient:
         result = client.request(owner_id="a"*32, operation="fetch", params={"limit":20})
     """
 
-    def __init__(self, *, connector, throttle: Throttle | None = None, retry: RetryPolicy | None = None):
+    def __init__(self, *, connector, throttle: Throttle | None = None, retry: RetryPolicy | None = None, sleeper=None, clock=None):
         self.connector = connector
         self.throttle = throttle or Throttle(limit=10, window_seconds=60)
         self.retry = retry or RetryPolicy()
+        # Injectable sleeper/clock for tests — default no-sleep for fast CI, real sleep in production
+        self._sleeper = sleeper  # callable(seconds) or None (skip sleep)
+        self._clock = clock or time.time
         self._log: list[dict] = []
 
     def _log_event(self, event: str, detail: dict) -> None:
@@ -83,17 +86,19 @@ class BaseAPIClient:
                 if any(k in safe_msg.lower() for k in ("api_key", "token", "secret")) and "***redacted***" not in safe_msg:
                     safe_msg = "Connector request failed."
                     err = ConnectorError(safe_msg)
-                if not is_transient(err) or attempt >= self.retry.max_retries:
+                if not self.retry.should_retry(attempt, err):
                     self._log_event("error", {"operation": operation, "error": safe_msg})
                     raise err
-                # retry with backoff (no sleep in tests to keep fast; calculate but skip actual sleep unless env allows)
+                # retry with backoff — use injectable sleeper to avoid long waits in tests
                 delay = self.retry.delay_for(attempt)
-                # In tests we avoid sleeping; real deployments could time.sleep(delay)
                 self._log_event("retry", {"operation": operation, "attempt": attempt, "delay": delay})
+                if self._sleeper is not None:
+                    try:
+                        self._sleeper(delay)
+                    except Exception:
+                        pass
+                # No real sleep when sleeper is None (fast CI); production passes time.sleep as sleeper
                 attempt += 1
-                if attempt > self.retry.max_retries:
-                    self._log_event("error", {"operation": operation, "error": safe_msg})
-                    raise err
 
     def logs(self) -> list[dict]:
         # return copy without secrets (already redacted)

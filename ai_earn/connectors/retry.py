@@ -22,11 +22,10 @@ class RetryPolicy:
         return min(delay, self.max_delay)
 
     def should_retry(self, attempt: int, error: Exception) -> bool:
-        # Only retry on transient ConnectorError with message containing retryable?
-        # For stub, we retry on any ConnectorError except auth/validation
+        # Align with errors.is_transient: retry only transient ConnectorError,
+        # not auth/permission/rate-limit/invalid/revoked. Bounded.
         if attempt >= self.max_retries:
             return False
-        msg = str(error).lower()
-        if "invalid" in msg or "rate limit" in msg or "auth" in msg:
-            return False
-        return isinstance(error, ConnectorError)
+        # Use same logic as errors.is_transient for consistency
+        from .errors import is_transient
+        return is_transient(error)

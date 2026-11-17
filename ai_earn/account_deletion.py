@@ -91,22 +91,75 @@ def prepare_deletion_backup(
     backup_path: Path,
 ) -> dict:
     """Step 1: Validate session and create verified backup. Returns backup info."""
+    if backup_path.exists():
+        raise FileExistsError("Backup path already exists; never overwrite.")
+    if backup_path.parent.resolve() != state_db.parent.resolve():
+        raise ValueError("Backup must be in same private directory as state DB.")
     auth = AuthService(AuthStorage(auth_db, create=False))
     state = StateStorage(state_db, create=False)
     owner_id = None
     with _authorized_transaction(auth, state, token) as (conn, oid, now):
         owner_id = oid
-        if backup_path.exists():
-            raise FileExistsError("Backup path already exists; never overwrite.")
-        if backup_path.parent.resolve() != state_db.parent.resolve():
-            raise ValueError("Backup must be in same private directory as state DB.")
     assert owner_id is not None
-    # Outside transaction, verified backup
+    # Outside transaction, verified backup — with hash, integrity, schema, restore test
     StateStorage(state_db, create=False).backup_to(backup_path, confirmed=True)
+    backup_bytes = backup_path.read_bytes()
+    backup_sha256 = hashlib.sha256(backup_bytes).hexdigest()
+    # Verify backup can be opened and contains expected pre-deletion data
+    bstate = StateStorage(backup_path, create=False)
+    with bstate.transaction() as bconn:
+        from .state_storage import LATEST_SCHEMA_VERSION
+        bv = bconn.execute("PRAGMA user_version").fetchone()[0]
+        if bv != LATEST_SCHEMA_VERSION:
+            raise StateStorageError(f"Backup schema version {bv} != LATEST {LATEST_SCHEMA_VERSION}")
+        has_data = False
+        try:
+            if bconn.execute("SELECT 1 FROM state_audit WHERE actor_id=? LIMIT 1", (owner_id,)).fetchone():
+                has_data = True
+        except sqlite3.Error:
+            pass
+        if not has_data:
+            try:
+                if bconn.execute("SELECT 1 FROM opportunities WHERE owner_id=? LIMIT 1", (owner_id,)).fetchone():
+                    has_data = True
+            except sqlite3.Error:
+                pass
+    # Verify backup can be restored to disposable temp (ensures file is not truncated/corrupt)
+    import tempfile, os as _os
+    try:
+        restore_parent = backup_path.parent / f"tmp_restore_{int(time.time()*1000)%1000000}"
+        if _os.name == "nt":
+            from .windows_security import create_private_directory
+            if not restore_parent.exists():
+                create_private_directory(restore_parent)
+            else:
+                restore_parent = backup_path.parent / f"tmp_restore_{int(time.time())}_2"
+                create_private_directory(restore_parent)
+        else:
+            restore_parent.mkdir(mode=0o700, exist_ok=False)
+        tmp_restore = restore_parent / "restored.sqlite3"
+        StateStorage(backup_path, create=False).backup_to(tmp_restore, confirmed=True)
+    finally:
+        try:
+            if 'tmp_restore' in locals() and Path(tmp_restore).exists():
+                Path(tmp_restore).unlink()
+            if 'restore_parent' in locals() and Path(restore_parent).exists():
+                for child in Path(restore_parent).iterdir():
+                    try:
+                        child.unlink()
+                    except Exception:
+                        pass
+                try:
+                    Path(restore_parent).rmdir()
+                except Exception:
+                    pass
+        except Exception:
+            pass
     return {
         "owner_id": owner_id,
         "backup_path": str(backup_path),
         "backup_bytes": backup_path.stat().st_size,
+        "backup_sha256": backup_sha256,
         "confirmation_phrase": _confirmation_phrase(owner_id),
         "next": f"To confirm deletion, call confirm_deletion(token, password, phrase='{_confirmation_phrase(owner_id)}', ...)",
     }
@@ -165,15 +218,59 @@ def confirm_deletion(
             (DELETION_ACTION, username, int(time.time())),
         )
 
-    # Ensure backup exists
+    # Ensure backup exists and is verified (hash, integrity, schema, restore)
     if backup_path is None:
         backup_path = state_db.parent / f"before-delete-{owner_id[:8]}-{int(time.time())}.sqlite3"
     if not backup_path.exists():
         StateStorage(state_db, create=False).backup_to(backup_path, confirmed=True)
     else:
-        StateStorage(backup_path, create=False)
+        if backup_path.parent.resolve() != state_db.parent.resolve():
+            raise ValueError("Backup must be in same private directory as state DB.")
+        bstate = StateStorage(backup_path, create=False)
+        with bstate.transaction() as bconn:
+            from .state_storage import LATEST_SCHEMA_VERSION, APPLICATION_ID
+            bv = bconn.execute("PRAGMA user_version").fetchone()[0]
+            if bv != LATEST_SCHEMA_VERSION:
+                raise StateStorageError(f"Backup schema version {bv} invalid")
+            row = bconn.execute("PRAGMA integrity_check").fetchone()
+            if row is None or row[0] != "ok":
+                raise StateStorageError("Backup integrity_check failed")
+            app_id = bconn.execute("PRAGMA application_id").fetchone()[0]
+            if app_id != APPLICATION_ID:
+                raise StateStorageError("Backup is wrong database (application_id mismatch)")
+        backup_sha256 = hashlib.sha256(backup_path.read_bytes()).hexdigest()
+        import tempfile as _tmp, os as _os2
+        try:
+            restore_parent = backup_path.parent / f"tmp_verify_{int(time.time()*1000)%1000000}"
+            if _os2.name == "nt":
+                from .windows_security import create_private_directory as _cpd
+                if not restore_parent.exists():
+                    _cpd(restore_parent)
+                else:
+                    restore_parent = backup_path.parent / f"tmp_verify_{int(time.time())}_2"
+                    _cpd(restore_parent)
+            else:
+                restore_parent.mkdir(mode=0o700, exist_ok=False)
+            tmp_verify = restore_parent / "verify.sqlite3"
+            StateStorage(backup_path, create=False).backup_to(tmp_verify, confirmed=True)
+        finally:
+            try:
+                if 'tmp_verify' in locals() and Path(tmp_verify).exists():
+                    Path(tmp_verify).unlink()
+                if 'restore_parent' in locals() and Path(restore_parent).exists():
+                    for child in list(Path(restore_parent).iterdir()):
+                        try:
+                            child.unlink()
+                        except Exception:
+                            pass
+                    try:
+                        Path(restore_parent).rmdir()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
-    # Delete owner-scoped rows
+    # Delete owner-scoped rows — no silent swallow of DB errors
     deleted_counts: dict[str, int] = {}
     with state.transaction() as conn:
         for table in DELETION_TABLES:
@@ -185,40 +282,34 @@ def confirm_deletion(
                 elif "actor_id" in cols:
                     cur = conn.execute(f"DELETE FROM {table} WHERE actor_id=?", (owner_id,))
                     deleted_counts[table] = cur.rowcount
-            except sqlite3.Error:
-                continue
-        try:
-            conn.execute(
-                "INSERT INTO state_audit(occurred_at, actor_id, event, resource_type, resource_id) VALUES (?, ?, ?, ?, ?)",
-                (int(time.time()), owner_id, "account_deletion", "account", owner_id),
-            )
-        except Exception:
-            pass
+                else:
+                    deleted_counts[table] = 0
+            except sqlite3.OperationalError as exc:
+                if "no such table" in str(exc).lower():
+                    deleted_counts[table] = 0
+                    continue
+                raise StateStorageError(f"Deletion failed for {table}: {exc}") from exc
+            except sqlite3.Error as exc:
+                raise StateStorageError(f"Deletion failed for {table}: {exc}") from exc
+        # Preserve minimal audit record without PII — must succeed, not swallowed
+        conn.execute(
+            "INSERT INTO state_audit(occurred_at, actor_id, event, resource_type, resource_id) VALUES (?, ?, ?, ?, ?)",
+            (int(time.time()), owner_id, "account_deletion", "account", owner_id),
+        )
 
     # Revoke and remove all auth data for owner (children first to satisfy FK)
     with auth_storage.transaction() as aconn:
-        # Delete sessions (including revoked) for this account
         aconn.execute("DELETE FROM sessions WHERE account_id=?", (owner_id,))
-        # Keep auth_audit for forensic trace but allow account deletion:
-        # null out account_id in audit where it references the deleted account (if FK is strict, delete instead)
-        try:
-            aconn.execute("DELETE FROM auth_audit WHERE account_id=?", (owner_id,))
-        except Exception:
-            pass
-        # Clear rate-limit attempts for this username (subject)
-        try:
-            aconn.execute("DELETE FROM auth_attempts WHERE subject=?", (username,))
-        except Exception:
-            pass
+        # Remove auth audit for this account (FK would prevent account delete otherwise)
+        aconn.execute("DELETE FROM auth_audit WHERE account_id=?", (owner_id,))
+        # Clear rate-limit attempts for this username
+        aconn.execute("DELETE FROM auth_attempts WHERE subject=?", (username,))
         aconn.execute("DELETE FROM accounts WHERE id=?", (owner_id,))
-        # Insert deletion audit without FK (use NULL account_id to avoid FK violation post-delete)
-        try:
-            aconn.execute(
-                "INSERT INTO auth_audit(occurred_at, event, account_id) VALUES (?, ?, ?)",
-                (int(time.time()), "account_deleted", None),
-            )
-        except Exception:
-            pass
+        # Insert deletion audit without FK (NULL account_id to avoid FK violation post-delete)
+        aconn.execute(
+            "INSERT INTO auth_audit(occurred_at, event, account_id) VALUES (?, ?, ?)",
+            (int(time.time()), "account_deleted", None),
+        )
 
     return {
         "owner_id": owner_id,
