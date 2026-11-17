@@ -203,6 +203,40 @@ def _classify(variable: str, value: str) -> StoreReport:
         connection.close()
 
 
+def _check_stale(environ: Mapping[str, str]) -> dict:
+    """Read-only stale check for doctor (same logic as health, no secrets)."""
+    backup_var = "AI_EARN_AUTH_BACKUP"
+    state_backup_var = "AI_EARN_STATE_BACKUP"
+    auth_path = environ.get(AUTH_VARIABLE, "")
+    backup_auth = environ.get(backup_var, "")
+    if not backup_auth:
+        state_path = environ.get(STATE_VARIABLE, "")
+        backup_state = environ.get(state_backup_var, "")
+        if backup_state and state_path:
+            try:
+                from .backup import detect_stale_state_backup
+                res = detect_stale_state_backup(Path(state_path), Path(backup_state))
+                if res["status"] == "stale":
+                    return {"status": "stale", "detail": res["warning"], "requires_rotation": False}
+                if res["status"] == "ok":
+                    return {"status": "ok", "detail": res["detail"], "requires_rotation": False}
+            except Exception:
+                pass
+        return {"status": "not_checked", "detail": "No backup path for stale comparison (set AI_EARN_AUTH_BACKUP to enable --check-stale)"}
+    try:
+        from .backup import detect_stale_auth_backup
+        if not Path(backup_auth).is_absolute():
+            return {"status": "invalid_configuration", "detail": f"{backup_var} must be absolute"}
+        res = detect_stale_auth_backup(Path(auth_path), Path(backup_auth))
+        if res["status"] == "stale":
+            return {"status": "stale", "detail": res["warning"], "requires_rotation": True, "delta_seconds": res.get("delta_seconds")}
+        if res["status"] == "ok":
+            return {"status": "ok", "detail": res["detail"], "requires_rotation": False}
+        return {"status": res["status"], "detail": res["detail"], "requires_rotation": False}
+    except Exception as exc:
+        return {"status": "unknown", "detail": f"stale check failed: {exc.__class__.__name__}"}
+
+
 def diagnose(environ: Mapping[str, str]) -> dict:
     """Inspect configuration and both stores; create, modify or delete nothing."""
     report: dict = {"environment": None, "problems": [], "actions": []}
@@ -245,4 +279,17 @@ def diagnose(environ: Mapping[str, str]) -> dict:
             )
         else:
             report["actions"].append("Stores look usable. Run 'python -m ai_earn dashboard snapshot'.")
+    # Stale backup check (read-only, opt-in via AI_EARN_AUTH_BACKUP)
+    try:
+        stale = _check_stale(environ)
+        report["stale"] = stale
+        if stale.get("status") == "stale":
+            report["problems"].append(stale["detail"])
+            report["actions"].append(
+                "Stale backup detected: revoke sessions on restored copy and rotate recovery code "
+                "(python -m ai_earn auth -> replace_recovery_code with confirmed=True, or recover). "
+                "Do not use stale copy without rotation."
+            )
+    except Exception:
+        report["stale"] = {"status": "unknown", "detail": "stale check failed"}
     return report

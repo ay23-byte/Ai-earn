@@ -49,7 +49,7 @@ def main(args: Sequence[str], environ: Mapping[str, str], out: TextIO, err: Text
         write_event(Event.INVALID_REQUEST, err)
         result = failure(
             "invalid_command",
-            "Usage: python -m ai_earn status | auth {register|login|recover} | tracker {init|open} | dashboard snapshot | doctor [--plan-init|--json] | health [--json] [--with-backups] | data {export|delete} | production",
+            "Usage: python -m ai_earn status | auth {register|login|recover} | tracker {init|open} | dashboard snapshot | doctor [--plan-init|--json|--check-stale] | health [--json] [--with-backups] [--check-stale] | data {export|delete} | production",
         )
         out.write(json.dumps(result) + "\n")
         return 2

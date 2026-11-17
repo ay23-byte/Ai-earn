@@ -521,3 +521,210 @@ def backup_retention_status(private_dir: Path) -> dict:
         "retention_days": RETENTION_DAYS,
         "protected_note": "before-v*.sqlite3 never auto-deleted; prune_backups(keep=7, dry_run=True) to review ephemeral *.backup-*",
     }
+
+
+# ---- Stale backup revival mitigation (P0-4) ----
+def _auth_audit_max(auth_path: Path) -> int | None:
+    """Read-only MAX(occurred_at) from auth_audit; None if unreadable/empty."""
+    try:
+        import sqlite3 as _sq
+
+        uri = f"file:{Path(auth_path).as_posix()}?mode=ro&immutable=1"
+        with _sq.connect(uri, uri=True, timeout=5) as conn:
+            # Validate header quickly
+            try:
+                row = conn.execute("SELECT MAX(occurred_at) FROM auth_audit").fetchone()
+                return row[0] if row and row[0] is not None else None
+            except _sq.Error:
+                return None
+    except Exception:
+        return None
+
+
+def _state_audit_max(state_path: Path) -> int | None:
+    """Read-only MAX(occurred_at) from state_audit; None if unreadable/empty."""
+    try:
+        import sqlite3 as _sq
+
+        uri = f"file:{Path(state_path).as_posix()}?mode=ro&immutable=1"
+        with _sq.connect(uri, uri=True, timeout=5) as conn:
+            try:
+                row = conn.execute("SELECT MAX(occurred_at) FROM state_audit").fetchone()
+                return row[0] if row and row[0] is not None else None
+            except _sq.Error:
+                return None
+    except Exception:
+        return None
+
+
+def detect_stale_auth_backup(primary_auth: Path, backup_auth: Path) -> dict:
+    """Compare auth_audit MAX(occurred_at) between primary and backup (read-only).
+
+    Returns dict with is_stale, primary_latest, backup_latest, delta_seconds,
+    warning, requires_rotation. Never raises, never logs secrets.
+    """
+    pa = Path(primary_auth).expanduser()
+    ba = Path(backup_auth).expanduser()
+    primary_latest = _auth_audit_max(pa) if pa.is_file() else None
+    backup_latest = _auth_audit_max(ba) if ba.is_file() else None
+    if primary_latest is None or backup_latest is None:
+        # If either unreadable, cannot determine staleness -> not_checked
+        return {
+            "is_stale": False,
+            "primary_latest": primary_latest,
+            "backup_latest": backup_latest,
+            "delta_seconds": None,
+            "warning": None,
+            "requires_rotation": False,
+            "detail": "Cannot determine staleness: missing or unreadable auth_audit",
+            "status": "not_checked",
+        }
+    delta = primary_latest - backup_latest
+    is_stale = delta > 0
+    # Consider stale if backup is at least 1 second older; clock may be mocked in tests
+    if is_stale:
+        warning = (
+            f"Stale auth backup: backup is {delta}s older than primary (backup {backup_latest} < primary {primary_latest}). "
+            "Restoring it revives old password/recovery codes and sessions. "
+            "After any restore, revoke sessions and rotate recovery code: "
+            "python -m ai_earn auth login -> replace_recovery_code(confirmed=True) or recover(). "
+            "Do not use stale copy for production."
+        )
+        return {
+            "is_stale": True,
+            "primary_latest": primary_latest,
+            "backup_latest": backup_latest,
+            "delta_seconds": delta,
+            "warning": warning,
+            "requires_rotation": True,
+            "detail": f"backup {delta}s stale",
+            "status": "stale",
+        }
+    return {
+        "is_stale": False,
+        "primary_latest": primary_latest,
+        "backup_latest": backup_latest,
+        "delta_seconds": 0,
+        "warning": None,
+        "requires_rotation": False,
+        "detail": "backup is current (not older than primary)",
+        "status": "ok",
+    }
+
+
+def detect_stale_state_backup(primary_state: Path, backup_state: Path) -> dict:
+    """Compare state_audit MAX(occurred_at) similarly for state DB."""
+    ps = Path(primary_state).expanduser()
+    bs = Path(backup_state).expanduser()
+    primary_latest = _state_audit_max(ps) if ps.is_file() else None
+    backup_latest = _state_audit_max(bs) if bs.is_file() else None
+    if primary_latest is None or backup_latest is None:
+        return {
+            "is_stale": False,
+            "primary_latest": primary_latest,
+            "backup_latest": backup_latest,
+            "delta_seconds": None,
+            "warning": None,
+            "requires_rotation": False,
+            "detail": "Cannot determine state staleness: missing or unreadable state_audit",
+            "status": "not_checked",
+        }
+    delta = primary_latest - backup_latest
+    is_stale = delta > 0
+    if is_stale:
+        warning = (
+            f"Stale state backup: backup is {delta}s older than primary (backup {backup_latest} < primary {primary_latest}). "
+            "Restore loses newer operation_keys/audit and can create duplicate leases. Reconcile independently."
+        )
+        return {
+            "is_stale": True,
+            "primary_latest": primary_latest,
+            "backup_latest": backup_latest,
+            "delta_seconds": delta,
+            "warning": warning,
+            "requires_rotation": False,
+            "detail": f"backup {delta}s stale",
+            "status": "stale",
+        }
+    return {
+        "is_stale": False,
+        "primary_latest": primary_latest,
+        "backup_latest": backup_latest,
+        "delta_seconds": 0,
+        "warning": None,
+        "requires_rotation": False,
+        "detail": "state backup current",
+        "status": "ok",
+    }
+
+
+def revoke_all_sessions(auth_db: Path, *, confirmed: bool = False) -> dict:
+    """Revoke all non-revoked sessions in auth DB (required after stale restore).
+
+    Never overwrites DB file; uses transaction. Requires confirmed=True.
+    Returns dict with revoked_count.
+    """
+    if confirmed is not True:
+        raise StorageError("Explicit confirmation required to revoke sessions.")
+    p = Path(auth_db).expanduser()
+    if not p.is_absolute():
+        raise StorageError("Auth DB path must be absolute.")
+    if not p.is_file():
+        raise StorageError("Auth DB file not found.")
+    # Use AuthStorage transaction (holds lock, validates parent privacy)
+    store = AuthStorage(p, create=False)
+    now = int(time.time())
+    count = 0
+    with store.transaction() as conn:
+        # Count before
+        before = conn.execute("SELECT COUNT(*) FROM sessions WHERE revoked_at IS NULL").fetchone()[0]
+        if before > 0:
+            conn.execute("UPDATE sessions SET revoked_at=? WHERE revoked_at IS NULL", (now,))
+            # Audit revocation per session? Single audit for bulk
+            # Find an account to audit under if exists
+            acct = conn.execute("SELECT id FROM accounts LIMIT 1").fetchone()
+            aid = acct[0] if acct else None
+            conn.execute("INSERT INTO auth_audit(occurred_at,event,account_id) VALUES(?,?,?)", (now, "stale_restore_sessions_revoked", aid))
+            count = before
+        else:
+            count = 0
+    return {"revoked_count": count, "now": now, "detail": f"Revoked {count} session(s); rotate recovery code next."}
+
+
+def handle_stale_restore(
+    primary_auth: Path,
+    backup_auth: Path,
+    restored_auth: Path,
+    *,
+    confirmed: bool = False,
+) -> dict:
+    """Detect staleness and, if stale, revoke sessions on restored_auth and emit warning.
+
+    Workflow for P0-4: user restored backup_auth to restored_auth (new private path) via
+    StateStorage.backup_to or create_auth_backup. This helper:
+      1. Compares primary vs backup timestamps (read-only).
+      2. If stale, revokes all sessions on restored_auth (requires confirmed=True) and returns warning.
+
+    Args:
+        primary_auth: Current primary auth DB (absolute).
+        backup_auth: Backup file that was restored (absolute).
+        restored_auth: Newly restored DB path to revoke sessions on (absolute).
+        confirmed: Must be True to perform revocation.
+
+    Returns:
+        Dict with detection + revocation result.
+    """
+    detection = detect_stale_auth_backup(primary_auth, backup_auth)
+    if not detection["is_stale"]:
+        return {"detection": detection, "revoked_count": 0, "warning": None, "detail": "not stale, no action"}
+    if confirmed is not True:
+        # Detection only, no mutation
+        return {
+            "detection": detection,
+            "revoked_count": 0,
+            "warning": detection["warning"] + " (dry-run: pass confirmed=True to revoke)",
+            "detail": "stale detected, revocation requires confirmed=True",
+        }
+    rev = revoke_all_sessions(restored_auth, confirmed=True)
+    warning = detection["warning"] + f" Revoked {rev['revoked_count']} session(s) on restored copy; now rotate recovery code via replace_recovery_code(confirmed=True)."
+    return {"detection": detection, "revoked_count": rev["revoked_count"], "warning": warning, "detail": "stale mitigated"}

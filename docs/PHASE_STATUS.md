@@ -617,3 +617,16 @@ Each phase depends on the immediately previous phase passing (including document
 - **Verification:** Disposable private `state.sqlite3` v28 (27 chain) + 5 `*.backup-*` + snapshots → `prune keep=2 dry_run 3 would` → `pruned 3` chain 27 intact; `state.sqlite3 -> state.sqlite3.enc` (839k) -> decrypt -> `verify_backup ok` + `StateStorage` ok; `auth.sqlite3` encrypt via `key_id` env -> decrypt -> `AuthStorage` ok; wrong key -> HMAC fail; `snapshot.json` round-trip ok; existing destinations never overwritten; full `discover` 1014 OK 17 skipped.
 - **Docs:** This entry; `BACKUP_AND_RECOVERY.md` is retention authority; `backup.py` is retention enforcement source.
 
+## P0-4 — Stale backup revival mitigation (2026-11-17, arena/4bd4230e-ai-earn)
+
+- **Branch:** `arena/4bd4230e-ai-earn` at `P0-4`, `LATEST 28`, `1014 OK / 17 skipped` (290s), `compileall OK`, `security_check --audit` clean.
+- **Motivation:** Stale `backup_to` restores revive old `password_hash`/`recovery_hash`/sessions and lose later `operation_key`s → second lease on same key; audit P0-4 flagged no detection or forced rotation.
+- **Implementation:**
+  - `ai_earn/backup.py` 524→~750 LOC: add `_auth_audit_max`/`_state_audit_max` read-only `MAX(occurred_at)`, `detect_stale_auth_backup(primary, backup)` and `detect_stale_state_backup` (read-only, `is_stale` when `backup MAX < primary MAX`, `delta_seconds`, `requires_rotation`), `revoke_all_sessions(auth_db, confirmed)` (`UPDATE sessions SET revoked_at=now`, audit `stale_restore_sessions_revoked`), `handle_stale_restore(primary, backup, restored, confirmed)` (detect+revoke+warning).
+  - `ai_earn/health.py` add `_check_stale(environ)` and `checks.stale` (`AI_EARN_AUTH_BACKUP`/`AI_EARN_STATE_BACKUP` env, `stale`/`ok`/`not_checked`/`invalid_configuration`, `requires_rotation`, `delta_seconds`) — `ok` still true but warns; `ai_earn/health_cli.py` displays stale and allows `--check-stale` flag.
+  - `ai_earn/doctor.py` add `_check_stale` and `report["stale"]` with `problems`/`actions` when stale; `ai_earn/doctor_cli.py` handles `doctor --check-stale[/path] [--json]` (env override, human+JSON, exit 1 when stale, never writes), `_report_to_dict` includes `stale`, help updated.
+  - `ai_earn/__main__.py` usage updated for `doctor --check-stale` / `health --check-stale`.
+  - `docs/BACKUP_AND_RECOVERY.md` new § Stale backup revival mitigation (P0-4): detection, health/doctor usage, 5-step mitigation flow, acceptance drill.
+- **Verification:** Disposable `auth.sqlite3` (register alice, login token1 1800000000, backup, recover 100s later revoking token1) → `detect_stale` `is_stale true delta 100s` → restore backup → token1 revives + old password works → `health checks.stale:stale requires_rotation:true` and `doctor stale:stale` and `doctor --check-stale` rc1 human+JSON → `handle_stale_restore(..., confirmed=True)` revokes 2 sessions → token1 denied → `revoke_all_sessions` also works; `health` without backup → `not_checked`; explicit path via `--check-stale /path` works; full `discover` 1014 OK 17 skipped.
+- **Docs:** This entry; `BACKUP_AND_RECOVERY.md` is stale-mitigation authority; `backup.py` is enforcement source.
+
