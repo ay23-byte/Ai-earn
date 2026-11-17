@@ -19,7 +19,8 @@ from .auth_storage import AuthStorage, StorageError, _windows_auth_verified
 
 APPLICATION_ID = 0x41494533  # AIE3, distinct from the auth-only database.
 SCHEMA_VERSION = 1  # New files still bootstrap as version 1; upgrades are explicit.
-LATEST_SCHEMA_VERSION = 14
+LATEST_SCHEMA_VERSION = 27
+SUPPORTED_STATE_VERSIONS = frozenset(range(1, LATEST_SCHEMA_VERSION + 1))
 
 
 class StateStorageError(Exception):
@@ -305,10 +306,507 @@ _V14_SCHEMA = {
 )""",
 }
 
+
+_V15_SCHEMA = {
+    "opportunities": """CREATE TABLE opportunities (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 200 AND length(trim(title)) > 0),
+    source_url TEXT NOT NULL CHECK(length(source_url) BETWEEN 1 AND 2048 AND (source_url GLOB 'http://*' OR source_url GLOB 'https://*')),
+    source_type TEXT NOT NULL CHECK(source_type IN ('manual','connector')),
+    connector_id TEXT CHECK(connector_id IS NULL OR (length(connector_id) BETWEEN 1 AND 64 AND connector_id NOT GLOB '*[^A-Za-z0-9_-]*')),
+    budget_paise INTEGER NOT NULL CHECK(typeof(budget_paise)='integer' AND budget_paise BETWEEN 0 AND 1000000000000),
+    currency TEXT NOT NULL CHECK(currency='INR'),
+    deadline_at INTEGER NOT NULL CHECK(typeof(deadline_at)='integer' AND deadline_at BETWEEN 0 AND 4102444800),
+    risk_level TEXT NOT NULL CHECK(risk_level IN ('low','medium','high','unknown')),
+    skill_tags TEXT NOT NULL CHECK(length(skill_tags) BETWEEN 0 AND 500),
+    status TEXT NOT NULL CHECK(status IN ('discovered','vetted','pursuing','archived','dismissed')),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at)
+)""",
+}
+
+_V16_INDEX = "CREATE UNIQUE INDEX services_id_owner_idx ON services(id, owner_id)"
+
+_V16_SCHEMA = {
+    "services": """CREATE TABLE services (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 200 AND length(trim(title)) > 0),
+    scope TEXT NOT NULL CHECK(length(scope) BETWEEN 0 AND 2000),
+    deliverable TEXT NOT NULL CHECK(length(deliverable) BETWEEN 1 AND 500 AND length(trim(deliverable)) > 0),
+    price_paise INTEGER NOT NULL CHECK(typeof(price_paise)='integer' AND price_paise BETWEEN 0 AND 1000000000000),
+    currency TEXT NOT NULL CHECK(currency='INR'),
+    revisions INTEGER NOT NULL CHECK(typeof(revisions)='integer' AND revisions BETWEEN 0 AND 100),
+    status TEXT NOT NULL CHECK(status IN ('draft','published','archived')),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at)
+)""",
+    "portfolio_items": """CREATE TABLE portfolio_items (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    service_id TEXT NOT NULL CHECK(length(service_id)=32 AND service_id NOT GLOB '*[^0-9a-f]*'),
+    title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 200 AND length(trim(title)) > 0),
+    description TEXT NOT NULL CHECK(length(description) BETWEEN 0 AND 2000),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    FOREIGN KEY(service_id, owner_id) REFERENCES services(id, owner_id)
+)""",
+}
+
+_V17_INDEX = "CREATE UNIQUE INDEX products_id_owner_idx ON products(id, owner_id)"
+
+_V17_SCHEMA = {
+    "products": """CREATE TABLE products (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 200 AND length(trim(title)) > 0),
+    description TEXT NOT NULL CHECK(length(description) BETWEEN 0 AND 2000),
+    version TEXT NOT NULL CHECK(length(version) BETWEEN 1 AND 20 AND version NOT GLOB '*[^A-Za-z0-9._-]*'),
+    price_paise INTEGER NOT NULL CHECK(typeof(price_paise)='integer' AND price_paise BETWEEN 0 AND 1000000000000),
+    currency TEXT NOT NULL CHECK(currency='INR'),
+    status TEXT NOT NULL CHECK(status IN ('draft','published','archived')),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at)
+)""",
+    "customers": """CREATE TABLE customers (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    name TEXT NOT NULL CHECK(length(name) BETWEEN 1 AND 200 AND length(trim(name)) > 0),
+    contact TEXT NOT NULL CHECK(length(contact) BETWEEN 1 AND 500),
+    source TEXT NOT NULL CHECK(length(source) BETWEEN 0 AND 500),
+    status TEXT NOT NULL CHECK(status IN ('lead','contacted','converted','rejected')),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at)
+)""",
+}
+
+_V18_INDEX = "CREATE UNIQUE INDEX communications_id_owner_idx ON communications(id, owner_id)"
+_V18_LEDGER_INDEX = "CREATE UNIQUE INDEX ledger_entries_id_owner_idx ON ledger_entries(id, owner_id)"
+_V19_CUSTOMER_INDEX = "CREATE UNIQUE INDEX customers_id_owner_idx ON customers(id, owner_id)"
+_V19_INDEX = "CREATE UNIQUE INDEX followups_id_owner_idx ON followups(id, owner_id)"
+_V20_INVOICE_INDEX = "CREATE UNIQUE INDEX invoices_id_owner_idx ON invoices(id, owner_id)"
+_V20_INVOICE_NUMBER_INDEX = "CREATE UNIQUE INDEX invoices_number_owner_idx ON invoices(invoice_number, owner_id)"
+_V21_PROVIDER_ORDERS_ID_OWNER_IDX = "CREATE UNIQUE INDEX payment_provider_orders_id_owner_idx ON payment_provider_orders(id, owner_id)"
+_V21_PROVIDER_ORDERS_PROVIDER_IDX = "CREATE UNIQUE INDEX payment_provider_orders_provider_order_idx ON payment_provider_orders(provider_order_id, owner_id)"
+_V21_PROVIDER_EVENTS_ID_IDX = "CREATE UNIQUE INDEX payment_provider_events_id_owner_idx ON payment_provider_events(event_id, owner_id)"
+
+_V21_SCHEMA = {
+    "payment_provider_orders": """CREATE TABLE payment_provider_orders (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    provider TEXT NOT NULL CHECK(provider IN ('razorpay','stripe')),
+    mode TEXT NOT NULL CHECK(mode IN ('sandbox','live')),
+    amount_paise INTEGER NOT NULL CHECK(typeof(amount_paise)='integer' AND amount_paise BETWEEN 0 AND 1000000000000),
+    currency TEXT NOT NULL CHECK(currency='INR'),
+    status TEXT NOT NULL CHECK(status IN ('created','authorized','captured','settled','refunded','failed')),
+    provider_order_id TEXT NOT NULL CHECK(length(provider_order_id) BETWEEN 1 AND 64 AND provider_order_id NOT GLOB '*[^A-Za-z0-9_-]*'),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at)
+)""",
+    "payment_provider_events": """CREATE TABLE payment_provider_events (
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    event_id TEXT PRIMARY KEY NOT NULL CHECK(length(event_id) BETWEEN 1 AND 64 AND event_id NOT GLOB '*[^A-Za-z0-9_-]*'),
+    order_id TEXT NOT NULL CHECK(length(order_id)=32 AND order_id NOT GLOB '*[^0-9a-f]*'),
+    event_type TEXT NOT NULL CHECK(event_type IN ('authorized','captured','failed','refunded','settled')),
+    amount_paise INTEGER NOT NULL CHECK(typeof(amount_paise)='integer' AND amount_paise BETWEEN 0 AND 1000000000000),
+    raw_body_hash BLOB NOT NULL CHECK(typeof(raw_body_hash)='blob' AND length(raw_body_hash)=32),
+    received_at INTEGER NOT NULL CHECK(typeof(received_at)='integer' AND received_at >= 0),
+    FOREIGN KEY(order_id, owner_id) REFERENCES payment_provider_orders(id, owner_id)
+)""",
+}
+
+_V22_APPROVAL_INDEX = "CREATE UNIQUE INDEX ai_approvals_id_owner_idx ON ai_approvals(id, owner_id)"
+_V22_SCHEMA = {
+    "ai_approvals": """CREATE TABLE ai_approvals (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    tool_name TEXT NOT NULL CHECK(length(tool_name) BETWEEN 1 AND 64 AND tool_name NOT GLOB '*[^A-Za-z0-9_.-]*'),
+    args_json TEXT NOT NULL CHECK(length(args_json) BETWEEN 2 AND 4096),
+    status TEXT NOT NULL CHECK(status IN ('pending','approved','rejected','expired','revoked')),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    expires_at INTEGER NOT NULL CHECK(typeof(expires_at)='integer' AND expires_at BETWEEN created_at AND 4102444800),
+    decided_at INTEGER CHECK(decided_at IS NULL OR (typeof(decided_at)='integer' AND decided_at >= created_at)),
+    UNIQUE(id, owner_id)
+)""" ,
+    "ai_emergency": """CREATE TABLE ai_emergency (
+    owner_id TEXT PRIMARY KEY NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    stopped INTEGER NOT NULL CHECK(stopped IN (0,1)),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= 0),
+    reason TEXT NOT NULL CHECK(length(reason) BETWEEN 0 AND 500)
+)""" ,
+}
+
+
+_V23_PROJECT_TASKS_INDEX = "CREATE UNIQUE INDEX project_tasks_id_owner_idx ON project_tasks(id, owner_id)"
+_V23_DEPENDS_INDEX = "CREATE INDEX task_dependencies_task_idx ON task_dependencies(task_id, owner_id)"
+_V23_LOGS_INDEX = "CREATE INDEX task_execution_logs_task_idx ON task_execution_logs(task_id, owner_id)"
+_V23_SCHEMA = {
+    "project_tasks": """CREATE TABLE project_tasks (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    opportunity_id TEXT CHECK(opportunity_id IS NULL OR (length(opportunity_id)=32 AND opportunity_id NOT GLOB '*[^0-9a-f]*')),
+    parent_task_id TEXT CHECK(parent_task_id IS NULL OR (length(parent_task_id)=32 AND parent_task_id NOT GLOB '*[^0-9a-f]*')),
+    title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 200 AND length(trim(title)) > 0),
+    description TEXT NOT NULL CHECK(length(description) BETWEEN 0 AND 2000),
+    priority INTEGER NOT NULL CHECK(priority BETWEEN 0 AND 9),
+    deadline_at INTEGER NOT NULL CHECK(deadline_at BETWEEN 0 AND 4102444800),
+    estimated_duration_seconds INTEGER NOT NULL CHECK(estimated_duration_seconds BETWEEN 0 AND 31536000),
+    actual_duration_seconds INTEGER NOT NULL CHECK(actual_duration_seconds BETWEEN 0 AND 31536000),
+    status TEXT NOT NULL CHECK(status IN ('draft','pending_review','approved','scheduled','in_progress','completed','failed','cancelled','rejected')),
+    created_at INTEGER NOT NULL CHECK(created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(updated_at >= created_at)
+)""",
+    "task_dependencies": """CREATE TABLE task_dependencies (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    task_id TEXT NOT NULL CHECK(length(task_id)=32 AND task_id NOT GLOB '*[^0-9a-f]*'),
+    depends_on_task_id TEXT NOT NULL CHECK(length(depends_on_task_id)=32 AND depends_on_task_id NOT GLOB '*[^0-9a-f]*'),
+    created_at INTEGER NOT NULL CHECK(created_at >= 0),
+    UNIQUE(task_id, depends_on_task_id, owner_id),
+    CHECK(task_id != depends_on_task_id)
+)""",
+    "task_execution_logs": """CREATE TABLE task_execution_logs (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    task_id TEXT NOT NULL CHECK(length(task_id)=32 AND task_id NOT GLOB '*[^0-9a-f]*'),
+    message TEXT NOT NULL CHECK(length(message) BETWEEN 1 AND 2000),
+    created_at INTEGER NOT NULL CHECK(created_at >= 0)
+)""",
+}
+
+_V24_LEASE_COL = "lease_id TEXT CHECK(lease_id IS NULL OR (length(lease_id)=32 AND lease_id NOT GLOB '*[^0-9a-f]*'))"
+_V24_UNTIL_COL = "lease_until INTEGER CHECK(lease_until IS NULL OR (lease_until BETWEEN 0 AND 4102444800))"
+_V24_ATTEMPTS_COL = "attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts BETWEEN 0 AND 10)"
+_V24_MAX_ATTEMPTS_COL = "max_attempts INTEGER NOT NULL DEFAULT 3 CHECK(max_attempts BETWEEN 1 AND 10)"
+_V24_BACKOFF_COL = "backoff_seconds INTEGER NOT NULL DEFAULT 60 CHECK(backoff_seconds BETWEEN 0 AND 86400)"
+_V24_AVAILABLE_COL = "available_at INTEGER NOT NULL DEFAULT 0 CHECK(available_at BETWEEN 0 AND 4102444800)"
+
+
+_V24_SCHEMA = {
+    "project_tasks": """CREATE TABLE project_tasks (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    opportunity_id TEXT CHECK(opportunity_id IS NULL OR (length(opportunity_id)=32 AND opportunity_id NOT GLOB '*[^0-9a-f]*')),
+    parent_task_id TEXT CHECK(parent_task_id IS NULL OR (length(parent_task_id)=32 AND parent_task_id NOT GLOB '*[^0-9a-f]*')),
+    title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 200 AND length(trim(title)) > 0),
+    description TEXT NOT NULL CHECK(length(description) BETWEEN 0 AND 2000),
+    priority INTEGER NOT NULL CHECK(priority BETWEEN 0 AND 9),
+    deadline_at INTEGER NOT NULL CHECK(deadline_at BETWEEN 0 AND 4102444800),
+    estimated_duration_seconds INTEGER NOT NULL CHECK(estimated_duration_seconds BETWEEN 0 AND 31536000),
+    actual_duration_seconds INTEGER NOT NULL CHECK(actual_duration_seconds BETWEEN 0 AND 31536000),
+    status TEXT NOT NULL CHECK(status IN ('draft','pending_review','approved','scheduled','in_progress','completed','failed','cancelled','rejected')),
+    created_at INTEGER NOT NULL CHECK(created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(updated_at >= created_at),
+    lease_id TEXT CHECK(lease_id IS NULL OR (length(lease_id)=32 AND lease_id NOT GLOB '*[^0-9a-f]*')),
+    lease_until INTEGER CHECK(lease_until IS NULL OR (lease_until BETWEEN 0 AND 4102444800)),
+    attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts BETWEEN 0 AND 10),
+    max_attempts INTEGER NOT NULL DEFAULT 3 CHECK(max_attempts BETWEEN 1 AND 10),
+    backoff_seconds INTEGER NOT NULL DEFAULT 60 CHECK(backoff_seconds BETWEEN 0 AND 86400),
+    available_at INTEGER NOT NULL DEFAULT 0 CHECK(available_at BETWEEN 0 AND 4102444800)
+)""",
+}
+
+
+_V25_PACKAGE_INDEX = "CREATE UNIQUE INDEX service_packages_id_owner_idx ON service_packages(id, owner_id)"
+_V25_REQUIREMENT_INDEX = "CREATE INDEX service_requirements_service_idx ON service_requirements(service_id, owner_id)"
+_V25_ATTACHMENT_INDEX = "CREATE INDEX service_attachments_service_idx ON service_attachments(service_id, owner_id)"
+_V25_PROPOSAL_INDEX = "CREATE UNIQUE INDEX proposals_id_owner_idx ON proposals(id, owner_id)"
+_V25_REQUEST_INDEX = "CREATE UNIQUE INDEX customer_requests_id_owner_idx ON customer_requests(id, owner_id)"
+_V25_SCHEMA = {
+    "service_packages": """CREATE TABLE service_packages (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    service_id TEXT NOT NULL CHECK(length(service_id)=32 AND service_id NOT GLOB '*[^0-9a-f]*'),
+    title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 200 AND length(trim(title)) > 0),
+    description TEXT NOT NULL CHECK(length(description) BETWEEN 0 AND 2000),
+    price_paise INTEGER NOT NULL CHECK(typeof(price_paise)='integer' AND price_paise BETWEEN 0 AND 1000000000000),
+    delivery_days INTEGER NOT NULL CHECK(typeof(delivery_days)='integer' AND delivery_days BETWEEN 1 AND 365),
+    revisions INTEGER NOT NULL CHECK(typeof(revisions)='integer' AND revisions BETWEEN 0 AND 100),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at),
+    FOREIGN KEY(service_id, owner_id) REFERENCES services(id, owner_id)
+)""",
+    "service_requirements": """CREATE TABLE service_requirements (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    service_id TEXT NOT NULL CHECK(length(service_id)=32 AND service_id NOT GLOB '*[^0-9a-f]*'),
+    requirement TEXT NOT NULL CHECK(length(requirement) BETWEEN 1 AND 500 AND length(trim(requirement)) > 0),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    FOREIGN KEY(service_id, owner_id) REFERENCES services(id, owner_id)
+)""",
+    "service_attachments": """CREATE TABLE service_attachments (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    service_id TEXT CHECK(service_id IS NULL OR (length(service_id)=32 AND service_id NOT GLOB '*[^0-9a-f]*')),
+    portfolio_item_id TEXT CHECK(portfolio_item_id IS NULL OR (length(portfolio_item_id)=32 AND portfolio_item_id NOT GLOB '*[^0-9a-f]*')),
+    file_name TEXT NOT NULL CHECK(length(file_name) BETWEEN 1 AND 200 AND length(trim(file_name)) > 0),
+    file_hash BLOB CHECK(file_hash IS NULL OR (typeof(file_hash)='blob' AND length(file_hash)=32)),
+    file_size INTEGER NOT NULL CHECK(typeof(file_size)='integer' AND file_size BETWEEN 0 AND 104857600),
+    mime_type TEXT NOT NULL CHECK(length(mime_type) BETWEEN 1 AND 100),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    CHECK((service_id IS NOT NULL) OR (portfolio_item_id IS NOT NULL))
+)""",
+    "proposals": """CREATE TABLE proposals (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    service_id TEXT NOT NULL CHECK(length(service_id)=32 AND service_id NOT GLOB '*[^0-9a-f]*'),
+    customer_id TEXT CHECK(customer_id IS NULL OR (length(customer_id)=32 AND customer_id NOT GLOB '*[^0-9a-f]*')),
+    title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 200 AND length(trim(title)) > 0),
+    description TEXT NOT NULL CHECK(length(description) BETWEEN 0 AND 2000),
+    price_paise INTEGER NOT NULL CHECK(typeof(price_paise)='integer' AND price_paise BETWEEN 0 AND 1000000000000),
+    delivery_days INTEGER NOT NULL CHECK(typeof(delivery_days)='integer' AND delivery_days BETWEEN 1 AND 365),
+    status TEXT NOT NULL CHECK(status IN ('draft','sent','accepted','rejected','cancelled','archived')),
+    ai_generated INTEGER NOT NULL CHECK(ai_generated IN (0,1)),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at),
+    FOREIGN KEY(service_id, owner_id) REFERENCES services(id, owner_id)
+)""",
+    "customer_requests": """CREATE TABLE customer_requests (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    service_id TEXT NOT NULL CHECK(length(service_id)=32 AND service_id NOT GLOB '*[^0-9a-f]*'),
+    customer_id TEXT NOT NULL CHECK(length(customer_id)=32 AND customer_id NOT GLOB '*[^0-9a-f]*'),
+    message TEXT NOT NULL CHECK(length(message) BETWEEN 1 AND 2000),
+    status TEXT NOT NULL CHECK(status IN ('pending','accepted','rejected','completed','cancelled')),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at),
+    FOREIGN KEY(service_id, owner_id) REFERENCES services(id, owner_id),
+    FOREIGN KEY(customer_id, owner_id) REFERENCES customers(id, owner_id)
+)""",
+}
+
+
+_V26_IDEA_INDEX = "CREATE UNIQUE INDEX product_ideas_id_owner_idx ON product_ideas(id, owner_id)"
+_V26_VALIDATION_INDEX = "CREATE INDEX product_validations_product_idx ON product_validations(product_id, owner_id)"
+_V26_RESEARCH_INDEX = "CREATE INDEX market_research_product_idx ON market_research(product_id, owner_id)"
+_V26_PRICING_INDEX = "CREATE INDEX pricing_suggestions_product_idx ON pricing_suggestions(product_id, owner_id)"
+_V26_VERSION_INDEX = "CREATE INDEX product_versions_product_idx ON product_versions(product_id, owner_id)"
+_V26_FILE_INDEX = "CREATE INDEX product_files_product_idx ON product_files(product_id, owner_id)"
+_V26_SALES_INDEX = "CREATE INDEX product_sales_product_idx ON product_sales(product_id, owner_id)"
+_V26_DELIVERABLE_INDEX = "CREATE INDEX product_deliverables_product_idx ON product_deliverables(product_id, owner_id)"
+_V26_DOCS_INDEX = "CREATE INDEX product_documentation_product_idx ON product_documentation(product_id, owner_id)"
+_V27_NOTE_INDEX = "CREATE INDEX customer_notes_customer_idx ON customer_notes(customer_id, owner_id)"
+_V27_REQUIREMENT_INDEX = "CREATE INDEX customer_requirements_customer_idx ON customer_requirements(customer_id, owner_id)"
+_V27_ORDER_INDEX = "CREATE UNIQUE INDEX customer_orders_id_owner_idx ON customer_orders(id, owner_id)"
+_V27_ORDER_CUSTOMER_INDEX = "CREATE INDEX customer_orders_customer_idx ON customer_orders(customer_id, owner_id)"
+_V27_PROJECT_CUSTOMER_INDEX = "CREATE INDEX customer_projects_customer_idx ON customer_projects(customer_id, owner_id)"
+_V27_PROJECT_TASK_INDEX = "CREATE INDEX customer_projects_task_idx ON customer_projects(project_task_id, owner_id)"
+_V27_COMM_APPROVAL_INDEX = "CREATE UNIQUE INDEX crm_communication_approvals_id_owner_idx ON crm_communication_approvals(id, owner_id)"
+_V27_COMM_APPROVAL_COMM_INDEX = "CREATE INDEX crm_communication_approvals_comm_idx ON crm_communication_approvals(communication_id, owner_id)"
+_V27_OUTBOUND_INDEX = "CREATE UNIQUE INDEX crm_outbound_configs_owner_idx ON crm_outbound_configs(owner_id)"
+_V27_SCHEMA = {
+    "customer_notes": """CREATE TABLE customer_notes (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    customer_id TEXT NOT NULL CHECK(length(customer_id)=32 AND customer_id NOT GLOB '*[^0-9a-f]*'),
+    note TEXT NOT NULL CHECK(length(note) BETWEEN 1 AND 2000 AND length(trim(note)) > 0),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    FOREIGN KEY(customer_id, owner_id) REFERENCES customers(id, owner_id)
+)""",
+    "customer_requirements": """CREATE TABLE customer_requirements (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    customer_id TEXT NOT NULL CHECK(length(customer_id)=32 AND customer_id NOT GLOB '*[^0-9a-f]*'),
+    requirement TEXT NOT NULL CHECK(length(requirement) BETWEEN 1 AND 500 AND length(trim(requirement)) > 0),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    FOREIGN KEY(customer_id, owner_id) REFERENCES customers(id, owner_id)
+)""",
+    "customer_orders": """CREATE TABLE customer_orders (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    customer_id TEXT NOT NULL CHECK(length(customer_id)=32 AND customer_id NOT GLOB '*[^0-9a-f]*'),
+    title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 200 AND length(trim(title)) > 0),
+    description TEXT NOT NULL CHECK(length(description) BETWEEN 0 AND 2000),
+    amount_paise INTEGER NOT NULL CHECK(typeof(amount_paise)='integer' AND amount_paise BETWEEN 0 AND 1000000000000),
+    currency TEXT NOT NULL CHECK(currency='INR'),
+    status TEXT NOT NULL CHECK(status IN ('draft','confirmed','fulfilled','cancelled')),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at),
+    FOREIGN KEY(customer_id, owner_id) REFERENCES customers(id, owner_id)
+)""",
+    "customer_projects": """CREATE TABLE customer_projects (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    customer_id TEXT NOT NULL CHECK(length(customer_id)=32 AND customer_id NOT GLOB '*[^0-9a-f]*'),
+    project_task_id TEXT NOT NULL CHECK(length(project_task_id)=32 AND project_task_id NOT GLOB '*[^0-9a-f]*'),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    UNIQUE(customer_id, project_task_id, owner_id),
+    FOREIGN KEY(customer_id, owner_id) REFERENCES customers(id, owner_id),
+    FOREIGN KEY(project_task_id, owner_id) REFERENCES project_tasks(id, owner_id)
+)""",
+    "crm_communication_approvals": """CREATE TABLE crm_communication_approvals (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    communication_id TEXT NOT NULL CHECK(length(communication_id)=32 AND communication_id NOT GLOB '*[^0-9a-f]*'),
+    status TEXT NOT NULL CHECK(status IN ('pending','approved','rejected','expired')),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    expires_at INTEGER NOT NULL CHECK(typeof(expires_at)='integer' AND expires_at > created_at AND (expires_at - created_at) BETWEEN 60 AND 86400),
+    decided_at INTEGER CHECK(decided_at IS NULL OR typeof(decided_at)='integer'),
+    FOREIGN KEY(communication_id, owner_id) REFERENCES communications(id, owner_id)
+)""",
+    "crm_outbound_configs": """CREATE TABLE crm_outbound_configs (
+    owner_id TEXT PRIMARY KEY NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),
+    allowed_channels TEXT NOT NULL CHECK(length(allowed_channels) BETWEEN 0 AND 500),
+    daily_limit INTEGER NOT NULL CHECK(typeof(daily_limit)='integer' AND daily_limit BETWEEN 1 AND 100),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= 0)
+)""",
+}
+_V26_SCHEMA = {
+    "product_ideas": """CREATE TABLE product_ideas (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 200 AND length(trim(title)) > 0),
+    description TEXT NOT NULL CHECK(length(description) BETWEEN 0 AND 2000),
+    status TEXT NOT NULL CHECK(status IN ('idea','validated','rejected','archived')),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at)
+)""",
+    "product_validations": """CREATE TABLE product_validations (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    product_id TEXT NOT NULL CHECK(length(product_id)=32 AND product_id NOT GLOB '*[^0-9a-f]*'),
+    criteria TEXT NOT NULL CHECK(length(criteria) BETWEEN 1 AND 500),
+    result TEXT NOT NULL CHECK(result IN ('pass','fail','pending')),
+    evidence TEXT NOT NULL CHECK(length(evidence) BETWEEN 0 AND 1000),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    FOREIGN KEY(product_id, owner_id) REFERENCES products(id, owner_id)
+)""",
+    "market_research": """CREATE TABLE market_research (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    product_id TEXT NOT NULL CHECK(length(product_id)=32 AND product_id NOT GLOB '*[^0-9a-f]*'),
+    query TEXT NOT NULL CHECK(length(query) BETWEEN 1 AND 500),
+    findings TEXT NOT NULL CHECK(length(findings) BETWEEN 1 AND 5000),
+    evidence_url TEXT NOT NULL CHECK(length(evidence_url) BETWEEN 0 AND 2048 AND (evidence_url='' OR evidence_url GLOB 'http://*' OR evidence_url GLOB 'https://*')),
+    ai_generated INTEGER NOT NULL CHECK(ai_generated IN (0,1)),
+    verification TEXT NOT NULL CHECK(verification IN ('unverified','verified')),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    FOREIGN KEY(product_id, owner_id) REFERENCES products(id, owner_id)
+)""",
+    "pricing_suggestions": """CREATE TABLE pricing_suggestions (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    product_id TEXT NOT NULL CHECK(length(product_id)=32 AND product_id NOT GLOB '*[^0-9a-f]*'),
+    price_paise INTEGER NOT NULL CHECK(typeof(price_paise)='integer' AND price_paise BETWEEN 0 AND 1000000000000),
+    rationale TEXT NOT NULL CHECK(length(rationale) BETWEEN 1 AND 2000),
+    ai_generated INTEGER NOT NULL CHECK(ai_generated IN (0,1)),
+    evidence TEXT NOT NULL CHECK(length(evidence) BETWEEN 0 AND 1000),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    FOREIGN KEY(product_id, owner_id) REFERENCES products(id, owner_id)
+)""",
+    "product_versions": """CREATE TABLE product_versions (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    product_id TEXT NOT NULL CHECK(length(product_id)=32 AND product_id NOT GLOB '*[^0-9a-f]*'),
+    version TEXT NOT NULL CHECK(length(version) BETWEEN 1 AND 20 AND version NOT GLOB '*[^A-Za-z0-9._-]*'),
+    notes TEXT NOT NULL CHECK(length(notes) BETWEEN 0 AND 2000),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    FOREIGN KEY(product_id, owner_id) REFERENCES products(id, owner_id)
+)""",
+    "product_files": """CREATE TABLE product_files (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    product_id TEXT NOT NULL CHECK(length(product_id)=32 AND product_id NOT GLOB '*[^0-9a-f]*'),
+    file_name TEXT NOT NULL CHECK(length(file_name) BETWEEN 1 AND 200 AND length(trim(file_name)) > 0),
+    file_hash BLOB CHECK(file_hash IS NULL OR (typeof(file_hash)='blob' AND length(file_hash)=32)),
+    file_size INTEGER NOT NULL CHECK(typeof(file_size)='integer' AND file_size BETWEEN 0 AND 104857600),
+    mime_type TEXT NOT NULL CHECK(length(mime_type) BETWEEN 1 AND 100),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    FOREIGN KEY(product_id, owner_id) REFERENCES products(id, owner_id)
+)""",
+    "product_sales": """CREATE TABLE product_sales (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    product_id TEXT NOT NULL CHECK(length(product_id)=32 AND product_id NOT GLOB '*[^0-9a-f]*'),
+    quantity INTEGER NOT NULL CHECK(typeof(quantity)='integer' AND quantity BETWEEN 1 AND 1000000),
+    amount_paise INTEGER NOT NULL CHECK(typeof(amount_paise)='integer' AND amount_paise BETWEEN 0 AND 1000000000000),
+    currency TEXT NOT NULL CHECK(currency='INR'),
+    sale_at INTEGER NOT NULL CHECK(typeof(sale_at)='integer' AND sale_at >= 0),
+    evidence_url TEXT NOT NULL CHECK(length(evidence_url) BETWEEN 0 AND 2048 AND (evidence_url='' OR evidence_url GLOB 'http://*' OR evidence_url GLOB 'https://*')),
+    verification TEXT NOT NULL CHECK(verification IN ('unverified','verified')),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    FOREIGN KEY(product_id, owner_id) REFERENCES products(id, owner_id)
+)""",
+    "product_deliverables": """CREATE TABLE product_deliverables (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    product_id TEXT NOT NULL CHECK(length(product_id)=32 AND product_id NOT GLOB '*[^0-9a-f]*'),
+    file_name TEXT NOT NULL CHECK(length(file_name) BETWEEN 1 AND 200 AND length(trim(file_name)) > 0),
+    file_hash BLOB CHECK(file_hash IS NULL OR (typeof(file_hash)='blob' AND length(file_hash)=32)),
+    file_size INTEGER NOT NULL CHECK(typeof(file_size)='integer' AND file_size BETWEEN 0 AND 104857600),
+    mime_type TEXT NOT NULL CHECK(length(mime_type) BETWEEN 1 AND 100),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    FOREIGN KEY(product_id, owner_id) REFERENCES products(id, owner_id)
+)""",
+    "product_documentation": """CREATE TABLE product_documentation (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    product_id TEXT NOT NULL CHECK(length(product_id)=32 AND product_id NOT GLOB '*[^0-9a-f]*'),
+    title TEXT NOT NULL CHECK(length(title) BETWEEN 1 AND 200 AND length(trim(title)) > 0),
+    content TEXT NOT NULL CHECK(length(content) BETWEEN 1 AND 10000),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at),
+    FOREIGN KEY(product_id, owner_id) REFERENCES products(id, owner_id)
+)""",
+}
+
+_V20_SCHEMA = {
+    "invoices": """CREATE TABLE invoices (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    order_id TEXT NOT NULL CHECK(length(order_id)=32 AND order_id NOT GLOB '*[^0-9a-f]*'),
+    invoice_number TEXT NOT NULL CHECK(length(invoice_number) BETWEEN 1 AND 32 AND invoice_number NOT GLOB '*[^A-Za-z0-9_-]*'),
+    amount_paise INTEGER NOT NULL CHECK(typeof(amount_paise)='integer' AND amount_paise BETWEEN 0 AND 1000000000000),
+    currency TEXT NOT NULL CHECK(currency='INR'),
+    status TEXT NOT NULL CHECK(status IN ('draft','issued','paid','overdue','void')),
+    pdf_hash BLOB CHECK(pdf_hash IS NULL OR (typeof(pdf_hash)='blob' AND length(pdf_hash)=32)),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at),
+    FOREIGN KEY(order_id, owner_id) REFERENCES order_drafts(id, owner_id)
+)""",
+}
+
+_V19_SCHEMA = {
+    "followups": """CREATE TABLE followups (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    customer_id TEXT NOT NULL CHECK(length(customer_id)=32 AND customer_id NOT GLOB '*[^0-9a-f]*'),
+    due_at INTEGER NOT NULL CHECK(typeof(due_at)='integer' AND due_at BETWEEN 0 AND 4102444800),
+    note TEXT NOT NULL CHECK(length(note) BETWEEN 0 AND 500),
+    status TEXT NOT NULL CHECK(status IN ('pending','completed','cancelled')),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at),
+    FOREIGN KEY(customer_id, owner_id) REFERENCES customers(id, owner_id)
+)""",
+}
+
+_V18_SCHEMA = {
+    "communications": """CREATE TABLE communications (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    customer_id TEXT NOT NULL CHECK(length(customer_id)=32 AND customer_id NOT GLOB '*[^0-9a-f]*'),
+    channel TEXT NOT NULL CHECK(length(channel) BETWEEN 1 AND 30),
+    body TEXT NOT NULL CHECK(length(body) BETWEEN 1 AND 2000),
+    status TEXT NOT NULL CHECK(status IN ('draft','sent','archived')),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at)
+)""",
+    "ledger_entries": """CREATE TABLE ledger_entries (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    kind TEXT NOT NULL CHECK(kind IN ('income','expense','refund','fee')),
+    amount_paise INTEGER NOT NULL CHECK(typeof(amount_paise)='integer' AND amount_paise BETWEEN 0 AND 1000000000000),
+    currency TEXT NOT NULL CHECK(currency='INR'),
+    note TEXT NOT NULL CHECK(length(note) BETWEEN 0 AND 500),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0)
+)""",
+}
+
 def _validate_schema(conn: sqlite3.Connection) -> int:
     application_id = conn.execute("PRAGMA application_id").fetchone()[0]
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    if application_id != APPLICATION_ID or version not in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14):
+    if application_id != APPLICATION_ID or version not in SUPPORTED_STATE_VERSIONS:
         raise StateStorageError("Unsupported or uninitialized state database; no migration was performed.")
     expected_columns = {
         "state_meta": [("key", "TEXT", 0, 1), ("value", "TEXT", 1, 0)],
@@ -408,6 +906,170 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
             ("owner_id", "TEXT", 1, 1), ("event_id", "TEXT", 1, 2), ("payment_id", "TEXT", 1, 0),
             ("event_type", "TEXT", 1, 0), ("sequence", "INTEGER", 1, 0), ("body_hash", "BLOB", 1, 0),
         ]
+    if version >= 15:
+        expected_columns["opportunities"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("title", "TEXT", 1, 0),
+            ("source_url", "TEXT", 1, 0), ("source_type", "TEXT", 1, 0), ("connector_id", "TEXT", 0, 0),
+            ("budget_paise", "INTEGER", 1, 0), ("currency", "TEXT", 1, 0), ("deadline_at", "INTEGER", 1, 0),
+            ("risk_level", "TEXT", 1, 0), ("skill_tags", "TEXT", 1, 0), ("status", "TEXT", 1, 0),
+            ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+        ]
+    if version >= 16:
+        expected_columns["services"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("title", "TEXT", 1, 0),
+            ("scope", "TEXT", 1, 0), ("deliverable", "TEXT", 1, 0), ("price_paise", "INTEGER", 1, 0),
+            ("currency", "TEXT", 1, 0), ("revisions", "INTEGER", 1, 0), ("status", "TEXT", 1, 0),
+            ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["portfolio_items"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("service_id", "TEXT", 1, 0),
+            ("title", "TEXT", 1, 0), ("description", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+        ]
+    if version >= 17:
+        expected_columns["products"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("title", "TEXT", 1, 0),
+            ("description", "TEXT", 1, 0), ("version", "TEXT", 1, 0), ("price_paise", "INTEGER", 1, 0),
+            ("currency", "TEXT", 1, 0), ("status", "TEXT", 1, 0),
+            ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["customers"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("name", "TEXT", 1, 0),
+            ("contact", "TEXT", 1, 0), ("source", "TEXT", 1, 0), ("status", "TEXT", 1, 0),
+            ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+        ]
+    if version >= 18:
+        expected_columns["communications"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("customer_id", "TEXT", 1, 0),
+            ("channel", "TEXT", 1, 0), ("body", "TEXT", 1, 0), ("status", "TEXT", 1, 0),
+            ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["ledger_entries"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("kind", "TEXT", 1, 0),
+            ("amount_paise", "INTEGER", 1, 0), ("currency", "TEXT", 1, 0), ("note", "TEXT", 1, 0),
+            ("created_at", "INTEGER", 1, 0),
+        ]
+    if version >= 19:
+        expected_columns["followups"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("customer_id", "TEXT", 1, 0),
+            ("due_at", "INTEGER", 1, 0), ("note", "TEXT", 1, 0), ("status", "TEXT", 1, 0),
+            ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+        ]
+    if version >= 21:
+        expected_columns["payment_provider_orders"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("provider", "TEXT", 1, 0), ("mode", "TEXT", 1, 0),
+            ("amount_paise", "INTEGER", 1, 0), ("currency", "TEXT", 1, 0), ("status", "TEXT", 1, 0), ("provider_order_id", "TEXT", 1, 0),
+            ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["payment_provider_events"] = [
+            ("owner_id", "TEXT", 1, 0), ("event_id", "TEXT", 1, 1), ("order_id", "TEXT", 1, 0),
+            ("event_type", "TEXT", 1, 0), ("amount_paise", "INTEGER", 1, 0), ("raw_body_hash", "BLOB", 1, 0), ("received_at", "INTEGER", 1, 0),
+        ]
+    if version >= 22:
+        expected_columns["ai_approvals"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("tool_name", "TEXT", 1, 0), ("args_json", "TEXT", 1, 0),
+            ("status", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0), ("expires_at", "INTEGER", 1, 0), ("decided_at", "INTEGER", 0, 0),
+        ]
+        expected_columns["ai_emergency"] = [
+            ("owner_id", "TEXT", 1, 1), ("stopped", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0), ("reason", "TEXT", 1, 0),
+        ]
+    if version >= 23:
+        expected_columns["project_tasks"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("opportunity_id", "TEXT", 0, 0), ("parent_task_id", "TEXT", 0, 0),
+            ("title", "TEXT", 1, 0), ("description", "TEXT", 1, 0), ("priority", "INTEGER", 1, 0), ("deadline_at", "INTEGER", 1, 0),
+            ("estimated_duration_seconds", "INTEGER", 1, 0), ("actual_duration_seconds", "INTEGER", 1, 0), ("status", "TEXT", 1, 0),
+            ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["task_dependencies"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("task_id", "TEXT", 1, 0), ("depends_on_task_id", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["task_execution_logs"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("task_id", "TEXT", 1, 0), ("message", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+        ]
+    if version >= 24:
+        # v24 adds lease and retry columns to project_tasks
+        expected_columns["project_tasks"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("opportunity_id", "TEXT", 0, 0), ("parent_task_id", "TEXT", 0, 0),
+            ("title", "TEXT", 1, 0), ("description", "TEXT", 1, 0), ("priority", "INTEGER", 1, 0), ("deadline_at", "INTEGER", 1, 0),
+            ("estimated_duration_seconds", "INTEGER", 1, 0), ("actual_duration_seconds", "INTEGER", 1, 0), ("status", "TEXT", 1, 0),
+            ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0), ("lease_id", "TEXT", 0, 0), ("lease_until", "INTEGER", 0, 0),
+            ("attempts", "INTEGER", 1, 0), ("max_attempts", "INTEGER", 1, 0), ("backoff_seconds", "INTEGER", 1, 0), ("available_at", "INTEGER", 1, 0),
+        ]
+    if version >= 25:
+        expected_columns["service_packages"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("service_id", "TEXT", 1, 0), ("title", "TEXT", 1, 0), ("description", "TEXT", 1, 0),
+            ("price_paise", "INTEGER", 1, 0), ("delivery_days", "INTEGER", 1, 0), ("revisions", "INTEGER", 1, 0),
+            ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["service_requirements"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("service_id", "TEXT", 1, 0), ("requirement", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["service_attachments"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("service_id", "TEXT", 0, 0), ("portfolio_item_id", "TEXT", 0, 0),
+            ("file_name", "TEXT", 1, 0), ("file_hash", "BLOB", 0, 0), ("file_size", "INTEGER", 1, 0), ("mime_type", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["proposals"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("service_id", "TEXT", 1, 0), ("customer_id", "TEXT", 0, 0),
+            ("title", "TEXT", 1, 0), ("description", "TEXT", 1, 0), ("price_paise", "INTEGER", 1, 0), ("delivery_days", "INTEGER", 1, 0),
+            ("status", "TEXT", 1, 0), ("ai_generated", "INTEGER", 1, 0), ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["customer_requests"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("service_id", "TEXT", 1, 0), ("customer_id", "TEXT", 1, 0),
+            ("message", "TEXT", 1, 0), ("status", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+        ]
+    if version >= 26:
+        expected_columns["product_ideas"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("title", "TEXT", 1, 0), ("description", "TEXT", 1, 0), ("status", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["product_validations"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("product_id", "TEXT", 1, 0), ("criteria", "TEXT", 1, 0), ("result", "TEXT", 1, 0), ("evidence", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["market_research"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("product_id", "TEXT", 1, 0), ("query", "TEXT", 1, 0), ("findings", "TEXT", 1, 0), ("evidence_url", "TEXT", 1, 0), ("ai_generated", "INTEGER", 1, 0), ("verification", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["pricing_suggestions"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("product_id", "TEXT", 1, 0), ("price_paise", "INTEGER", 1, 0), ("rationale", "TEXT", 1, 0), ("ai_generated", "INTEGER", 1, 0), ("evidence", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["product_versions"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("product_id", "TEXT", 1, 0), ("version", "TEXT", 1, 0), ("notes", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["product_files"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("product_id", "TEXT", 1, 0), ("file_name", "TEXT", 1, 0), ("file_hash", "BLOB", 0, 0), ("file_size", "INTEGER", 1, 0), ("mime_type", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["product_sales"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("product_id", "TEXT", 1, 0), ("quantity", "INTEGER", 1, 0), ("amount_paise", "INTEGER", 1, 0), ("currency", "TEXT", 1, 0), ("sale_at", "INTEGER", 1, 0), ("evidence_url", "TEXT", 1, 0), ("verification", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["product_deliverables"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("product_id", "TEXT", 1, 0), ("file_name", "TEXT", 1, 0), ("file_hash", "BLOB", 0, 0), ("file_size", "INTEGER", 1, 0), ("mime_type", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["product_documentation"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("product_id", "TEXT", 1, 0), ("title", "TEXT", 1, 0), ("content", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+        ]
+    if version >= 27:
+        expected_columns["customer_notes"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("customer_id", "TEXT", 1, 0), ("note", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["customer_requirements"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("customer_id", "TEXT", 1, 0), ("requirement", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["customer_orders"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("customer_id", "TEXT", 1, 0), ("title", "TEXT", 1, 0), ("description", "TEXT", 1, 0), ("amount_paise", "INTEGER", 1, 0), ("currency", "TEXT", 1, 0), ("status", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["customer_projects"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("customer_id", "TEXT", 1, 0), ("project_task_id", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["crm_communication_approvals"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("communication_id", "TEXT", 1, 0), ("status", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0), ("expires_at", "INTEGER", 1, 0), ("decided_at", "INTEGER", 0, 0),
+        ]
+        expected_columns["crm_outbound_configs"] = [
+            ("owner_id", "TEXT", 1, 1), ("enabled", "INTEGER", 1, 0), ("allowed_channels", "TEXT", 1, 0), ("daily_limit", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+        ]
+    if version >= 20:
+        expected_columns["invoices"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("order_id", "TEXT", 1, 0),
+            ("invoice_number", "TEXT", 1, 0), ("amount_paise", "INTEGER", 1, 0), ("currency", "TEXT", 1, 0),
+            ("status", "TEXT", 1, 0), ("pdf_hash", "BLOB", 0, 0), ("created_at", "INTEGER", 1, 0),
+            ("updated_at", "INTEGER", 1, 0),
+        ]
     objects = conn.execute(
         "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name"
     ).fetchall()
@@ -420,6 +1082,55 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         expected_objects.append(("index", "task_workflows_id_owner_idx"))
     if version >= 11:
         expected_objects.append(("index", "task_associations_id_owner_idx"))
+    if version >= 16:
+        expected_objects.append(("index", "services_id_owner_idx"))
+    if version >= 17:
+        expected_objects.append(("index", "products_id_owner_idx"))
+    if version >= 18:
+        expected_objects.append(("index", "communications_id_owner_idx"))
+        expected_objects.append(("index", "ledger_entries_id_owner_idx"))
+    if version >= 19:
+        expected_objects.append(("index", "customers_id_owner_idx"))
+        expected_objects.append(("index", "followups_id_owner_idx"))
+    if version >= 21:
+        expected_objects.append(("index", "payment_provider_orders_id_owner_idx"))
+        expected_objects.append(("index", "payment_provider_orders_provider_order_idx"))
+        expected_objects.append(("index", "payment_provider_events_id_owner_idx"))
+    if version >= 22:
+        expected_objects.append(("index", "ai_approvals_id_owner_idx"))
+    if version >= 23:
+        expected_objects.append(("index", "project_tasks_id_owner_idx"))
+        expected_objects.append(("index", "task_dependencies_task_idx"))
+        expected_objects.append(("index", "task_execution_logs_task_idx"))
+    if version >= 25:
+        expected_objects.append(("index", "service_packages_id_owner_idx"))
+        expected_objects.append(("index", "service_requirements_service_idx"))
+        expected_objects.append(("index", "service_attachments_service_idx"))
+        expected_objects.append(("index", "proposals_id_owner_idx"))
+        expected_objects.append(("index", "customer_requests_id_owner_idx"))
+    if version >= 26:
+        expected_objects.append(("index", "product_ideas_id_owner_idx"))
+        expected_objects.append(("index", "product_validations_product_idx"))
+        expected_objects.append(("index", "market_research_product_idx"))
+        expected_objects.append(("index", "pricing_suggestions_product_idx"))
+        expected_objects.append(("index", "product_versions_product_idx"))
+        expected_objects.append(("index", "product_files_product_idx"))
+        expected_objects.append(("index", "product_sales_product_idx"))
+        expected_objects.append(("index", "product_deliverables_product_idx"))
+        expected_objects.append(("index", "product_documentation_product_idx"))
+    if version >= 27:
+        expected_objects.append(("index", "customer_notes_customer_idx"))
+        expected_objects.append(("index", "customer_requirements_customer_idx"))
+        expected_objects.append(("index", "customer_orders_id_owner_idx"))
+        expected_objects.append(("index", "customer_orders_customer_idx"))
+        expected_objects.append(("index", "customer_projects_customer_idx"))
+        expected_objects.append(("index", "customer_projects_task_idx"))
+        expected_objects.append(("index", "crm_communication_approvals_id_owner_idx"))
+        expected_objects.append(("index", "crm_communication_approvals_comm_idx"))
+        expected_objects.append(("index", "crm_outbound_configs_owner_idx"))
+    if version >= 20:
+        expected_objects.append(("index", "invoices_id_owner_idx"))
+        expected_objects.append(("index", "invoices_number_owner_idx"))
     if [tuple(row) for row in objects] != sorted(expected_objects, key=lambda item: item[1]):
         raise StateStorageError("State database schema is incompatible.")
     if version >= 6:
@@ -437,6 +1148,131 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
     if version >= 11:
         row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='task_associations_id_owner_idx'").fetchone()
         if row is None or row[0] != _V11_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+    if version >= 16:
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='services_id_owner_idx'").fetchone()
+        if row is None or row[0] != _V16_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+    if version >= 17:
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='products_id_owner_idx'").fetchone()
+        if row is None or row[0] != _V17_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+    if version >= 18:
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='communications_id_owner_idx'").fetchone()
+        if row is None or row[0] != _V18_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='ledger_entries_id_owner_idx'").fetchone()
+        if row is None or row[0] != _V18_LEDGER_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+    if version >= 19:
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='customers_id_owner_idx'").fetchone()
+        if row is None or row[0] != _V19_CUSTOMER_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='followups_id_owner_idx'").fetchone()
+        if row is None or row[0] != _V19_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+    if version >= 21:
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='payment_provider_orders_id_owner_idx'").fetchone()
+        if row is None or row[0] != _V21_PROVIDER_ORDERS_ID_OWNER_IDX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='payment_provider_orders_provider_order_idx'").fetchone()
+        if row is None or row[0] != _V21_PROVIDER_ORDERS_PROVIDER_IDX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='payment_provider_events_id_owner_idx'").fetchone()
+        if row is None or row[0] != _V21_PROVIDER_EVENTS_ID_IDX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+    if version >= 22:
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='ai_approvals_id_owner_idx'").fetchone()
+        if row is None or row[0] != _V22_APPROVAL_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+    if version >= 23:
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='project_tasks_id_owner_idx'").fetchone()
+        if row is None or row[0] != _V23_PROJECT_TASKS_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='task_dependencies_task_idx'").fetchone()
+        if row is None or row[0] != _V23_DEPENDS_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='task_execution_logs_task_idx'").fetchone()
+        if row is None or row[0] != _V23_LOGS_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+    if version >= 25:
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='service_packages_id_owner_idx'").fetchone()
+        if row is None or row[0] != _V25_PACKAGE_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='service_requirements_service_idx'").fetchone()
+        if row is None or row[0] != _V25_REQUIREMENT_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='service_attachments_service_idx'").fetchone()
+        if row is None or row[0] != _V25_ATTACHMENT_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='proposals_id_owner_idx'").fetchone()
+        if row is None or row[0] != _V25_PROPOSAL_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='customer_requests_id_owner_idx'").fetchone()
+        if row is None or row[0] != _V25_REQUEST_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+    if version >= 26:
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='product_ideas_id_owner_idx'").fetchone()
+        if row is None or row[0] != _V26_IDEA_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='product_validations_product_idx'").fetchone()
+        if row is None or row[0] != _V26_VALIDATION_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='market_research_product_idx'").fetchone()
+        if row is None or row[0] != _V26_RESEARCH_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='pricing_suggestions_product_idx'").fetchone()
+        if row is None or row[0] != _V26_PRICING_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='product_versions_product_idx'").fetchone()
+        if row is None or row[0] != _V26_VERSION_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='product_files_product_idx'").fetchone()
+        if row is None or row[0] != _V26_FILE_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='product_sales_product_idx'").fetchone()
+        if row is None or row[0] != _V26_SALES_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='product_deliverables_product_idx'").fetchone()
+        if row is None or row[0] != _V26_DELIVERABLE_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='product_documentation_product_idx'").fetchone()
+        if row is None or row[0] != _V26_DOCS_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+    if version >= 27:
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='customer_notes_customer_idx'").fetchone()
+        if row is None or row[0] != _V27_NOTE_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='customer_requirements_customer_idx'").fetchone()
+        if row is None or row[0] != _V27_REQUIREMENT_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='customer_orders_id_owner_idx'").fetchone()
+        if row is None or row[0] != _V27_ORDER_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='customer_orders_customer_idx'").fetchone()
+        if row is None or row[0] != _V27_ORDER_CUSTOMER_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='customer_projects_customer_idx'").fetchone()
+        if row is None or row[0] != _V27_PROJECT_CUSTOMER_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='customer_projects_task_idx'").fetchone()
+        if row is None or row[0] != _V27_PROJECT_TASK_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='crm_communication_approvals_id_owner_idx'").fetchone()
+        if row is None or row[0] != _V27_COMM_APPROVAL_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='crm_communication_approvals_comm_idx'").fetchone()
+        if row is None or row[0] != _V27_COMM_APPROVAL_COMM_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='crm_outbound_configs_owner_idx'").fetchone()
+        if row is None or row[0] != _V27_OUTBOUND_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+    if version >= 20:
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='invoices_id_owner_idx'").fetchone()
+        if row is None or row[0] != _V20_INVOICE_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='invoices_number_owner_idx'").fetchone()
+        if row is None or row[0] != _V20_INVOICE_NUMBER_INDEX:
             raise StateStorageError("State database schema constraints are incompatible.")
     for table, expected in expected_columns.items():
         columns = conn.execute(f"PRAGMA table_info({table})").fetchall()
@@ -469,8 +1305,39 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         schemas.append(_V13_SCHEMA)
     if version >= 14:
         schemas.append(_V14_SCHEMA)
+    if version >= 15:
+        schemas.append(_V15_SCHEMA)
+    if version >= 16:
+        schemas.append(_V16_SCHEMA)
+    if version >= 17:
+        schemas.append(_V17_SCHEMA)
+    if version >= 18:
+        schemas.append(_V18_SCHEMA)
+    if version >= 19:
+        schemas.append(_V19_SCHEMA)
+    if version >= 20:
+        schemas.append(_V20_SCHEMA)
+    if version >= 21:
+        schemas.append(_V21_SCHEMA)
+    if version >= 22:
+        schemas.append(_V22_SCHEMA)
+    if version >= 23:
+        schemas.append(_V23_SCHEMA)
+    if version >= 24:
+        schemas.append(_V24_SCHEMA)
+    if version >= 25:
+        schemas.append(_V25_SCHEMA)
+    if version >= 26:
+        schemas.append(_V26_SCHEMA)
+    if version >= 27:
+        schemas.append(_V27_SCHEMA)
     for schema in schemas:
         for name, statement in schema.items():
+            # v24 alters project_tasks via ALTER TABLE; sql formatting differs from CREATE literal, so rely on PRAGMA table_info instead
+            if version >= 24 and name == "project_tasks":
+                continue
+            if version >= 24 and name == "project_tasks" and statement == _V23_SCHEMA.get("project_tasks"):
+                continue
             row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()
             if row is None or row[0] != statement:
                 raise StateStorageError("State database schema constraints are incompatible.")
@@ -577,6 +1444,139 @@ def _apply_v14(conn: sqlite3.Connection) -> None:
     conn.execute("PRAGMA user_version = 14")
 
 
+def _apply_v15(conn: sqlite3.Connection) -> None:
+    for statement in _V15_SCHEMA.values():
+        conn.execute(statement)
+    conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (15, int(time.time())))
+    conn.execute("PRAGMA user_version = 15")
+
+
+def _apply_v16(conn: sqlite3.Connection) -> None:
+    for statement in _V16_SCHEMA.values():
+        conn.execute(statement)
+    conn.execute(_V16_INDEX)
+    conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (16, int(time.time())))
+    conn.execute("PRAGMA user_version = 16")
+
+
+def _apply_v17(conn: sqlite3.Connection) -> None:
+    for statement in _V17_SCHEMA.values():
+        conn.execute(statement)
+    conn.execute(_V17_INDEX)
+    conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (17, int(time.time())))
+    conn.execute("PRAGMA user_version = 17")
+
+
+def _apply_v18(conn: sqlite3.Connection) -> None:
+    for statement in _V18_SCHEMA.values():
+        conn.execute(statement)
+    conn.execute(_V18_INDEX)
+    conn.execute(_V18_LEDGER_INDEX)
+    conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (18, int(time.time())))
+    conn.execute("PRAGMA user_version = 18")
+
+
+def _apply_v19(conn: sqlite3.Connection) -> None:
+    conn.execute(_V19_CUSTOMER_INDEX)
+    for statement in _V19_SCHEMA.values():
+        conn.execute(statement)
+    conn.execute(_V19_INDEX)
+    conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (19, int(time.time())))
+    conn.execute("PRAGMA user_version = 19")
+
+
+def _apply_v20(conn: sqlite3.Connection) -> None:
+    for statement in _V20_SCHEMA.values():
+        conn.execute(statement)
+    conn.execute(_V20_INVOICE_INDEX)
+    conn.execute(_V20_INVOICE_NUMBER_INDEX)
+    conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (20, int(time.time())))
+    conn.execute("PRAGMA user_version = 20")
+
+
+def _apply_v21(conn: sqlite3.Connection) -> None:
+    for statement in _V21_SCHEMA.values():
+        conn.execute(statement)
+    conn.execute(_V21_PROVIDER_ORDERS_ID_OWNER_IDX)
+    conn.execute(_V21_PROVIDER_ORDERS_PROVIDER_IDX)
+    conn.execute(_V21_PROVIDER_EVENTS_ID_IDX)
+    conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (21, int(time.time())))
+    conn.execute("PRAGMA user_version = 21")
+
+
+def _apply_v22(conn: sqlite3.Connection) -> None:
+    for statement in _V22_SCHEMA.values():
+        conn.execute(statement)
+    conn.execute(_V22_APPROVAL_INDEX)
+    conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (22, int(time.time())))
+    conn.execute("PRAGMA user_version = 22")
+
+
+def _apply_v23(conn: sqlite3.Connection) -> None:
+    for statement in _V23_SCHEMA.values():
+        conn.execute(statement)
+    conn.execute(_V23_PROJECT_TASKS_INDEX)
+    conn.execute(_V23_DEPENDS_INDEX)
+    conn.execute(_V23_LOGS_INDEX)
+    conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (23, int(time.time())))
+    conn.execute("PRAGMA user_version = 23")
+
+
+def _apply_v24(conn: sqlite3.Connection) -> None:
+    conn.execute("ALTER TABLE project_tasks ADD COLUMN lease_id TEXT CHECK(lease_id IS NULL OR (length(lease_id)=32 AND lease_id NOT GLOB '*[^0-9a-f]*'))")
+    conn.execute("ALTER TABLE project_tasks ADD COLUMN lease_until INTEGER CHECK(lease_until IS NULL OR (lease_until BETWEEN 0 AND 4102444800))")
+    conn.execute("ALTER TABLE project_tasks ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0 CHECK(attempts BETWEEN 0 AND 10)")
+    conn.execute("ALTER TABLE project_tasks ADD COLUMN max_attempts INTEGER NOT NULL DEFAULT 3 CHECK(max_attempts BETWEEN 1 AND 10)")
+    conn.execute("ALTER TABLE project_tasks ADD COLUMN backoff_seconds INTEGER NOT NULL DEFAULT 60 CHECK(backoff_seconds BETWEEN 0 AND 86400)")
+    conn.execute("ALTER TABLE project_tasks ADD COLUMN available_at INTEGER NOT NULL DEFAULT 0 CHECK(available_at BETWEEN 0 AND 4102444800)")
+    conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (24, int(time.time())))
+    conn.execute("PRAGMA user_version = 24")
+
+
+def _apply_v25(conn: sqlite3.Connection) -> None:
+    for statement in _V25_SCHEMA.values():
+        conn.execute(statement)
+    conn.execute(_V25_PACKAGE_INDEX)
+    conn.execute(_V25_REQUIREMENT_INDEX)
+    conn.execute(_V25_ATTACHMENT_INDEX)
+    conn.execute(_V25_PROPOSAL_INDEX)
+    conn.execute(_V25_REQUEST_INDEX)
+    conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (25, int(time.time())))
+    conn.execute("PRAGMA user_version = 25")
+
+
+def _apply_v26(conn: sqlite3.Connection) -> None:
+    for statement in _V26_SCHEMA.values():
+        conn.execute(statement)
+    conn.execute(_V26_IDEA_INDEX)
+    conn.execute(_V26_VALIDATION_INDEX)
+    conn.execute(_V26_RESEARCH_INDEX)
+    conn.execute(_V26_PRICING_INDEX)
+    conn.execute(_V26_VERSION_INDEX)
+    conn.execute(_V26_FILE_INDEX)
+    conn.execute(_V26_SALES_INDEX)
+    conn.execute(_V26_DELIVERABLE_INDEX)
+    conn.execute(_V26_DOCS_INDEX)
+    conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (26, int(time.time())))
+    conn.execute("PRAGMA user_version = 26")
+
+
+def _apply_v27(conn: sqlite3.Connection) -> None:
+    for statement in _V27_SCHEMA.values():
+        conn.execute(statement)
+    conn.execute(_V27_NOTE_INDEX)
+    conn.execute(_V27_REQUIREMENT_INDEX)
+    conn.execute(_V27_ORDER_INDEX)
+    conn.execute(_V27_ORDER_CUSTOMER_INDEX)
+    conn.execute(_V27_PROJECT_CUSTOMER_INDEX)
+    conn.execute(_V27_PROJECT_TASK_INDEX)
+    conn.execute(_V27_COMM_APPROVAL_INDEX)
+    conn.execute(_V27_COMM_APPROVAL_COMM_INDEX)
+    conn.execute(_V27_OUTBOUND_INDEX)
+    conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (27, int(time.time())))
+    conn.execute("PRAGMA user_version = 27")
+
+
 def _check_managed_pairs(conn: sqlite3.Connection, owner=None, queue_id=None, workflow_id=None, association_id=None) -> None:
     """Check managed-parent state combinations, not history authenticity."""
     invalid = conn.execute("""
@@ -670,6 +1670,17 @@ _OPERATION_RESULTS = (
     (12, "managed_task_pair", "managed_task_pairs"),
     (13, "financial_assertion", "financial_assertions"),
     (14, "sandbox_payment", "sandbox_payments"),
+    (15, "opportunity", "opportunities"),
+    (16, "service", "services"),
+    (16, "portfolio_item", "portfolio_items"),
+    (17, "product", "products"),
+    (17, "customer", "customers"),
+    (18, "communication", "communications"),
+    (18, "ledger_entry", "ledger_entries"),
+    (19, "followup", "followups"),
+    (20, "invoice", "invoices"),
+    (21, "provider_order", "payment_provider_orders"),
+    (22, "ai_approval", "ai_approvals"),
 )
 
 
@@ -733,6 +1744,17 @@ _CREATION_EVENTS = (
     (12, "managed_task_pairs", "managed_task_pair", "managed_task_pair_created"),
     (13, "financial_assertions", "financial_assertion", "financial_assertion_created"),
     (14, "sandbox_payments", "sandbox_payment", "sandbox_payment_created"),
+    (15, "opportunities", "opportunity", "opportunity_created"),
+    (16, "services", "service", "service_created"),
+    (16, "portfolio_items", "portfolio_item", "portfolio_item_created"),
+    (17, "products", "product", "product_created"),
+    (17, "customers", "customer", "customer_created"),
+    (18, "communications", "communication", "communication_created"),
+    (18, "ledger_entries", "ledger_entry", "ledger_entry_created"),
+    (19, "followups", "followup", "followup_created"),
+    (20, "invoices", "invoice", "invoice_created"),
+    (21, "payment_provider_orders", "provider_order", "provider_order_created"),
+    (22, "ai_approvals", "ai_approval", "ai_approval_created"),
 )
 
 
@@ -839,6 +1861,76 @@ _MULTI_STEP_HISTORIES = (
         ("flagged", "payment_observation_unflag"): "unverified",
         ("unverified", "payment_observation_discard"): "discarded",
         ("flagged", "payment_observation_discard"): "discarded",
+    }),
+    (15, "opportunities", "opportunity", {
+        (None, "opportunity_created"): "discovered",
+        ("discovered", "opportunity_vetted"): "vetted",
+        ("discovered", "opportunity_dismissed"): "dismissed",
+        ("discovered", "opportunity_archived"): "archived",
+        ("vetted", "opportunity_pursuing"): "pursuing",
+        ("vetted", "opportunity_dismissed"): "dismissed",
+        ("vetted", "opportunity_archived"): "archived",
+        ("pursuing", "opportunity_archived"): "archived",
+        ("pursuing", "opportunity_dismissed"): "dismissed",
+    }),
+    (16, "services", "service", {
+        (None, "service_created"): "draft",
+        ("draft", "service_published"): "published",
+        ("draft", "service_archived"): "archived",
+        ("published", "service_archived"): "archived",
+    }),
+    (17, "products", "product", {
+        (None, "product_created"): "draft",
+        ("draft", "product_published"): "published",
+        ("draft", "product_archived"): "archived",
+        ("published", "product_archived"): "archived",
+    }),
+    (17, "customers", "customer", {
+        (None, "customer_created"): "lead",
+        ("lead", "customer_contacted"): "contacted",
+        ("lead", "customer_rejected"): "rejected",
+        ("contacted", "customer_converted"): "converted",
+        ("contacted", "customer_rejected"): "rejected",
+    }),
+    (18, "communications", "communication", {
+        (None, "communication_created"): "draft",
+        ("draft", "communication_sent"): "sent",
+        ("draft", "communication_archived"): "archived",
+        ("sent", "communication_archived"): "archived",
+    }),
+    (19, "followups", "followup", {
+        (None, "followup_created"): "pending",
+        ("pending", "followup_completed"): "completed",
+        ("pending", "followup_cancelled"): "cancelled",
+    }),
+    (20, "invoices", "invoice", {
+        (None, "invoice_created"): "draft",
+        ("draft", "invoice_issued"): "issued",
+        ("draft", "invoice_voided"): "void",
+        ("issued", "invoice_paid"): "paid",
+        ("issued", "invoice_overdue"): "overdue",
+        ("issued", "invoice_voided"): "void",
+        ("overdue", "invoice_paid"): "paid",
+        ("overdue", "invoice_voided"): "void",
+    }),
+    (21, "payment_provider_orders", "provider_order", {
+        (None, "provider_order_created"): "created",
+        ("created", "provider_order_authorized"): "authorized",
+        ("created", "provider_order_failed"): "failed",
+        ("authorized", "provider_order_captured"): "captured",
+        ("authorized", "provider_order_failed"): "failed",
+        ("captured", "provider_order_settled"): "settled",
+        ("captured", "provider_order_refunded"): "refunded",
+        ("settled", "provider_order_refunded"): "refunded",
+        ("captured", "provider_order_failed"): "failed",
+    }),
+    (22, "ai_approvals", "ai_approval", {
+        (None, "ai_approval_created"): "pending",
+        ("pending", "ai_approval_approved"): "approved",
+        ("pending", "ai_approval_rejected"): "rejected",
+        ("pending", "ai_approval_expired"): "expired",
+        ("pending", "ai_approval_revoked"): "revoked",
+        ("approved", "ai_approval_revoked"): "revoked",
     }),
 )
 
@@ -1265,6 +2357,175 @@ class StateStorage:
             self.backup_to(backup, confirmed=True)
             _apply_v14(conn)
             if _validate_schema(conn) != 14:
+                raise StateStorageError("Migration produced an incompatible schema.")
+            _check_integrity(conn)
+
+    def migrate_to_v15(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 14 only after a checked non-overwriting backup."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 14:
+                raise StateStorageError("Only version 14 can be upgraded to version 15.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v15(conn)
+            if _validate_schema(conn) != 15:
+                raise StateStorageError("Migration produced an incompatible schema.")
+            _check_integrity(conn)
+
+    def migrate_to_v16(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 15 only after a checked non-overwriting backup."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 15:
+                raise StateStorageError("Only version 15 can be upgraded to version 16.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v16(conn)
+            if _validate_schema(conn) != 16:
+                raise StateStorageError("Migration produced an incompatible schema.")
+            _check_integrity(conn)
+
+    def migrate_to_v17(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 16 only after a checked non-overwriting backup."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 16:
+                raise StateStorageError("Only version 16 can be upgraded to version 17.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v17(conn)
+            if _validate_schema(conn) != 17:
+                raise StateStorageError("Migration produced an incompatible schema.")
+            _check_integrity(conn)
+
+    def migrate_to_v18(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 17 only after a checked non-overwriting backup."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 17:
+                raise StateStorageError("Only version 17 can be upgraded to version 18.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v18(conn)
+            if _validate_schema(conn) != 18:
+                raise StateStorageError("Migration produced an incompatible schema.")
+            _check_integrity(conn)
+
+    def migrate_to_v19(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 18 only after a checked non-overwriting backup."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 18:
+                raise StateStorageError("Only version 18 can be upgraded to version 19.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v19(conn)
+            if _validate_schema(conn) != 19:
+                raise StateStorageError("Migration produced an incompatible schema.")
+            _check_integrity(conn)
+
+    def migrate_to_v20(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 19 only after a checked non-overwriting backup."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 19:
+                raise StateStorageError("Only version 19 can be upgraded to version 20.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v20(conn)
+            if _validate_schema(conn) != 20:
+                raise StateStorageError("Migration produced an incompatible schema.")
+            _check_integrity(conn)
+
+    def migrate_to_v21(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 20 only after a checked non-overwriting backup."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 20:
+                raise StateStorageError("Only version 20 can be upgraded to version 21.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v21(conn)
+            if _validate_schema(conn) != 21:
+                raise StateStorageError("Migration produced an incompatible schema.")
+            _check_integrity(conn)
+
+    def migrate_to_v22(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 21 only after a checked non-overwriting backup."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 21:
+                raise StateStorageError("Only version 21 can be upgraded to version 22.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v22(conn)
+            if _validate_schema(conn) != 22:
+                raise StateStorageError("Migration produced an incompatible schema.")
+            _check_integrity(conn)
+
+    def migrate_to_v23(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 22 only after a checked non-overwriting backup."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 22:
+                raise StateStorageError("Only version 22 can be upgraded to version 23.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v23(conn)
+            if _validate_schema(conn) != 23:
+                raise StateStorageError("Migration produced an incompatible schema.")
+            _check_integrity(conn)
+
+    def migrate_to_v24(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 23 only after a checked non-overwriting backup."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 23:
+                raise StateStorageError("Only version 23 can be upgraded to version 24.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v24(conn)
+            if _validate_schema(conn) != 24:
+                raise StateStorageError("Migration produced an incompatible schema.")
+            _check_integrity(conn)
+
+    def migrate_to_v25(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 24 only after a checked non-overwriting backup."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 24:
+                raise StateStorageError("Only version 24 can be upgraded to version 25.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v25(conn)
+            if _validate_schema(conn) != 25:
+                raise StateStorageError("Migration produced an incompatible schema.")
+            _check_integrity(conn)
+
+    def migrate_to_v26(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 25 only after a checked non-overwriting backup."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 25:
+                raise StateStorageError("Only version 25 can be upgraded to version 26.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v26(conn)
+            if _validate_schema(conn) != 26:
+                raise StateStorageError("Migration produced an incompatible schema.")
+            _check_integrity(conn)
+
+    def migrate_to_v27(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 26 only after a checked non-overwriting backup."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 26:
+                raise StateStorageError("Only version 26 can be upgraded to version 27.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v27(conn)
+            if _validate_schema(conn) != 27:
                 raise StateStorageError("Migration produced an incompatible schema.")
             _check_integrity(conn)
 

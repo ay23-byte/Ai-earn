@@ -31,8 +31,8 @@ def _input(validator, value):
 
 
 def _version(conn):
-    if conn.execute("PRAGMA user_version").fetchone()[0] != 14:
-        raise StateStorageError("State schema version 14 is required for durable synthetic payments.")
+    if conn.execute("PRAGMA user_version").fetchone()[0] not in (14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27):
+        raise StateStorageError("State schema version 14 or 15 is required for durable synthetic payments.")
 
 
 def _owned(conn, owner, ident):

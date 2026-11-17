@@ -9,6 +9,8 @@ on:
 
 permissions:
   contents: read
+  issues: write
+  pull-requests: write
 
 jobs:
   test:
@@ -38,5 +40,63 @@ jobs:
       - name: Compile application and tests
         run: python -m compileall -q ai_earn tests tools
 
+      - name: Check for whitespace / secret patterns
+        shell: bash
+        run: |
+          git diff --check
+          if grep -R --include="*.py" -n "BEGIN PRIVATE KEY" ai_earn/; then
+            echo "private key material found"
+            exit 1
+          fi
+          if grep -R --include="*.py" -n -E "sk-[A-Za-z0-9]{20}" ai_earn/; then
+            echo "possible API key found"
+            exit 1
+          fi
+
       - name: Run unit tests
-        run: python -m unittest discover -v
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m unittest discover -v 2>&1 | tee unittest.log
+          status=${PIPESTATUS[0]}
+          if [ $status -ne 0 ]; then
+            echo "===== FAILED TEST LOG TAIL (last 300 lines) ====="
+            tail -n 300 unittest.log || true
+            echo "===== END TAIL ====="
+          fi
+          exit $status
+
+      - name: Upload test log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unittest-log-${{ matrix.os }}-${{ matrix.python-version }}
+          path: unittest.log
+          retention-days: 2
+
+      - name: Report failures to PR (bypass blob)
+        if: failure() && github.event_name == 'pull_request'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Posting failure snippet to PR..."
+          TAIL=$(tail -n 500 unittest.log | head -c 7000)
+          FAILS=$(grep -A 40 -E "^FAIL:|^ERROR:" unittest.log | head -n 700 | head -c 7000 || true)
+          BODY="❌ python -m unittest failed on \`${{ matrix.os }} / ${{ matrix.python-version }}\`
+          tail:
+          \`\`\`
+          $TAIL
+          \`\`\`
+          fails:
+          \`\`\`
+          $FAILS
+          \`\`\`"
+          echo "$BODY" | head -c 10000 > /tmp/out.txt
+          gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments -f body="$BODY" || echo "comment failed"
+          cat /tmp/out.txt | head -n 100
+
+      - name: Health and doctor (read-only, no DBs expected on runner)
+        run: |
+          python -m ai_earn health --json || true
+          python -m ai_earn doctor --json || true

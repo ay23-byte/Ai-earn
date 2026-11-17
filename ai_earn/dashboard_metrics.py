@@ -139,4 +139,259 @@ class DashboardMetrics:
                     "stages": sandbox,
                     "verification": "sandbox_only",
                 }
+            if version >= 15:
+                opp = _amount_summary(
+                    conn, "opportunities", owner, "budget_paise",
+                    status_column="status",
+                )
+                result["opportunities"] = {
+                    "count": sum(item["count"] for item in opp.values()),
+                    "amount_paise": sum(item["amount_paise"] for item in opp.values()),
+                    "statuses": opp,
+                    "verification": "unverified",
+                    "note": "Manual/connector discovered; not verified or contacted.",
+                }
+            if version >= 16:
+                svc = _amount_summary(
+                    conn, "services", owner, "price_paise",
+                    status_column="status",
+                )
+                result["services"] = {
+                    "count": sum(item["count"] for item in svc.values()),
+                    "amount_paise": sum(item["amount_paise"] for item in svc.values()),
+                    "statuses": svc,
+                    "verification": "unverified",
+                    "note": "Local service catalog; draft/published are not verified offerings.",
+                }
+                result["portfolio"] = {
+                    "count": _count(conn, "portfolio_items", owner),
+                    "verification": "unverified",
+                }
+            if version >= 17:
+                prod = _amount_summary(
+                    conn, "products", owner, "price_paise",
+                    status_column="status",
+                )
+                result["products"] = {
+                    "count": sum(item["count"] for item in prod.values()),
+                    "amount_paise": sum(item["amount_paise"] for item in prod.values()),
+                    "statuses": prod,
+                    "verification": "unverified",
+                    "note": "Local product workspace; draft/published are not verified.",
+                }
+                cust_rows = conn.execute(
+                    "SELECT status, COUNT(*) FROM customers WHERE owner_id=? GROUP BY status",
+                    (owner,),
+                ).fetchall()
+                cust_statuses = {row[0]: {"count": row[1]} for row in cust_rows}
+                result["customers"] = {
+                    "count": sum(item["count"] for item in cust_statuses.values()),
+                    "statuses": cust_statuses,
+                    "verification": "unverified",
+                    "note": "Local CRM leads; not verified customers.",
+                }
+            if version >= 18:
+                comm_rows = conn.execute(
+                    "SELECT status, COUNT(*) FROM communications WHERE owner_id=? GROUP BY status",
+                    (owner,),
+                ).fetchall()
+                comm_statuses = {row[0]: {"count": row[1]} for row in comm_rows}
+                result["communications"] = {
+                    "count": sum(item["count"] for item in comm_statuses.values()),
+                    "statuses": comm_statuses,
+                    "verification": "unverified",
+                    "note": "Local CRM communications; draft/sent are unverified.",
+                }
+                ledger = _amount_summary(
+                    conn, "ledger_entries", owner, "amount_paise",
+                    status_column="kind",
+                )
+                # ledger_entries uses kind, not status, but _amount_summary generic handles it
+                total_ledger = sum(item["amount_paise"] for item in ledger.values())
+                # net = income - expense - refund - fee
+                net_paise = (ledger.get("income", {}).get("amount_paise", 0)
+                             - ledger.get("expense", {}).get("amount_paise", 0)
+                             - ledger.get("refund", {}).get("amount_paise", 0)
+                             - ledger.get("fee", {}).get("amount_paise", 0))
+                result["ledger"] = {
+                    "count": sum(item["count"] for item in ledger.values()),
+                    "amount_paise": total_ledger,
+                    "net_paise": net_paise,
+                    "kinds": ledger,
+                    "verification": "unverified",
+                    "note": "Local ledger; net = income - expense - refund - fee, unverified.",
+                }
+                result["income"]["verified_amount_paise"] = 0
+                # keep income status as not_available, but ledger net is separate
+            if version >= 19:
+                follow_rows = conn.execute(
+                    "SELECT status, COUNT(*) FROM followups WHERE owner_id=? GROUP BY status",
+                    (owner,),
+                ).fetchall()
+                follow_statuses = {row[0]: {"count": row[1]} for row in follow_rows}
+                result["followups"] = {
+                    "count": sum(item["count"] for item in follow_statuses.values()),
+                    "statuses": follow_statuses,
+                    "verification": "unverified",
+                    "note": "Local followups; pending/completed/cancelled unverified.",
+                }
+            if version >= 20:
+                inv_rows = conn.execute(
+                    "SELECT status, COUNT(*), COALESCE(SUM(amount_paise),0) FROM invoices WHERE owner_id=? GROUP BY status",
+                    (owner,),
+                ).fetchall()
+                inv_statuses = {row[0]: {"count": row[1], "amount_paise": row[2]} for row in inv_rows}
+                result["invoices"] = {
+                    "count": sum(item["count"] for item in inv_statuses.values()),
+                    "amount_paise": sum(item["amount_paise"] for item in inv_statuses.values()),
+                    "statuses": inv_statuses,
+                    "verification": "unverified",
+                    "note": "Local invoices draft→issued→paid/overdue/void, PDF stub hash, not issued demand.",
+                }
+                # 11-concept hardening: aggregate across tables, clearly separating unverified vs not_implemented
+                # Concept breakdown per PAYMENTS.md
+                def _c(table, status_col=None, value=None, amount_col="amount_paise"):
+                    if status_col is None:
+                        r = conn.execute(f"SELECT COUNT(*), COALESCE(SUM({amount_col}),0) FROM {table} WHERE owner_id=?", (owner,)).fetchone()
+                        return {"count": r[0], "amount_paise": r[1]}
+                    # Use amount_col = amount_paise or proposed_amount_paise etc.
+                    r = conn.execute(f"SELECT COUNT(*), COALESCE(SUM({amount_col}),0) FROM {table} WHERE owner_id=? AND {status_col}=?", (owner, value)).fetchone()
+                    return {"count": r[0], "amount_paise": r[1]}
+                proposed = conn.execute("SELECT COUNT(*), COALESCE(SUM(proposed_amount_paise),0) FROM order_drafts WHERE owner_id=? AND status='draft'", (owner,)).fetchone()
+                quoted = _c("financial_assertions", "stage", "quote_asserted")
+                contracted = _c("financial_assertions", "stage", "contract_asserted")
+                invoiced_asserted = _c("financial_assertions", "stage", "invoice_asserted")
+                initiated = _c("financial_assertions", "stage", "initiated_asserted")
+                inv_draft = conn.execute("SELECT COUNT(*), COALESCE(SUM(proposed_amount_paise),0) FROM invoice_drafts WHERE owner_id=? AND status='draft'", (owner,)).fetchone()
+                invoices_issued_row = conn.execute("SELECT COUNT(*), COALESCE(SUM(amount_paise),0) FROM invoices WHERE owner_id=? AND status IN ('issued','paid','overdue')", (owner,)).fetchone()
+                settled = {"count": 0, "amount_paise": 0}
+                if version >= 14:
+                    r = conn.execute("SELECT COUNT(*), COALESCE(SUM(amount_paise),0) FROM sandbox_payments WHERE owner_id=? AND stage='sandbox_settled'", (owner,)).fetchone()
+                    settled = {"count": r[0], "amount_paise": r[1]}
+                ledger_rows2 = conn.execute("SELECT kind, COALESCE(SUM(amount_paise),0), COUNT(*) FROM ledger_entries WHERE owner_id=? GROUP BY kind", (owner,)).fetchall()
+                ledger_map2 = {k: {"amount_paise": 0, "count": 0} for k in ("income","expense","refund","fee")}
+                for kind, amt, cnt in ledger_rows2:
+                    ledger_map2[kind] = {"amount_paise": amt, "count": cnt}
+                refunds = ledger_map2["refund"]
+                expenses = ledger_map2["expense"]
+                fees = ledger_map2["fee"]
+                ledger_net = conn.execute("SELECT COALESCE(SUM(CASE WHEN kind='income' THEN amount_paise WHEN kind IN ('expense','refund','fee') THEN -amount_paise ELSE 0 END),0) FROM ledger_entries WHERE owner_id=?", (owner,)).fetchone()[0]
+                net_realized = settled["amount_paise"] - refunds["amount_paise"] - fees["amount_paise"] - expenses["amount_paise"]
+                result["ledger_11"] = {
+                    "proposed": {"count": proposed[0], "amount_paise": proposed[1], "verification": "unverified"},
+                    "quoted": {**quoted, "verification": "unverified"},
+                    "contracted": {**contracted, "verification": "unverified"},
+                    "invoiced_asserted": {**invoiced_asserted, "verification": "unverified"},
+                    "invoiced_drafts": {"count": inv_draft[0], "amount_paise": inv_draft[1], "verification": "unverified"},
+                    "invoices_issued": {"count": invoices_issued_row[0], "amount_paise": invoices_issued_row[1], "verification": "unverified", "note": "PDF stub"},
+                    "payment_initiated": {**initiated, "verification": "unverified"},
+                    "payment_received_verified": {"count": 0, "amount_paise": 0, "verification": "not_implemented"},
+                    "payment_settled_synthetic": {**settled, "verification": "synthetic"},
+                    "refunds": {**refunds, "verification": "unverified"},
+                    "expenses": {**expenses, "verification": "unverified"},
+                    "fees": {**fees, "verification": "unverified"},
+                    "ledger_net_unverified": {"amount_paise": ledger_net, "verification": "unverified"},
+                    "net_realized_synthetic": {"amount_paise": net_realized, "verification": "synthetic", "note": "settled(synthetic)-refunds-fees-expenses, not bank-verified"},
+                    "note": "11-concept separation: verified income is 0; all others unverified/synthetic.",
+                }
+            if version >= 21:
+                prov_rows = conn.execute(
+                    "SELECT provider, status, COUNT(*), COALESCE(SUM(amount_paise),0) FROM payment_provider_orders WHERE owner_id=? GROUP BY provider, status",
+                    (owner,),
+                ).fetchall()
+                # aggregate by status and provider
+                prov_statuses = {}
+                prov_providers = {}
+                total_cnt = 0
+                total_amt = 0
+                for prov, status, cnt, amt in prov_rows:
+                    prov_statuses.setdefault(status, {"count": 0, "amount_paise": 0})
+                    prov_statuses[status]["count"] += cnt
+                    prov_statuses[status]["amount_paise"] += amt
+                    prov_providers.setdefault(prov, {"count": 0, "amount_paise": 0})
+                    prov_providers[prov]["count"] += cnt
+                    prov_providers[prov]["amount_paise"] += amt
+                    total_cnt += cnt
+                    total_amt += amt
+                result["provider_orders"] = {
+                    "count": total_cnt,
+                    "amount_paise": total_amt,
+                    "statuses": prov_statuses,
+                    "providers": prov_providers,
+                    "verification": "sandbox_only",
+                    "note": "Sandbox provider orders; HMAC verified, not live settlement.",
+                }
+                # webhook events
+                evt_cnt = conn.execute("SELECT COUNT(*) FROM payment_provider_events WHERE owner_id=?", (owner,)).fetchone()[0]
+                result["provider_events"] = {
+                    "count": evt_cnt,
+                    "verification": "sandbox_only",
+                    "note": "HMAC verified webhook events, idempotent by event_id.",
+                }
+            if version >= 22:
+                # AI approvals aggregated by status (pending/approved/rejected/expired virtual/revoked)
+                approv_rows = conn.execute(
+                    "SELECT status, COUNT(*) FROM ai_approvals WHERE owner_id=? GROUP BY status",
+                    (owner,),
+                ).fetchall()
+                approv_statuses = {row[0]: {"count": row[1]} for row in approv_rows}
+                # virtual expired count: pending rows past expires_at
+                import time as _time
+                now_ts = int(_time.time())
+                # use DB now already captured as `now` in transaction; treat pending expired logically
+                try:
+                    pending_expired = conn.execute(
+                        "SELECT COUNT(*) FROM ai_approvals WHERE owner_id=? AND status='pending' AND expires_at < ?",
+                        (owner, now),
+                    ).fetchone()[0]
+                except Exception:
+                    pending_expired = 0
+                total_approv = sum(v["count"] for v in approv_statuses.values())
+                result["ai_approvals"] = {
+                    "count": total_approv,
+                    "statuses": approv_statuses,
+                    "pending_expired_virtual": pending_expired,
+                    "verification": "unverified",
+                    "note": "ApprovalQueue: consequential tools require explicit owner approval; pending past TTL treated as expired (virtual).",
+                }
+                # emergency stop
+                emerg = conn.execute("SELECT stopped, updated_at, reason FROM ai_emergency WHERE owner_id=?", (owner,)).fetchone()
+                if emerg is None:
+                    result["ai_emergency"] = {"stopped": False, "note": "No emergency; consequential actions allowed if approved."}
+                else:
+                    result["ai_emergency"] = {"stopped": bool(emerg["stopped"]), "updated_at": emerg["updated_at"], "reason": emerg["reason"], "verification": "sandbox_only"}
+                # AI provider/tooling note
+                result["ai_policy"] = {
+                    "tool_scopes": {"read": "direct", "draft": "draft_unverified", "consequential": "approval_required"},
+                    "provider": "stub sandbox only; live OpenAI/Ollama blocked",
+                    "injection_isolation": "external content treated as data, never as instruction; consequential tools never auto-executed",
+                    "verification": "draft_unverified or approved_consequential, not authority",
+                }
+                # Analytics read-only summary (no new tables, real ledger/invoice aggregates, time-bounded via created_at)
+                try:
+                    from .analytics import Analytics as _Analytics
+                    # Use same owner+now but avoid re-entering transaction; compute directly via current conn
+                    # Funnel quick counts (all time) for dashboard glance
+                    funnel_total_opp = conn.execute("SELECT COUNT(*) FROM opportunities WHERE owner_id=?", (owner,)).fetchone()[0] if version >=15 else 0
+                    funnel_total_cust = conn.execute("SELECT COUNT(*) FROM customers WHERE owner_id=?", (owner,)).fetchone()[0] if version >=17 else 0
+                    funnel_total_inv = conn.execute("SELECT COUNT(*) FROM invoices WHERE owner_id=?", (owner,)).fetchone()[0] if version >=20 else 0
+                    # MRR total income all time (unverified)
+                    mrr_total = conn.execute("SELECT COALESCE(SUM(amount_paise),0) FROM ledger_entries WHERE owner_id=? AND kind='income'", (owner,)).fetchone()[0] if version >=18 else 0
+                    # Monthly buckets for last display (recompute via same logic as Analytics.mrr but simplified)
+                    mrr_buckets = {}
+                    if version >=18:
+                        import datetime as _dt
+                        rows = conn.execute("SELECT created_at, amount_paise FROM ledger_entries WHERE owner_id=? AND kind='income' ORDER BY created_at", (owner,)).fetchall()
+                        for r in rows:
+                            dt = _dt.datetime.utcfromtimestamp(r["created_at"])
+                            key = f"{dt.year:04d}-{dt.month:02d}"
+                            mrr_buckets[key] = mrr_buckets.get(key, 0) + r["amount_paise"]
+                    result["analytics"] = {
+                        "funnel": {"opportunities": funnel_total_opp, "customers": funnel_total_cust, "invoices": funnel_total_inv},
+                        "mrr": {"total_paise": mrr_total, "monthly_buckets": mrr_buckets, "months_with_income": len(mrr_buckets), "verification": "unverified", "note": "Monthly ledger income buckets UTC (unverified, not recurring subscription)."},
+                        "verification": "unverified",
+                        "note": "Real-data analytics from persisted owned rows (inclusive time window handled by dedicated Analytics service for filtered queries; dashboard shows all-time glance).",
+                    }
+                except Exception:
+                    result["analytics"] = {"note": "analytics unavailable", "verification": "unverified"}
             return result

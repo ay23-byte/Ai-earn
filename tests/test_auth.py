@@ -24,7 +24,7 @@ class Clock:
 @unittest.skipUnless(os.name == "posix", "account storage requires verified POSIX permissions")
 class AuthenticationTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(self.tmp.cleanup)
         self.path = Path(self.tmp.name) / "auth.sqlite3"
         self.clock = Clock()

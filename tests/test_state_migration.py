@@ -17,7 +17,7 @@ from ai_earn.state_storage import StateStorage, StateStorageError
 @unittest.skipUnless(os.name in {"posix", "nt"}, "requires a supported private filesystem")
 class StateMigrationTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(self.tmp.cleanup)
         directory = Path(self.tmp.name) / "private"
         if os.name == "nt":
