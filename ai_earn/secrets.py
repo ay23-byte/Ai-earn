@@ -101,7 +101,7 @@ def assert_no_secrets_in_repo(repo_path: Path | None = None) -> list[str]:
         if ".venv" in str(p) or "__pycache__" in str(p):
             continue
         try:
-            content = p.read_text(errors="ignore")
+            content = p.read_text(encoding="utf-8", errors="ignore")
         except Exception:
             continue
         hits = scan_for_forbidden_text(content)

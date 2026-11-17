@@ -73,10 +73,14 @@ def export_user_data(token: str, *, auth_db: Path, state_db: Path, destination: 
     # This will raise AccessDenied if token invalid/expired
     with _authorized_transaction(auth, state, token) as (conn, owner_id, now):
         # Integrity gate already checked by _authorized_transaction
+        schema_version = conn.execute("PRAGMA user_version").fetchone()[0]
         result: dict = {
+            "export_version": "1",
+            "schema_version": int(schema_version),
             "owner_id": owner_id,
             "exported_at": int(now),
             "exported_at_iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
+            "included_categories": sorted(EXPORT_TABLES),
             "tables": {},
             "counts": {},
             "verification": "owner-scoped, read-only, secrets redacted",

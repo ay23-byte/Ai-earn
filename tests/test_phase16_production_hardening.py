@@ -1,5 +1,6 @@
 """Phase 16 — production hardening and deployment checks."""
 import json
+import os
 import pathlib
 import re
 import tempfile
@@ -8,19 +9,53 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+def _make_private_dir(base: Path) -> Path:
+    """Create a private directory correctly on both POSIX and Windows."""
+    private = base / "private"
+    if os.name == "nt":
+        from ai_earn.windows_security import create_private_directory
+        create_private_directory(private)
+    else:
+        private.mkdir(mode=0o700, exist_ok=False)
+    return private
+
+def _private_auth_state_pair(base: Path) -> tuple[Path, Path, Path]:
+    """Return (private_dir, auth_db, state_db) with correct isolation."""
+    tmp = Path(tempfile.mkdtemp())
+    private = _make_private_dir(tmp)
+    return private, private / "auth.sqlite3", private / "state.sqlite3"
+
 class ProductionHardeningTests(unittest.TestCase):
     def test_production_config_exists_and_validates(self):
         p = ROOT / "ai_earn" / "production_config.py"
         self.assertTrue(p.exists(), "production_config.py missing")
-        text = p.read_text()
+        text = p.read_text(encoding="utf-8")
         self.assertIn("validate_production", text)
         self.assertIn("no_network_db_exposure", text)
         self.assertIn("Never expose", text)
         self.assertIn("production_ready", text)
         from ai_earn.production_config import validate_production, production_summary
-        env = {"AI_EARN_ENV": "production", "AI_EARN_AUTH_DB": "/tmp/a/auth.sqlite3", "AI_EARN_STATE_DB": "/tmp/a/state.sqlite3"}
+        # Use platform-appropriate absolute path: on Windows, drive-letter; on POSIX, /tmp
+        if os.name == "nt":
+            env = {"AI_EARN_ENV": "production", "AI_EARN_AUTH_DB": r"C:\a\auth.sqlite3", "AI_EARN_STATE_DB": r"C:\a\state.sqlite3"}
+        else:
+            env = {"AI_EARN_ENV": "production", "AI_EARN_AUTH_DB": "/tmp/a/auth.sqlite3", "AI_EARN_STATE_DB": "/tmp/a/state.sqlite3"}
         checks = validate_production(env)
         self.assertTrue(any(c.id == "no_network_db_exposure" for c in checks))
+        # Negative: 0.0.0.0 bind must fail the exposure check
+        env_bad = dict(env)
+        env_bad["AI_EARN_BIND"] = "0.0.0.0"
+        checks_bad = validate_production(env_bad)
+        bad = [c for c in checks_bad if c.id == "no_network_db_exposure"]
+        self.assertTrue(bad and not bad[0].passed, "0.0.0.0 must fail no_network_db_exposure")
+        # Forbidden substring must also fail
+        if os.name == "nt":
+            env_forbid = {"AI_EARN_ENV": "production", "AI_EARN_AUTH_DB": r"C:\www\auth.sqlite3", "AI_EARN_STATE_DB": r"C:\www\state.sqlite3"}
+        else:
+            env_forbid = {"AI_EARN_ENV": "production", "AI_EARN_AUTH_DB": "/tmp/www/auth.sqlite3", "AI_EARN_STATE_DB": "/tmp/www/state.sqlite3"}
+        checks_forbid = validate_production(env_forbid)
+        fb = [c for c in checks_forbid if c.id == "no_network_db_exposure"]
+        self.assertTrue(fb and not fb[0].passed)
         summary = production_summary(env)
         self.assertFalse(summary["production_ready"])
         self.assertIn("127.0.0.1", summary["guidance"])
@@ -28,7 +63,7 @@ class ProductionHardeningTests(unittest.TestCase):
     def test_secret_management(self):
         p = ROOT / "ai_earn" / "secrets.py"
         self.assertTrue(p.exists())
-        text = p.read_text()
+        text = p.read_text(encoding="utf-8")
         self.assertIn("generate_secret", text)
         self.assertIn("redact", text)
         self.assertIn("validate_secret", text)
@@ -46,7 +81,7 @@ class ProductionHardeningTests(unittest.TestCase):
     def test_database_backups(self):
         p = ROOT / "ai_earn" / "backup.py"
         self.assertTrue(p.exists())
-        text = p.read_text()
+        text = p.read_text(encoding="utf-8")
         self.assertIn("create_backup", text)
         self.assertIn("verified", text.lower())
         self.assertIn("never overwrite", text.lower())
@@ -55,8 +90,8 @@ class ProductionHardeningTests(unittest.TestCase):
     def test_recovery_procedures_docs(self):
         for doc in ["docs/BACKUP_AND_RECOVERY.md", "docs/ROLLBACK.md", "docs/MIGRATION.md"]:
             self.assertTrue((ROOT / doc).exists(), f"missing {doc}")
-            self.assertIn("backup", (ROOT / doc).read_text().lower())
-        rollback = (ROOT / "docs/ROLLBACK.md").read_text()
+            self.assertIn("backup", (ROOT / doc).read_text(encoding="utf-8").lower())
+        rollback = (ROOT / "docs/ROLLBACK.md").read_text(encoding="utf-8")
         self.assertIn("new private path", rollback.lower())
         self.assertIn("never overwrite", rollback.lower())
 
@@ -74,7 +109,7 @@ class ProductionHardeningTests(unittest.TestCase):
     def test_structured_logs(self):
         p = ROOT / "ai_earn" / "structured_logging.py"
         self.assertTrue(p.exists())
-        text = p.read_text()
+        text = p.read_text(encoding="utf-8")
         self.assertIn("StructuredLogger", text)
         self.assertIn("redact", text.lower())
         self.assertIn("allowlist", text.lower())
@@ -105,7 +140,7 @@ class ProductionHardeningTests(unittest.TestCase):
     def test_dependency_security_checks(self):
         p = ROOT / "tools" / "security_check.py"
         self.assertTrue(p.exists())
-        text = p.read_text()
+        text = p.read_text(encoding="utf-8")
         self.assertIn("pip-audit", text.lower())
         # Run scan — should pass (split pattern avoids self-trigger)
         import subprocess, sys
@@ -118,7 +153,7 @@ class ProductionHardeningTests(unittest.TestCase):
     def test_ci_workflow(self):
         p = ROOT / ".github" / "workflows" / "tests.yml"
         self.assertTrue(p.exists())
-        text = p.read_text()
+        text = p.read_text(encoding="utf-8")
         self.assertIn("compileall", text)
         self.assertIn("unittest", text)
         self.assertIn("security_check", text.lower())
@@ -130,7 +165,7 @@ class ProductionHardeningTests(unittest.TestCase):
     def test_deployment_documentation(self):
         p = ROOT / "docs" / "DEPLOYMENT.md"
         self.assertTrue(p.exists())
-        text = p.read_text()
+        text = p.read_text(encoding="utf-8")
         self.assertIn("Windows", text)
         self.assertIn("127.0.0.1", text)
         self.assertIn("Never expose", text)
@@ -145,7 +180,7 @@ class ProductionHardeningTests(unittest.TestCase):
     def test_database_migration_procedure(self):
         p = ROOT / "docs" / "MIGRATION.md"
         self.assertTrue(p.exists())
-        text = p.read_text()
+        text = p.read_text(encoding="utf-8")
         self.assertIn("migrate_to_v", text)
         self.assertIn("backup", text.lower())
         self.assertIn("never overwrite", text.lower())
@@ -153,14 +188,14 @@ class ProductionHardeningTests(unittest.TestCase):
     def test_rollback_documentation(self):
         p = ROOT / "docs" / "ROLLBACK.md"
         self.assertTrue(p.exists())
-        text = p.read_text()
+        text = p.read_text(encoding="utf-8")
         self.assertIn("rollback", text.lower())
         self.assertIn("new private path", text.lower())
 
     def test_user_data_export(self):
         p = ROOT / "ai_earn" / "data_export.py"
         self.assertTrue(p.exists())
-        text = p.read_text()
+        text = p.read_text(encoding="utf-8")
         self.assertIn("export_user_data", text)
         self.assertIn("owner-scoped", text.lower())
         self.assertIn("redacted", text.lower())
@@ -171,8 +206,13 @@ class ProductionHardeningTests(unittest.TestCase):
         from ai_earn.state_storage import StateStorage
         from ai_earn.opportunities import Opportunities
         tmp = tempfile.mkdtemp()
+        # Use Windows-native private dir creation when on Windows
         private = Path(tmp) / "private"
-        private.mkdir(mode=0o700)
+        if os.name == "nt":
+            from ai_earn.windows_security import create_private_directory
+            create_private_directory(private)
+        else:
+            private.mkdir(mode=0o700)
         auth_db = private / "auth.sqlite3"
         state_db = private / "state.sqlite3"
         with patch("ai_earn.auth.PASSWORD_ITERATIONS", 1000):
@@ -195,11 +235,15 @@ class ProductionHardeningTests(unittest.TestCase):
         j = json.dumps(result)
         self.assertNotIn("password_hash", j)
         self.assertNotIn("recovery_hash", j)
+        # Manifest checks
+        self.assertIn("export_version", result)
+        self.assertIn("schema_version", result)
+        self.assertIn("included_categories", result)
 
     def test_account_deletion_safeguards(self):
         p = ROOT / "ai_earn" / "account_deletion.py"
         self.assertTrue(p.exists())
-        text = p.read_text()
+        text = p.read_text(encoding="utf-8")
         self.assertIn("DELETE", text)
         self.assertIn("backup", text.lower())
         self.assertIn("password", text.lower())
@@ -214,7 +258,11 @@ class ProductionHardeningTests(unittest.TestCase):
         from ai_earn.account_deletion import prepare_deletion_backup, confirm_deletion
         tmp = tempfile.mkdtemp()
         private = Path(tmp) / "private"
-        private.mkdir(mode=0o700)
+        if os.name == "nt":
+            from ai_earn.windows_security import create_private_directory
+            create_private_directory(private)
+        else:
+            private.mkdir(mode=0o700)
         auth_db = private / "auth.sqlite3"
         state_db = private / "state.sqlite3"
         with patch("ai_earn.auth.PASSWORD_ITERATIONS", 1000):
@@ -233,6 +281,7 @@ class ProductionHardeningTests(unittest.TestCase):
         prep = prepare_deletion_backup(token, auth_db=auth_db, state_db=state_db, backup_path=backup)
         self.assertIn("confirmation_phrase", prep)
         self.assertTrue(backup.exists())
+        self.assertIn("backup_sha256", prep)
         phrase = prep["confirmation_phrase"]
         with self.assertRaises(ValueError):
             confirm_deletion(token, "StrongPass123!", "DELETE wrong", auth_db=auth_db, state_db=state_db, backup_path=backup)
@@ -245,7 +294,7 @@ class ProductionHardeningTests(unittest.TestCase):
     def test_privacy_documentation(self):
         p = ROOT / "docs" / "PRIVACY.md"
         self.assertTrue(p.exists())
-        text = p.read_text()
+        text = p.read_text(encoding="utf-8")
         self.assertIn("Privacy", text)
         self.assertIn("export", text.lower())
         self.assertIn("deletion", text.lower())
@@ -255,7 +304,7 @@ class ProductionHardeningTests(unittest.TestCase):
     def test_operational_runbooks(self):
         p = ROOT / "docs" / "OPERATIONAL_RUNBOOKS.md"
         self.assertTrue(p.exists())
-        text = p.read_text()
+        text = p.read_text(encoding="utf-8")
         self.assertIn("Runbook", text)
         self.assertIn("Health check", text)
         self.assertIn("Backup", text)
@@ -263,7 +312,7 @@ class ProductionHardeningTests(unittest.TestCase):
         self.assertIn("Windows", text)
 
     def test_never_expose_sqlite_over_network(self):
-        dep = (ROOT / "docs" / "DEPLOYMENT.md").read_text()
+        dep = (ROOT / "docs" / "DEPLOYMENT.md").read_text(encoding="utf-8")
         self.assertIn("--bind 127.0.0.1", dep)
         for m in re.finditer(r"0\.0\.0\.0", dep):
             window = dep[max(0, m.start()-120):m.end()+40].lower()
@@ -272,7 +321,7 @@ class ProductionHardeningTests(unittest.TestCase):
         for rel in ["dashboard"]:
             for path in (ROOT / rel).rglob("*"):
                 if path.suffix in (".py", ".js", ".html"):
-                    text = path.read_text(errors="ignore")
+                    text = path.read_text(encoding="utf-8", errors="ignore")
                     if "0.0.0.0" in text:
                         self.assertIn("never", text.lower(), f"{path} mentions 0.0.0.0 without never warning")
 

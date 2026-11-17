@@ -29,7 +29,7 @@ def scan_secrets() -> list[str]:
         if ".venv" in s or "__pycache__" in s or ".git" in s:
             continue
         try:
-            text = p.read_text(errors="ignore")
+            text = p.read_text(encoding="utf-8", errors="ignore")
         except Exception:
             continue
         for pat, label in FORBIDDEN:
@@ -40,7 +40,7 @@ def scan_secrets() -> list[str]:
         offenders.append(".env file present in repo — must be gitignored and env-only")
     # Check dashboard never serves sqlite
     for f in [ROOT / "dashboard" / "app.js", ROOT / "dashboard" / "connected.html"]:
-        if f.exists() and "0.0.0.0" in f.read_text(errors="ignore"):
+        if f.exists() and "0.0.0.0" in f.read_text(encoding="utf-8", errors="ignore"):
             offenders.append(f"{f}: must not bind 0.0.0.0 with local SQLite")
     return offenders
 
@@ -52,7 +52,7 @@ def audit_dependencies() -> int:
     has_deps = False
     for f in reqs:
         try:
-            txt = f.read_text(errors="ignore")
+            txt = f.read_text(encoding="utf-8", errors="ignore")
             if txt.strip() and not txt.strip().startswith("#"):
                 has_deps = True
         except Exception:
