@@ -1,6 +1,6 @@
-# Integrations — Ai-earn (2026-11-16 Phase 12)
+# Integrations — Ai-earn (2026-11-17 Phase 12+ (v28))
 
-**Status:** Reusable connector framework implemented (v28, sandbox stubs). No live network, no live OAuth. Manual workflows preserved.
+**Status:** Reusable connector framework implemented (963 tests) (v28, sandbox stubs). No live network, no live OAuth. Manual workflows preserved.
 
 ## Reusable connector framework (implemented)
 

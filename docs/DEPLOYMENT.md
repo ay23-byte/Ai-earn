@@ -1,4 +1,4 @@
-# Deployment — Ai-earn (2026-11-16, Phase 16 — Production Hardening)
+# Deployment — Ai-earn (2026-11-17, Phase 16 — Production Hardening)
 
 **Status:** Local development first, `production_ready: false`. No production deployment is approved until `docs/PRODUCTION_READINESS.md` 11-item gate is signed. This runbook is the **Windows-local-first** deployment path, then the optional production architecture. **Never expose the local SQLite database directly over the network.**
 

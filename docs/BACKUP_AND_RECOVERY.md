@@ -1,11 +1,11 @@
-# Backup and Recovery — Ai-earn (2026-11-16, M15)
+# Backup and Recovery — Ai-earn (2026-11-17, M15+M16, LATEST 28)
 
 **Status:** Experimental, local SQLite only. No auto-repair. **Do not delete or overwrite files blindly.** M15 adds `health --with-backups` and a disposable restore drill.
 
 ## What is backed up
 
 - **Auth DB:** `AI_EARN_AUTH_DB` (`auth.sqlite3`) – single account expected; `recovery_hash` rotation on `replace_recovery_code`/`recover`.
-- **State DB:** `AI_EARN_STATE_DB` (`state.sqlite3`, v1→v22) plus 21 `before-v*.sqlite3` backups (`before-v2.sqlite3` … `before-v22.sqlite3`) created by `tracker init`/`migrate_to_v*`.
+- **State DB:** `AI_EARN_STATE_DB` (`state.sqlite3`, v1→v28) plus 27 `before-v*.sqlite3` backups (`before-v2.sqlite3` … `before-v28.sqlite3`) created by `tracker init`/`migrate_to_v*`.
 - **Snapshots:** `dashboard-snapshot-*.json` beside state DB (counts only, no titles/tokens; 1 MB cap; never overwrite).
 
 ## How backups are made (current code)
@@ -49,7 +49,7 @@
   rm -rf "$tmp"
   ```
   Windows PowerShell equivalent uses `Join-Path $env:TEMP` + `python -c` with `pathlib`.
-- **CI drill:** `tests/test_health.py` (9 tests) does the same on `TemporaryDirectory` with `StateStorage(..., create=True)` → `migrate_to_v22` → `health` + `health --with-backups` + `backup_to(new_path)` verification.
+- **CI drill:** `tests/test_health.py` (9 tests) does the same on `TemporaryDirectory` with `StateStorage(..., create=True)` → `migrate_to_v28` → `health` + `health --with-backups` + `backup_to(new_path)` verification.
 - Real-data recovery remains unverified; no existing user DB has been migrated (per `PHASE_STATUS.md`).
 
 ## Retention

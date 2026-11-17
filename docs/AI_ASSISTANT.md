@@ -1,6 +1,6 @@
-# AI Assistant — Ai-earn (2026-11-16 Phase 13)
+# AI Assistant — Ai-earn (2026-11-17 Phase 13+ (v28))
 
-**Status:** Implemented (v28, sandbox stub). Real assistant connected to backend, modular providers, ToolRegistry (32 tools), ApprovalQueue with TTL, preview, audit, emergency stop. No live provider network until explicit approval. **This is one of the most important parts of Ai-earn — controlled autonomy.**
+**Status:** Implemented (v28, sandbox stub, 963 tests). Real assistant connected to backend, modular providers, ToolRegistry (32 tools), ApprovalQueue with TTL, preview, audit, emergency stop. No live provider network until explicit approval. **This is one of the most important parts of Ai-earn — controlled autonomy.**
 
 ## Goal — 15 tasks
 

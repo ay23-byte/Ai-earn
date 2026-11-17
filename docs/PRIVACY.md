@@ -1,4 +1,4 @@
-# Privacy — Ai-earn (2026-11-16, Phase 16)
+# Privacy — Ai-earn (2026-11-17, Phase 16)
 
 **Status:** Experimental, local-offline only. No cloud storage, no third-party sharing. This document describes data minimization, purpose, retention, export and deletion. It is not legal advice.
 

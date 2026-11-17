@@ -1,4 +1,4 @@
-# Database — Ai-earn (2026-11-16, branch arena/c6693e06-ai-earn)
+# Database — Ai-earn (2026-11-17, branch arena/a2b30614-ai-earn)
 
 **Status:** `EXPERIMENTAL` local SQLite only, **not production**. No Postgres, no network DB.
 
@@ -40,11 +40,11 @@ All tables have `CHECK (length(owner_id)=32 AND hex)` except `state_*`, plus `CH
 
 - Explicit, backup-first: `StateStorage.migrate_to_v2` … `migrate_to_v18, migrate_to_v19, migrate_to_v20, migrate_to_v21, migrate_to_v23, migrate_to_v24, migrate_to_v25, migrate_to_v26`, each holds `transaction` write lock, calls `backup_to(verified_new_path, confirmed=True)`, applies DDL, inserts `state_migrations`, `PRAGMA user_version = N`, then `validate_schema` + `check_integrity`. `backup_to` verifies source integrity, `create_exclusive` on destination (fails if exists), `source.backup(destination)`, verifies destination.
 - New files start at `v1`; no auto-upgrade; unknown `user_version` or missing `state_migrations` history → `StateStorageError`.
-- `tracker_cli._initialize_state` creates `state.sqlite3` (v1) then migrates `v2→v27` with 26 `before-v*.sqlite3` backups, never overwriting.
+- `tracker_cli._initialize_state` creates `state.sqlite3` (v1) then migrates `v2→v27` with 27 `before-v*.sqlite3` backups, never overwriting.
 
 ## Integrity & ownership
 
-- `validate_schema` checks `application_id`, `user_version` in 1..27, expected tables/columns/indexes/sql, migration history `1..N`.
+- `validate_schema` checks `application_id`, `user_version` in 1..28, expected tables/columns/indexes/sql, migration history `1..N`.
 - `check_integrity` (`PRAGMA quick_check`, `foreign_key_check`, then versioned: `check_operation_results`, `check_audit_operation_balance`, `check_proposed_amount_snapshots`, `check_queue_integrity`, `check_creation_events`, `check_terminal_transition_events`, `check_multistep_histories` (now includes `opportunities` discovered→…→archived/dismissed, `services` draft→published→archived, `followups` pending→completed/cancelled, `invoices` draft→issued→paid/overdue/void), `check_paired_completions`, `check_managed_pairs`, `check_financial_assertion_binding`, `check_sandbox_payment_integrity`).
 - All domain services use `state_authorization._authorized_transaction` (auth lock → state lock, derive actor from live session, recheck expiry before commit). Queries always `WHERE owner_id=?`.
 - `state_operations` idempotency is owner-scoped; coordinated deletion of marker+operation+audit can evade checks (not tamper-evident). Auth/state commits are separate → ambiguous on crash after state commit; caller must retry with same key and inspect `get_lease`/`inspect`.
@@ -80,6 +80,6 @@ All tables have `CHECK (length(owner_id)=32 AND hex)` except `state_*`, plus `CH
 - `financial_assertions`: `potential → quote_asserted → contract_asserted → invoice_asserted → initiated_asserted → withdrawn`
 - `sandbox_payments`: `sandbox_awaiting → sandbox_confirmed → sandbox_settled → sandbox_refunded` plus `sandbox_failed` branch
 
-Disposal: all data is disposable, validated via `python -m unittest discover -v` (901/17, incl. v15 opportunity discovery + managed runner + v16 services/portfolio + v17 products/customers + v18 comms/ledger + v19 followups/CSV + v20 invoices/11-concept + v21 provider sandbox HMAC + v22 AI ToolRegistry/ApprovalQueue, Linux Python 3.11.2). No customer or payment data, no production use.
+Disposal: all data is disposable, validated via `python -m unittest discover -v` (963/17, incl. v15 opportunity discovery + managed runner + v16 services/portfolio + v17 products/customers + v18 comms/ledger + v19 followups/CSV + v20 invoices/11-concept + v21 provider sandbox HMAC + v22 AI ToolRegistry/ApprovalQueue, Linux Python 3.11.2). No customer or payment data, no production use.
 
 See `ARCHITECTURE.md`, `SECURITY_REVIEW.md`, `TESTING.md` for limits, and `PHASE_STATUS.md` for phase gates. Real-data recovery and production hardening are future milestones (M2, M15).

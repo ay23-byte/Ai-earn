@@ -3,7 +3,7 @@
 **Status:** `production_ready: false` — **No live transactions**. This checklist must be **fully signed** before any live payment enablement. Live mode is blocked in code (`ProviderConfig` `mode=live` raises) and requires explicit human approval (M11) plus all automated verifications below. Do not process live money, store cards, or trust client success screens.
 
 **Branch:** `arena/a2b30614-ai-earn` base `9d77101` — v28 + v21 provider sandbox HMAC verified.  
-**Date:** 2026-11-16  
+**Date:** 2026-11-17  
 **Gate:** M11 (see `PAYMENTS.md`). This document IS the production readiness checklist.
 
 ## Checklist — all 11 must pass before live enablement
@@ -31,13 +31,13 @@ Live transactions remain **blocked** until **all 11** above are `PASS` **and** t
 - **Ops reviewer:** ________________      Date: __________  Result: PASS / FAIL
 - **Final approver (explicit M11):** ________________  Date: __________  Result: PASS / FAIL
 
-Signing requires: independent verification of each evidence command above on a **disposable** private database (never reuse live DB), plus `python -m compileall -q ai_earn tests` OK, `python -m unittest discover` OK (901/17 on Linux as of 2026-11-16), `git diff --check` clean, secret scan (`BEGIN PRIVATE KEY`, `sk-`) clean, and `ai_earn.production_readiness.evaluate()` reports `live_ready: false` (blocked) until this form is stored out-of-repo and code gate is explicitly updated with the approval commit.
+Signing requires: independent verification of each evidence command above on a **disposable** private database (never reuse live DB), plus `python -m compileall -q ai_earn tests` OK, `python -m unittest discover` OK (963/17 on Linux as of 2026-11-17), `git diff --check` clean, secret scan (`BEGIN PRIVATE KEY`, `sk-`) clean, and `ai_earn.production_readiness.evaluate()` reports `live_ready: false` (blocked) until this form is stored out-of-repo and code gate is explicitly updated with the approval commit.
 
 ## How to verify (disposable)
 
 ```sh
 python -m compileall -q ai_earn tests
-python -m unittest discover -v  # expect 901 OK + 17 skipped
+python -m unittest discover -v  # expect 963 OK + 17 skipped (946 passed)
 python -m ai_earn health --json --with-backups
 python -m ai_earn doctor --json
 # automated checklist (read-only, no network, no card, no live):
