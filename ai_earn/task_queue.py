@@ -35,7 +35,7 @@ def _integer(value, minimum, maximum):
 
 
 def _version(conn):
-    if conn.execute("PRAGMA user_version").fetchone()[0] not in (7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27):
+    if conn.execute("PRAGMA user_version").fetchone()[0] not in (7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28):
         raise StateStorageError("State schema version 7, 8, 9, 10, 11, 12, 13, 14 or 15 is required for the queue.")
 
 

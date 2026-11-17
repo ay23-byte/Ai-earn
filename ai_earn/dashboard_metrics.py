@@ -277,6 +277,30 @@ class DashboardMetrics:
                 fees = ledger_map2["fee"]
                 ledger_net = conn.execute("SELECT COALESCE(SUM(CASE WHEN kind='income' THEN amount_paise WHEN kind IN ('expense','refund','fee') THEN -amount_paise ELSE 0 END),0) FROM ledger_entries WHERE owner_id=?", (owner,)).fetchone()[0]
                 net_realized = settled["amount_paise"] - refunds["amount_paise"] - fees["amount_paise"] - expenses["amount_paise"]
+                # v28 verified finance breakdown
+                payment_initiated_verified = {"count": 0, "amount_paise": 0, "verification": "verified", "currency": "INR"}
+                payment_received_verified_v28 = {"count": 0, "amount_paise": 0, "verification": "verified", "currency": "INR"}
+                payment_settled_verified = {"count": 0, "amount_paise": 0, "verification": "verified", "currency": "INR"}
+                refunds_verified = {"count": 0, "amount_paise": 0, "verification": "verified", "currency": "INR"}
+                expenses_verified = {"count": 0, "amount_paise": 0, "verification": "verified", "currency": "INR"}
+                fees_verified = {"count": 0, "amount_paise": 0, "verification": "verified", "currency": "INR"}
+                net_realized_verified = {"amount_paise": 0, "verification": "verified", "currency": "INR"}
+                if version >= 28:
+                    row = conn.execute("SELECT COUNT(*), COALESCE(SUM(amount_paise),0) FROM payment_records WHERE owner_id=? AND status='initiated' AND verified=1", (owner,)).fetchone()
+                    payment_initiated_verified = {"count": row[0], "amount_paise": row[1], "verification": "verified", "currency": "INR"}
+                    row = conn.execute("SELECT COUNT(*), COALESCE(SUM(amount_paise),0) FROM payment_records WHERE owner_id=? AND status='received' AND verified=1", (owner,)).fetchone()
+                    payment_received_verified_v28 = {"count": row[0], "amount_paise": row[1], "verification": "verified", "currency": "INR"}
+                    row = conn.execute("SELECT COUNT(*), COALESCE(SUM(amount_paise),0) FROM payment_records WHERE owner_id=? AND status='settled' AND verified=1", (owner,)).fetchone()
+                    payment_settled_verified = {"count": row[0], "amount_paise": row[1], "verification": "verified", "currency": "INR"}
+                    row = conn.execute("SELECT COUNT(*), COALESCE(SUM(amount_paise),0) FROM refund_records WHERE owner_id=? AND verified=1", (owner,)).fetchone()
+                    refunds_verified = {"count": row[0], "amount_paise": row[1], "verification": "verified", "currency": "INR"}
+                    row = conn.execute("SELECT COUNT(*), COALESCE(SUM(amount_paise),0) FROM expense_records WHERE owner_id=? AND verified=1", (owner,)).fetchone()
+                    expenses_verified = {"count": row[0], "amount_paise": row[1], "verification": "verified", "currency": "INR"}
+                    row = conn.execute("SELECT COUNT(*), COALESCE(SUM(amount_paise),0) FROM fee_records WHERE owner_id=? AND verified=1", (owner,)).fetchone()
+                    fees_verified = {"count": row[0], "amount_paise": row[1], "verification": "verified", "currency": "INR"}
+                    net_realized_verified = {"amount_paise": payment_settled_verified["amount_paise"] - refunds_verified["amount_paise"] - expenses_verified["amount_paise"] - fees_verified["amount_paise"], "verification": "verified", "currency": "INR", "note": "settled_verified - refunds_verified - expenses_verified - fees_verified"}
+                # payment_received_verified legacy: if v28, show verified else not_implemented
+                _prv = payment_received_verified_v28 if version >= 28 else {"count": 0, "amount_paise": 0, "verification": "not_implemented"}
                 result["ledger_11"] = {
                     "proposed": {"count": proposed[0], "amount_paise": proposed[1], "verification": "unverified"},
                     "quoted": {**quoted, "verification": "unverified"},
@@ -285,14 +309,46 @@ class DashboardMetrics:
                     "invoiced_drafts": {"count": inv_draft[0], "amount_paise": inv_draft[1], "verification": "unverified"},
                     "invoices_issued": {"count": invoices_issued_row[0], "amount_paise": invoices_issued_row[1], "verification": "unverified", "note": "PDF stub"},
                     "payment_initiated": {**initiated, "verification": "unverified"},
-                    "payment_received_verified": {"count": 0, "amount_paise": 0, "verification": "not_implemented"},
+                    "payment_received_verified": _prv,
                     "payment_settled_synthetic": {**settled, "verification": "synthetic"},
                     "refunds": {**refunds, "verification": "unverified"},
                     "expenses": {**expenses, "verification": "unverified"},
                     "fees": {**fees, "verification": "unverified"},
                     "ledger_net_unverified": {"amount_paise": ledger_net, "verification": "unverified"},
                     "net_realized_synthetic": {"amount_paise": net_realized, "verification": "synthetic", "note": "settled(synthetic)-refunds-fees-expenses, not bank-verified"},
-                    "note": "11-concept separation: verified income is 0; all others unverified/synthetic.",
+                    "payment_initiated_verified": payment_initiated_verified,
+                    "payment_received_verified_v28": payment_received_verified_v28,
+                    "payment_settled_verified": payment_settled_verified,
+                    "refunds_verified": refunds_verified,
+                    "expenses_verified": expenses_verified,
+                    "fees_verified": fees_verified,
+                    "net_realized_verified": net_realized_verified,
+                    "note": "11-concept separation: legacy unverified/synthetic + v28 verified strictly separate.",
+                }
+            if version >= 28:
+                # Finance v28 verified ledger metrics
+                tax_row = conn.execute("SELECT jurisdiction, rate_bps FROM tax_configs WHERE owner_id=?", (owner,)).fetchone()
+                tax_cfg = {"jurisdiction": tax_row[0], "rate_bps": tax_row[1], "currency": "INR"} if tax_row else {"count": 0, "note": "No tax config; invocable via finance TaxConfigs."}
+                billing_cnt = conn.execute("SELECT COUNT(*) FROM billing_profiles WHERE owner_id=?", (owner,)).fetchone()[0]
+                pay_cnt = conn.execute("SELECT COUNT(*) FROM payment_records WHERE owner_id=?", (owner,)).fetchone()[0]
+                pay_verified_cnt = conn.execute("SELECT COUNT(*) FROM payment_records WHERE owner_id=? AND verified=1", (owner,)).fetchone()[0]
+                exp_cnt = conn.execute("SELECT COUNT(*) FROM expense_records WHERE owner_id=?", (owner,)).fetchone()[0]
+                refund_cnt = conn.execute("SELECT COUNT(*) FROM refund_records WHERE owner_id=?", (owner,)).fetchone()[0]
+                fee_cnt = conn.execute("SELECT COUNT(*) FROM fee_records WHERE owner_id=?", (owner,)).fetchone()[0]
+                # outstanding invoices: issued/overdue
+                outstanding_cnt = conn.execute("SELECT COUNT(*) FROM invoices WHERE owner_id=? AND status IN ('issued','overdue')", (owner,)).fetchone()[0]
+                overdue_cnt = conn.execute("SELECT COUNT(*) FROM invoices WHERE owner_id=? AND status IN ('issued','overdue') AND due_at IS NOT NULL AND due_at < ?", (owner, now)).fetchone()[0]
+                result["finance_v28"] = {
+                    "tax_config": tax_cfg,
+                    "billing_profiles": {"count": billing_cnt, "currency": "INR"},
+                    "payment_records": {"count": pay_cnt, "verified": pay_verified_cnt, "currency": "INR"},
+                    "expense_records": {"count": exp_cnt, "currency": "INR"},
+                    "refund_records": {"count": refund_cnt, "currency": "INR"},
+                    "fee_records": {"count": fee_cnt, "currency": "INR"},
+                    "outstanding_invoices": {"count": outstanding_cnt, "overdue": overdue_cnt, "currency": "INR"},
+                    "net_realized_verified": net_realized_verified,
+                    "verification": "verified",
+                    "note": "Finance v28: INR-only, verified ledger strictly separate, due dates and billing isolated.",
                 }
             if version >= 21:
                 prov_rows = conn.execute(

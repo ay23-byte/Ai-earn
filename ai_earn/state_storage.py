@@ -19,7 +19,7 @@ from .auth_storage import AuthStorage, StorageError, _windows_auth_verified
 
 APPLICATION_ID = 0x41494533  # AIE3, distinct from the auth-only database.
 SCHEMA_VERSION = 1  # New files still bootstrap as version 1; upgrades are explicit.
-LATEST_SCHEMA_VERSION = 27
+LATEST_SCHEMA_VERSION = 28
 SUPPORTED_STATE_VERSIONS = frozenset(range(1, LATEST_SCHEMA_VERSION + 1))
 
 
@@ -594,6 +594,17 @@ _V27_PROJECT_TASK_INDEX = "CREATE INDEX customer_projects_task_idx ON customer_p
 _V27_COMM_APPROVAL_INDEX = "CREATE UNIQUE INDEX crm_communication_approvals_id_owner_idx ON crm_communication_approvals(id, owner_id)"
 _V27_COMM_APPROVAL_COMM_INDEX = "CREATE INDEX crm_communication_approvals_comm_idx ON crm_communication_approvals(communication_id, owner_id)"
 _V27_OUTBOUND_INDEX = "CREATE UNIQUE INDEX crm_outbound_configs_owner_idx ON crm_outbound_configs(owner_id)"
+_V28_TAX_INDEX = "CREATE UNIQUE INDEX tax_configs_owner_idx ON tax_configs(owner_id)"
+_V28_BILLING_ID_INDEX = "CREATE UNIQUE INDEX billing_profiles_id_owner_idx ON billing_profiles(id, owner_id)"
+_V28_BILLING_CUSTOMER_INDEX = "CREATE INDEX billing_profiles_customer_idx ON billing_profiles(customer_id, owner_id)"
+_V28_PAYMENT_ID_INDEX = "CREATE UNIQUE INDEX payment_records_id_owner_idx ON payment_records(id, owner_id)"
+_V28_PAYMENT_INVOICE_INDEX = "CREATE INDEX payment_records_invoice_idx ON payment_records(invoice_id, owner_id)"
+_V28_PAYMENT_STATUS_INDEX = "CREATE INDEX payment_records_status_idx ON payment_records(status, owner_id)"
+_V28_EXPENSE_ID_INDEX = "CREATE UNIQUE INDEX expense_records_id_owner_idx ON expense_records(id, owner_id)"
+_V28_REFUND_ID_INDEX = "CREATE UNIQUE INDEX refund_records_id_owner_idx ON refund_records(id, owner_id)"
+_V28_REFUND_PAYMENT_INDEX = "CREATE INDEX refund_records_payment_idx ON refund_records(payment_id, owner_id)"
+_V28_FEE_ID_INDEX = "CREATE UNIQUE INDEX fee_records_id_owner_idx ON fee_records(id, owner_id)"
+_V28_FEE_PAYMENT_INDEX = "CREATE INDEX fee_records_payment_idx ON fee_records(payment_id, owner_id)"
 _V27_SCHEMA = {
     "customer_notes": """CREATE TABLE customer_notes (
     id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
@@ -652,6 +663,82 @@ _V27_SCHEMA = {
     updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= 0)
 )""",
 }
+_V28_SCHEMA = {
+    "tax_configs": """CREATE TABLE tax_configs (
+    owner_id TEXT PRIMARY KEY NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    jurisdiction TEXT NOT NULL CHECK(length(jurisdiction) BETWEEN 1 AND 100 AND length(trim(jurisdiction)) > 0),
+    rate_bps INTEGER NOT NULL CHECK(typeof(rate_bps)='integer' AND rate_bps BETWEEN 0 AND 10000),
+    currency TEXT NOT NULL CHECK(currency='INR'),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at)
+)""",
+    "billing_profiles": """CREATE TABLE billing_profiles (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    customer_id TEXT NOT NULL CHECK(length(customer_id)=32 AND customer_id NOT GLOB '*[^0-9a-f]*'),
+    billing_name TEXT NOT NULL CHECK(length(billing_name) BETWEEN 1 AND 200 AND length(trim(billing_name)) > 0),
+    billing_contact TEXT NOT NULL CHECK(length(billing_contact) BETWEEN 1 AND 500),
+    billing_address TEXT NOT NULL CHECK(length(billing_address) BETWEEN 0 AND 1000),
+    tax_id TEXT NOT NULL CHECK(length(tax_id) BETWEEN 0 AND 100),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at),
+    UNIQUE(customer_id, owner_id),
+    FOREIGN KEY(customer_id, owner_id) REFERENCES customers(id, owner_id)
+)""",
+    "payment_records": """CREATE TABLE payment_records (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    invoice_id TEXT CHECK(invoice_id IS NULL OR (length(invoice_id)=32 AND invoice_id NOT GLOB '*[^0-9a-f]*')),
+    order_id TEXT CHECK(order_id IS NULL OR (length(order_id)=32 AND order_id NOT GLOB '*[^0-9a-f]*')),
+    amount_paise INTEGER NOT NULL CHECK(typeof(amount_paise)='integer' AND amount_paise BETWEEN 0 AND 1000000000000),
+    currency TEXT NOT NULL CHECK(currency='INR'),
+    status TEXT NOT NULL CHECK(status IN ('initiated','received','settled','failed','refunded')),
+    provider TEXT NOT NULL CHECK(provider IN ('manual','razorpay','stripe','sandbox') AND length(provider) BETWEEN 1 AND 32),
+    provider_ref TEXT NOT NULL CHECK(length(provider_ref) BETWEEN 0 AND 128),
+    verified INTEGER NOT NULL CHECK(verified IN (0,1)),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at),
+    FOREIGN KEY(invoice_id, owner_id) REFERENCES invoices(id, owner_id)
+)""",
+    "expense_records": """CREATE TABLE expense_records (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    amount_paise INTEGER NOT NULL CHECK(typeof(amount_paise)='integer' AND amount_paise BETWEEN 0 AND 1000000000000),
+    currency TEXT NOT NULL CHECK(currency='INR'),
+    category TEXT NOT NULL CHECK(length(category) BETWEEN 1 AND 100 AND length(trim(category)) > 0),
+    note TEXT NOT NULL CHECK(length(note) BETWEEN 0 AND 500),
+    incurred_at INTEGER NOT NULL CHECK(typeof(incurred_at)='integer' AND incurred_at BETWEEN 0 AND 4102444800),
+    verified INTEGER NOT NULL CHECK(verified IN (0,1)),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at)
+)""",
+    "refund_records": """CREATE TABLE refund_records (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    payment_id TEXT NOT NULL CHECK(length(payment_id)=32 AND payment_id NOT GLOB '*[^0-9a-f]*'),
+    amount_paise INTEGER NOT NULL CHECK(typeof(amount_paise)='integer' AND amount_paise BETWEEN 0 AND 1000000000000),
+    currency TEXT NOT NULL CHECK(currency='INR'),
+    reason TEXT NOT NULL CHECK(length(reason) BETWEEN 0 AND 500),
+    verified INTEGER NOT NULL CHECK(verified IN (0,1)),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at),
+    FOREIGN KEY(payment_id, owner_id) REFERENCES payment_records(id, owner_id)
+)""",
+    "fee_records": """CREATE TABLE fee_records (
+    id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
+    owner_id TEXT NOT NULL CHECK(length(owner_id)=32 AND owner_id NOT GLOB '*[^0-9a-f]*'),
+    payment_id TEXT CHECK(payment_id IS NULL OR (length(payment_id)=32 AND payment_id NOT GLOB '*[^0-9a-f]*')),
+    amount_paise INTEGER NOT NULL CHECK(typeof(amount_paise)='integer' AND amount_paise BETWEEN 0 AND 1000000000000),
+    currency TEXT NOT NULL CHECK(currency='INR'),
+    fee_type TEXT NOT NULL CHECK(fee_type IN ('platform','gateway','other') AND length(fee_type) BETWEEN 1 AND 32),
+    note TEXT NOT NULL CHECK(length(note) BETWEEN 0 AND 500),
+    verified INTEGER NOT NULL CHECK(verified IN (0,1)),
+    created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at >= 0),
+    updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at >= created_at),
+    FOREIGN KEY(payment_id, owner_id) REFERENCES payment_records(id, owner_id)
+)""",
+}
+
 _V26_SCHEMA = {
     "product_ideas": """CREATE TABLE product_ideas (
     id TEXT PRIMARY KEY NOT NULL CHECK(length(id)=32 AND id NOT GLOB '*[^0-9a-f]*'),
@@ -1051,9 +1138,14 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         expected_columns["customer_requirements"] = [
             ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("customer_id", "TEXT", 1, 0), ("requirement", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
         ]
-        expected_columns["customer_orders"] = [
-            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("customer_id", "TEXT", 1, 0), ("title", "TEXT", 1, 0), ("description", "TEXT", 1, 0), ("amount_paise", "INTEGER", 1, 0), ("currency", "TEXT", 1, 0), ("status", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
-        ]
+        if version >= 28:
+            expected_columns["customer_orders"] = [
+                ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("customer_id", "TEXT", 1, 0), ("title", "TEXT", 1, 0), ("description", "TEXT", 1, 0), ("amount_paise", "INTEGER", 1, 0), ("currency", "TEXT", 1, 0), ("status", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0), ("due_at", "INTEGER", 0, 0), ("billing_name", "TEXT", 0, 0), ("billing_address", "TEXT", 0, 0), ("tax_rate_bps", "INTEGER", 0, 0), ("tax_amount_paise", "INTEGER", 0, 0),
+            ]
+        else:
+            expected_columns["customer_orders"] = [
+                ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("customer_id", "TEXT", 1, 0), ("title", "TEXT", 1, 0), ("description", "TEXT", 1, 0), ("amount_paise", "INTEGER", 1, 0), ("currency", "TEXT", 1, 0), ("status", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+            ]
         expected_columns["customer_projects"] = [
             ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("customer_id", "TEXT", 1, 0), ("project_task_id", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
         ]
@@ -1063,13 +1155,42 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         expected_columns["crm_outbound_configs"] = [
             ("owner_id", "TEXT", 1, 1), ("enabled", "INTEGER", 1, 0), ("allowed_channels", "TEXT", 1, 0), ("daily_limit", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
         ]
+        if version >= 28:
+            expected_columns["tax_configs"] = [
+                ("owner_id", "TEXT", 1, 1), ("jurisdiction", "TEXT", 1, 0), ("rate_bps", "INTEGER", 1, 0), ("currency", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+            ]
+            expected_columns["billing_profiles"] = [
+                ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("customer_id", "TEXT", 1, 0), ("billing_name", "TEXT", 1, 0), ("billing_contact", "TEXT", 1, 0), ("billing_address", "TEXT", 1, 0), ("tax_id", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+            ]
+            expected_columns["payment_records"] = [
+                ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("invoice_id", "TEXT", 0, 0), ("order_id", "TEXT", 0, 0), ("amount_paise", "INTEGER", 1, 0), ("currency", "TEXT", 1, 0), ("status", "TEXT", 1, 0), ("provider", "TEXT", 1, 0), ("provider_ref", "TEXT", 1, 0), ("verified", "INTEGER", 1, 0), ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+            ]
+            expected_columns["expense_records"] = [
+                ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("amount_paise", "INTEGER", 1, 0), ("currency", "TEXT", 1, 0), ("category", "TEXT", 1, 0), ("note", "TEXT", 1, 0), ("incurred_at", "INTEGER", 1, 0), ("verified", "INTEGER", 1, 0), ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+            ]
+            expected_columns["refund_records"] = [
+                ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("payment_id", "TEXT", 1, 0), ("amount_paise", "INTEGER", 1, 0), ("currency", "TEXT", 1, 0), ("reason", "TEXT", 1, 0), ("verified", "INTEGER", 1, 0), ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+            ]
+            expected_columns["fee_records"] = [
+                ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("payment_id", "TEXT", 0, 0), ("amount_paise", "INTEGER", 1, 0), ("currency", "TEXT", 1, 0), ("fee_type", "TEXT", 1, 0), ("note", "TEXT", 1, 0), ("verified", "INTEGER", 1, 0), ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+            ]
     if version >= 20:
-        expected_columns["invoices"] = [
-            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("order_id", "TEXT", 1, 0),
-            ("invoice_number", "TEXT", 1, 0), ("amount_paise", "INTEGER", 1, 0), ("currency", "TEXT", 1, 0),
-            ("status", "TEXT", 1, 0), ("pdf_hash", "BLOB", 0, 0), ("created_at", "INTEGER", 1, 0),
-            ("updated_at", "INTEGER", 1, 0),
-        ]
+        if version >= 28:
+            expected_columns["invoices"] = [
+                ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("order_id", "TEXT", 1, 0),
+                ("invoice_number", "TEXT", 1, 0), ("amount_paise", "INTEGER", 1, 0), ("currency", "TEXT", 1, 0),
+                ("status", "TEXT", 1, 0), ("pdf_hash", "BLOB", 0, 0), ("created_at", "INTEGER", 1, 0),
+                ("updated_at", "INTEGER", 1, 0), ("due_at", "INTEGER", 0, 0),
+                ("billing_name", "TEXT", 0, 0), ("billing_contact", "TEXT", 0, 0), ("billing_address", "TEXT", 0, 0),
+                ("tax_rate_bps", "INTEGER", 0, 0), ("tax_amount_paise", "INTEGER", 0, 0),
+            ]
+        else:
+            expected_columns["invoices"] = [
+                ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("order_id", "TEXT", 1, 0),
+                ("invoice_number", "TEXT", 1, 0), ("amount_paise", "INTEGER", 1, 0), ("currency", "TEXT", 1, 0),
+                ("status", "TEXT", 1, 0), ("pdf_hash", "BLOB", 0, 0), ("created_at", "INTEGER", 1, 0),
+                ("updated_at", "INTEGER", 1, 0),
+            ]
     objects = conn.execute(
         "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name"
     ).fetchall()
@@ -1128,6 +1249,18 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         expected_objects.append(("index", "crm_communication_approvals_id_owner_idx"))
         expected_objects.append(("index", "crm_communication_approvals_comm_idx"))
         expected_objects.append(("index", "crm_outbound_configs_owner_idx"))
+    if version >= 28:
+        expected_objects.append(("index", "tax_configs_owner_idx"))
+        expected_objects.append(("index", "billing_profiles_id_owner_idx"))
+        expected_objects.append(("index", "billing_profiles_customer_idx"))
+        expected_objects.append(("index", "payment_records_id_owner_idx"))
+        expected_objects.append(("index", "payment_records_invoice_idx"))
+        expected_objects.append(("index", "payment_records_status_idx"))
+        expected_objects.append(("index", "expense_records_id_owner_idx"))
+        expected_objects.append(("index", "refund_records_id_owner_idx"))
+        expected_objects.append(("index", "refund_records_payment_idx"))
+        expected_objects.append(("index", "fee_records_id_owner_idx"))
+        expected_objects.append(("index", "fee_records_payment_idx"))
     if version >= 20:
         expected_objects.append(("index", "invoices_id_owner_idx"))
         expected_objects.append(("index", "invoices_number_owner_idx"))
@@ -1267,6 +1400,23 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='crm_outbound_configs_owner_idx'").fetchone()
         if row is None or row[0] != _V27_OUTBOUND_INDEX:
             raise StateStorageError("State database schema constraints are incompatible.")
+        if version >= 28:
+            for name, sql in [
+                ("tax_configs_owner_idx", _V28_TAX_INDEX),
+                ("billing_profiles_id_owner_idx", _V28_BILLING_ID_INDEX),
+                ("billing_profiles_customer_idx", _V28_BILLING_CUSTOMER_INDEX),
+                ("payment_records_id_owner_idx", _V28_PAYMENT_ID_INDEX),
+                ("payment_records_invoice_idx", _V28_PAYMENT_INVOICE_INDEX),
+                ("payment_records_status_idx", _V28_PAYMENT_STATUS_INDEX),
+                ("expense_records_id_owner_idx", _V28_EXPENSE_ID_INDEX),
+                ("refund_records_id_owner_idx", _V28_REFUND_ID_INDEX),
+                ("refund_records_payment_idx", _V28_REFUND_PAYMENT_INDEX),
+                ("fee_records_id_owner_idx", _V28_FEE_ID_INDEX),
+                ("fee_records_payment_idx", _V28_FEE_PAYMENT_INDEX),
+            ]:
+                row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name=?", (name,)).fetchone()
+                if row is None or row[0] != sql:
+                    raise StateStorageError("State database schema constraints are incompatible.")
     if version >= 20:
         row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='invoices_id_owner_idx'").fetchone()
         if row is None or row[0] != _V20_INVOICE_INDEX:
@@ -1331,12 +1481,17 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         schemas.append(_V26_SCHEMA)
     if version >= 27:
         schemas.append(_V27_SCHEMA)
+    if version >= 28:
+        schemas.append(_V28_SCHEMA)
     for schema in schemas:
         for name, statement in schema.items():
             # v24 alters project_tasks via ALTER TABLE; sql formatting differs from CREATE literal, so rely on PRAGMA table_info instead
             if version >= 24 and name == "project_tasks":
                 continue
             if version >= 24 and name == "project_tasks" and statement == _V23_SCHEMA.get("project_tasks"):
+                continue
+            # v28 alters invoices/customer_orders via ALTER TABLE; rely on PRAGMA table_info instead
+            if version >= 28 and name in ("invoices", "customer_orders"):
                 continue
             row = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()
             if row is None or row[0] != statement:
@@ -1575,6 +1730,37 @@ def _apply_v27(conn: sqlite3.Connection) -> None:
     conn.execute(_V27_OUTBOUND_INDEX)
     conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (27, int(time.time())))
     conn.execute("PRAGMA user_version = 27")
+
+
+def _apply_v28(conn: sqlite3.Connection) -> None:
+    for statement in _V28_SCHEMA.values():
+        conn.execute(statement)
+    conn.execute(_V28_TAX_INDEX)
+    conn.execute(_V28_BILLING_ID_INDEX)
+    conn.execute(_V28_BILLING_CUSTOMER_INDEX)
+    conn.execute(_V28_PAYMENT_ID_INDEX)
+    conn.execute(_V28_PAYMENT_INVOICE_INDEX)
+    conn.execute(_V28_PAYMENT_STATUS_INDEX)
+    conn.execute(_V28_EXPENSE_ID_INDEX)
+    conn.execute(_V28_REFUND_ID_INDEX)
+    conn.execute(_V28_REFUND_PAYMENT_INDEX)
+    conn.execute(_V28_FEE_ID_INDEX)
+    conn.execute(_V28_FEE_PAYMENT_INDEX)
+    # Alter invoices to add due_at, billing, tax columns (nullable for backward compat)
+    conn.execute("ALTER TABLE invoices ADD COLUMN due_at INTEGER CHECK(due_at IS NULL OR (typeof(due_at)='integer' AND due_at BETWEEN 0 AND 4102444800))")
+    conn.execute("ALTER TABLE invoices ADD COLUMN billing_name TEXT CHECK(billing_name IS NULL OR (length(billing_name) BETWEEN 1 AND 200 AND length(trim(billing_name)) > 0))")
+    conn.execute("ALTER TABLE invoices ADD COLUMN billing_contact TEXT CHECK(billing_contact IS NULL OR (length(billing_contact) BETWEEN 1 AND 500))")
+    conn.execute("ALTER TABLE invoices ADD COLUMN billing_address TEXT CHECK(billing_address IS NULL OR (length(billing_address) BETWEEN 0 AND 1000))")
+    conn.execute("ALTER TABLE invoices ADD COLUMN tax_rate_bps INTEGER CHECK(tax_rate_bps IS NULL OR (typeof(tax_rate_bps)='integer' AND tax_rate_bps BETWEEN 0 AND 10000))")
+    conn.execute("ALTER TABLE invoices ADD COLUMN tax_amount_paise INTEGER CHECK(tax_amount_paise IS NULL OR (typeof(tax_amount_paise)='integer' AND tax_amount_paise BETWEEN 0 AND 1000000000000))")
+    # Alter customer_orders to add financial fields
+    conn.execute("ALTER TABLE customer_orders ADD COLUMN due_at INTEGER CHECK(due_at IS NULL OR (typeof(due_at)='integer' AND due_at BETWEEN 0 AND 4102444800))")
+    conn.execute("ALTER TABLE customer_orders ADD COLUMN billing_name TEXT CHECK(billing_name IS NULL OR (length(billing_name) BETWEEN 1 AND 200 AND length(trim(billing_name)) > 0))")
+    conn.execute("ALTER TABLE customer_orders ADD COLUMN billing_address TEXT CHECK(billing_address IS NULL OR (length(billing_address) BETWEEN 0 AND 1000))")
+    conn.execute("ALTER TABLE customer_orders ADD COLUMN tax_rate_bps INTEGER CHECK(tax_rate_bps IS NULL OR (typeof(tax_rate_bps)='integer' AND tax_rate_bps BETWEEN 0 AND 10000))")
+    conn.execute("ALTER TABLE customer_orders ADD COLUMN tax_amount_paise INTEGER CHECK(tax_amount_paise IS NULL OR (typeof(tax_amount_paise)='integer' AND tax_amount_paise BETWEEN 0 AND 1000000000000))")
+    conn.execute("INSERT INTO state_migrations(version, applied_at) VALUES (?, ?)", (28, int(time.time())))
+    conn.execute("PRAGMA user_version = 28")
 
 
 def _check_managed_pairs(conn: sqlite3.Connection, owner=None, queue_id=None, workflow_id=None, association_id=None) -> None:
@@ -2526,6 +2712,19 @@ class StateStorage:
             self.backup_to(backup, confirmed=True)
             _apply_v27(conn)
             if _validate_schema(conn) != 27:
+                raise StateStorageError("Migration produced an incompatible schema.")
+            _check_integrity(conn)
+
+    def migrate_to_v28(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 27 only after a checked non-overwriting backup."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 27:
+                raise StateStorageError("Only version 27 can be upgraded to version 28.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v28(conn)
+            if _validate_schema(conn) != 28:
                 raise StateStorageError("Migration produced an incompatible schema.")
             _check_integrity(conn)
 

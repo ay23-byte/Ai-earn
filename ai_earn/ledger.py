@@ -236,6 +236,33 @@ class Ledger:
             # 11 net_realized = settled synthetic - refunds - fees - expenses (but marked synthetic, not bank-verified)
             net_realized_paise = settled["amount_paise"] - refunds["amount_paise"] - fees["amount_paise"] - expenses["amount_paise"]
             ledger_net = conn.execute("SELECT COALESCE(SUM(CASE WHEN kind='income' THEN amount_paise WHEN kind IN ('expense','refund','fee') THEN -amount_paise ELSE 0 END),0) FROM ledger_entries WHERE owner_id=?", (owner,)).fetchone()[0]
+            # v28 verified finance: only when schema supports it
+            payment_initiated_verified = {"count": 0, "amount_paise": 0, "verification": "verified", "currency": "INR"}
+            payment_received_verified = {"count": 0, "amount_paise": 0, "verification": "not_implemented", "note": "No provider verification", "currency": "INR"}
+            payment_settled_verified = {"count": 0, "amount_paise": 0, "verification": "verified", "currency": "INR"}
+            refunds_verified = {"count": 0, "amount_paise": 0, "verification": "verified", "currency": "INR"}
+            expenses_verified = {"count": 0, "amount_paise": 0, "verification": "verified", "currency": "INR"}
+            fees_verified = {"count": 0, "amount_paise": 0, "verification": "verified", "currency": "INR"}
+            net_realized_verified = {"amount_paise": 0, "verification": "verified", "currency": "INR", "note": "settled_verified - refunds_verified - expenses_verified - fees_verified"}
+            if version >= 28:
+                # Payment lifecycle verified
+                row = conn.execute("SELECT COUNT(*), COALESCE(SUM(amount_paise),0) FROM payment_records WHERE owner_id=? AND status='initiated' AND verified=1", (owner,)).fetchone()
+                payment_initiated_verified = {"count": row[0], "amount_paise": row[1], "verification": "verified", "currency": "INR", "source": "payment_records initiated verified"}
+                row = conn.execute("SELECT COUNT(*), COALESCE(SUM(amount_paise),0) FROM payment_records WHERE owner_id=? AND status='received' AND verified=1", (owner,)).fetchone()
+                payment_received_verified = {"count": row[0], "amount_paise": row[1], "verification": "verified", "currency": "INR", "source": "payment_records received verified"}
+                row = conn.execute("SELECT COUNT(*), COALESCE(SUM(amount_paise),0) FROM payment_records WHERE owner_id=? AND status='settled' AND verified=1", (owner,)).fetchone()
+                payment_settled_verified = {"count": row[0], "amount_paise": row[1], "verification": "verified", "currency": "INR", "source": "payment_records settled verified"}
+                row = conn.execute("SELECT COUNT(*), COALESCE(SUM(amount_paise),0) FROM refund_records WHERE owner_id=? AND verified=1", (owner,)).fetchone()
+                refunds_verified = {"count": row[0], "amount_paise": row[1], "verification": "verified", "currency": "INR", "source": "refund_records verified"}
+                row = conn.execute("SELECT COUNT(*), COALESCE(SUM(amount_paise),0) FROM expense_records WHERE owner_id=? AND verified=1", (owner,)).fetchone()
+                expenses_verified = {"count": row[0], "amount_paise": row[1], "verification": "verified", "currency": "INR", "source": "expense_records verified"}
+                row = conn.execute("SELECT COUNT(*), COALESCE(SUM(amount_paise),0) FROM fee_records WHERE owner_id=? AND verified=1", (owner,)).fetchone()
+                fees_verified = {"count": row[0], "amount_paise": row[1], "verification": "verified", "currency": "INR", "source": "fee_records verified"}
+                net_realized_verified = {"amount_paise": payment_settled_verified["amount_paise"] - refunds_verified["amount_paise"] - expenses_verified["amount_paise"] - fees_verified["amount_paise"], "verification": "verified", "currency": "INR", "note": "settled_verified - refunds_verified - expenses_verified - fees_verified"}
+                # For verified path, payment_received_verified should not be not_implemented
+                # Keep legacy key for backward compat but with verified values
+            # Preserve legacy keys for backward compat, but override when v28
+            legacy_payment_received = payment_received_verified if version >= 28 else {"count": 0, "amount_paise": 0, "verification": "not_implemented", "note": "No provider verification"}
             return {
                 "proposed": {"count": proposed[0], "amount_paise": proposed[1], "verification": "unverified", "source": "order_drafts draft"},
                 "quoted": {**quoted, "verification": "unverified", "source": "financial_assertions quote_asserted"},
@@ -244,11 +271,19 @@ class Ledger:
                 "invoiced_drafts": {"count": inv_drafts[0], "amount_paise": inv_drafts[1], "verification": "unverified", "source": "invoice_drafts draft"},
                 "invoices_issued": {**invoices_issued, "verification": "unverified", "note": "PDF stub, not issued demand"},
                 "payment_initiated": {**initiated, "verification": "unverified", "source": "financial_assertions initiated_asserted"},
-                "payment_received_verified": {"count": 0, "amount_paise": 0, "verification": "not_implemented", "note": "No provider verification"},
+                "payment_received_verified": legacy_payment_received,
                 "payment_settled": {**settled, "verification": "synthetic", "source": "sandbox_payments settled"},
                 "refunds": {**refunds, "verification": "unverified", "source": "ledger refund"},
                 "expenses": {**expenses, "verification": "unverified", "source": "ledger expense"},
                 "fees": {**fees, "verification": "unverified", "source": "ledger fee"},
                 "ledger_net_unverified": {"amount_paise": ledger_net, "verification": "unverified", "note": "income - expense - refund - fee"},
                 "net_realized_synthetic": {"amount_paise": net_realized_paise, "verification": "synthetic", "note": "settled(synthetic) - refunds - fees - expenses, not bank-verified"},
+                # v28 verified breakdown (new, strictly separate)
+                "payment_initiated_verified": payment_initiated_verified,
+                "payment_received_verified_v28": payment_received_verified,
+                "payment_settled_verified": payment_settled_verified,
+                "refunds_verified": refunds_verified,
+                "expenses_verified": expenses_verified,
+                "fees_verified": fees_verified,
+                "net_realized_verified": net_realized_verified,
             }

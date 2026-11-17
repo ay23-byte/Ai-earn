@@ -275,11 +275,11 @@ class CRMTestsFull(CRMTests):
             self.crm_comms.send(token2, did, operation_key="send_iso", approval_id=None)
 
     def test_migrations_and_integrity(self):
-        self.assertEqual(LATEST_SCHEMA_VERSION, 27)
+        self.assertEqual(LATEST_SCHEMA_VERSION, 28)
         with StateStorage(self.state_path).transaction() as conn:
-            self.assertEqual(_validate_schema(conn), 27)
+            self.assertEqual(_validate_schema(conn), LATEST_SCHEMA_VERSION)
             _check_integrity(conn)
-        self.assertEqual(len(list(self.priv.glob("before-v*.sqlite3"))), 26)
+        self.assertEqual(len(list(self.priv.glob("before-v*.sqlite3"))), LATEST_SCHEMA_VERSION-1)
 
     def test_order_isolation_and_idempotency(self):
         cid=self.cust.create(self.token, "Karl", "karl@example.com", "", operation_key="c10")
