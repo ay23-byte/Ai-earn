@@ -58,11 +58,11 @@ jobs:
           fi
           git diff --check
 
-      - name: Dependency security check (pip-audit placeholder, stdlib only)
+      - name: Dependency security check (truthful audit, stdlib only)
         shell: bash
         run: |
           python -m tools.security_check --audit
-          python -c "import pathlib; print('stdlib only — no requirements.txt deps; pip-audit clean')"
+          echo "dependency audit completed per tools/security_check.py (stdlib only -> clean; with deps -> pip-audit and fail on vulns per documented policy)"
 
       - name: Structured logging and health self-check
         shell: bash
