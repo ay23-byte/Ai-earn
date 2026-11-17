@@ -357,3 +357,58 @@ The test-first call failed because `withdraw_invoice` did not exist. On Linux th
 ### Offline tracker first increment (2026-10-31)
 
 Linux tracker/CLI/assertions/draft/gate group: 63 tests passed. Full discovery: 629 run, 612 passed and 17 Windows-only skipped. Compileall and `git diff --check` passed. Tracker tests cover new-file initialization and backup refusal, account isolation, creation/listing, amount parsing, stage/withdrawal confirmation, production and noninteractive refusal, and refusing missing/old state on open. Tests use mocked terminal/password input and disposable data; actual interactive Windows operation is unverified. The Windows gate includes the new suite. This is not payment verification, receipt recording, real-data readiness, or completion of the original Phase 3. The terminal generates a new operation key on each attempt; an ambiguous error can have committed, so inspect before retry.
+
+### Phase 16 production hardening + testing requirements compliance (2026-11-17)
+
+**Goal:** Satisfy testing requirements — every phase has meaningful automated tests; cover 15 required categories (unit, integration, API, authentication, authorization, account-isolation, database migration, recovery, financial calculation, payment webhook, AI tool permission, approval workflow, frontend, end-to-end, Windows-specific); test failure conditions, not only success; never weaken assertions; run full suite after major phase and record totals; skipped is not passing.
+
+**New tests added (stdlib-only, disposable DBs, never network):**
+
+- `tests/test_api_contract.py` — 14 tests. API contract for `health`/`status` JSON, auth (wrong password, invalid token, revoked token, expired/revoked via `AccessDenied`), authorization (cross-account `AccessDenied`, invalid transition `OpportunityError`, duplicate `operation_key` conflict), account isolation (opportunity/service/customer/ledger isolated per owner), database migration (old `v17` blocks `Ledger` → `StateStorageError`, then `migrate_to_v18` succeeds + `backup_to` verified), recovery (`backup_to` new path, never overwrite, `StateRecoveryComparison.compare_records`/`compare_snapshot`, version-mismatch fails), financial calculation (`Ledger` invalid kind/amount `LedgerError`, `net` arithmetic, `eleven_concepts` `net_realized_synthetic`/`net_realized_verified`, `Analytics.funnel`/`mrr` + invalid range), payment webhook (Razorpay `ProviderConfig` sandbox, `HMAC-SHA256(raw_body, secret)` valid `authorized`, invalid signature `ProviderError`, amount mismatch `ProviderError`, replay conflict, live blocked), AI tool permission (read/draft `draft_unverified` without approval, consequential without `approval_id` → `ApprovalError`, with approved `approved_consequential`, emergency `confirmed=True` blocks), approval workflow (request → `decide` requires `confirmed=True`, `revoke`, TTL `pending` + `effective_status`, expiry harness), frontend snapshot (`ai-earn-dashboard-snapshot` `read_only=True` + 1 MB cap, rejects `read_only=False`, no secrets), Windows policy (refuses `dashboard/` auth DB, no `0.0.0.0` in health payload), unit `load_settings`/`Event` allowlist (rejects invalid env without echo, rejects non-`Event`).
+
+- `tests/test_e2e_journey.py` — 2 tests. Full user journey `alice`+`bob` isolation: register/login, `Opportunities` create/list/vetted/invalid inputs (`title`, `url`, `budget`) + `AccessDenied` + `operation_key` idempotency/conflict, `Services` create/publish + invalid price, `Products` create, `Customers` create + invalid contact, `Communications` create/sent, `Followups` create/completed, `Ledger` income/expense `net` + invalid kind/control-char, `Analytics` funnel/MRR/revenue_analytics + invalid range, `OrderDrafts`→`Invoices` create/issued + `AccessDenied`, `TaskPlans` create, `DashboardMetrics` counts + no secrets, `PaymentProviders` Razorpay order→webhook (valid HMAC + failures amount mismatch/invalid sig), `AIAssistant` read/draft/consequential + `ApprovalQueue` emergency (`confirmed=True`) → request/approve/execute/revoke + `AccessDenied` for bob, snapshot validation, `health` ok + `production_ready:false`, `backup_to` never overwrite, `StateRecoveryComparison` matching, `AuthStorage` dashboard reject, logout revocation, `tracker_cli._paise` unit (`0`, `123.45`, `-1`/`1.999` fail).
+
+- Existing Phase 16 hardening `tests/test_phase16_production_hardening.py` — 17 tests covering production config, secret generation/redaction, backups, recovery docs (new path + never overwrite), health/monitoring, structured logs redacted, error reporting 8-hex, dependency `pip-audit` placeholder + secret scan, CI `compileall`+`security_check`+`health`, deployment `127.0.0.1` + never expose, migration backup-first, rollback new path, export owner-scoped redacted bounded, deletion two-phase `DELETE <8>` + backup, privacy, runbooks, never-expose network.
+
+All new tests assert failure conditions via `assertRaises` (`AccessDenied`, `ProviderError`, `LedgerError`, `OpportunityError`, `ApprovalError`, `StateStorageError`, `ConfigurationError`, `ValueError`, generic `Exception` for revoked/expired) and success paths via equality + shape checks. No existing assertion was weakened; new tests are additive and use isolated `tempfile` + `PASSWORD_ITERATIONS=1000` only in test setup.
+
+**Coverage matrix (required categories → representative test files, failure example):**
+
+| Category | Representative files | Failure conditions tested |
+|---|---|---|
+| Unit tests | `test_config`, `test_events`, `test_api_contract` unit, `test_e2e_journey` `_paise` | invalid env/level, non-Event, invalid note/amount |
+| Integration tests | `test_state_authorization`, `test_state_crash_recovery`, `test_api_contract` integration | expired after lock, revoked during operation |
+| API tests | `test_api_contract`, `test_health`, `test_cli`, `test_dashboard_export` | missing DB → `missing`, invalid env → `invalid_configuration`, invalid JSON shape |
+| Authentication tests | `test_auth`, `test_auth_cli`, `test_auth_terminal`, `test_api_contract` auth | wrong password, invalid token, revoked (`logout`), expired, rate limit |
+| Authorization tests | `test_state_authorization`, `test_state_operation_integrity`, `test_api_contract` authz | cross-account `AccessDenied`, invalid transition, missing approval |
+| Account-isolation tests | `test_customers`, `test_opportunities`, `test_api_contract` isolation, `test_e2e_journey` | bob cannot get/list alice records, ledger net isolated |
+| Database migration tests | `test_state_migration`, `test_phase3_completion`, `test_api_contract` migration | old version blocks `StateStorageError`, backup overwrite refused, corrupt backup fails, interrupted migration rollback |
+| Recovery tests | `test_recovery_drill`, `test_state_recovery_comparison`, `test_state_snapshot_integrity`, `test_phase3_recovery_rehearsal` | corrupt copy refuses `backup_to`, stale copy diverges, version mismatch fails |
+| Financial calculation tests | `test_ledger`, `test_financial_assertions`, `test_financial_draft_workflows`, `test_analytics`, `test_api_contract` financial | invalid kind/amount `LedgerError`, negative, overflow `1_000_000_000_001`, control-char note, unverified vs `net_realized_synthetic` |
+| Payment webhook tests | `test_payment_providers`, `test_payment_sandbox`, `test_durable_sandbox_payments`, `test_api_contract` webhook | invalid HMAC `ProviderError`, amount mismatch, replay/conflict, stale, live blocked, `t=`/`v1=` invalid, duplicate field |
+| AI tool permission tests | `test_ai_assistant`, `test_api_contract` AI | read/draft without approval succeeds (`read_only`/`draft_unverified`), consequential without `approval_id` → `ApprovalError`, injection treated as data |
+| Approval workflow tests | `test_ai_assistant` queue, `test_api_contract` queue | request requires `confirmed=True`, decide without confirm fails, `expired`/`revoked` cannot decide, emergency blocks, `is_stopped` |
+| Frontend tests | `test_frontend_spa`, `test_dashboard_metrics`, `test_dashboard_export`, `test_api_contract` snapshot | 1 MB cap, missing `read_only`/`format` rejected, no `fetch(http`, dark/light CSS, responsive breakpoints, `aria-current` |
+| End-to-end tests | `test_e2e_journey`, `test_phase3_recovery_rehearsal`, `test_tracker_cli`, `test_phase3_completion` | full flow register→opp→service→customer→ledger→analytics→payment webhook→AI approval→snapshot→backup restores, plus `AccessDenied`/`ProviderError` etc. |
+| Windows-specific tests | `test_windows_security`, `test_windows_auth`, `test_windows_phase3_gate`, `test_windows_terminal_*` | unsafe ACL fails closed, junction/reparse rejected, sidecar inherits private ACL, non-Windows skips, dirty checkout refused; **skipped on Linux (17)** is not pass |
+
+**Full suite run after Phase 16 (this branch `arena/a2b30614-ai-earn`, LATEST 28):**
+
+- Command: `python -m compileall -q ai_earn tests tools && python -m unittest discover -s tests -v` (also `python -m tools.security_check` + `--audit` and `python -m ai_earn health --json` in CI)
+- Platform: `Linux e2b.local 6.1.158+ #1 SMP PREEMPT_DYNAMIC Mon May 11 18:48:24 UTC 2026 x86_64 GNU/Linux`, `Python 3.11.2`, `STD-library only, no requirements.txt`
+- Commit: `9812b800494f284156aa26e8d16ac3579f4c0060` + API/E2E additions (this working tree; next commit will be recorded in `git log --oneline`; current `git rev-parse --short HEAD` before commit is `9812b80`)
+- Result: **Ran 963 tests in 176.692s — OK (skipped=17)** on Linux sandbox. `Passed 946`, `Failed 0`, `Skipped 17`, `Total 963`. `compileall` OK, `tools/security_check` pass (secret scan + `0.0.0.0` guard), `health --json` `production_ready:false`.
+- Windows: `17` skipped tests are `test_windows_auth` 17 cases requiring Win32 ACL APIs and a local ACL-capable drive; they are not executed on Linux. A skipped test is not a passing test. Windows verification requires `python -m unittest discover -v` on a clean Windows checkout (NTFS fixed drive, `create_private_directory`, Python 3.11/3.13) plus `tools/windows_phase3_gate` / `tools/windows_candidate_smoke` as documented in `docs/WINDOWS_TESTING.md`. Latest user-reported Windows gate was at `f26c6b9` (pre-Phase 16, 611 tests 564 passed 47 skipped); Phase 16 Windows gate not yet user-reported.
+
+**Known limitations (not weakened):** Suite is disposable-data only (temporary `private` dirs, never real user data). Audit is not tamper-evident; coordinated raw DB edits can evade checks. `auth`/`state` are separate commits, so ambiguity after `state` commit remains (retry with same `operation_key` acknowledges). Financial amounts are owner-asserted/local `unverified`, payment is Razorpay/Stripe sandbox HMAC-only (no bank settlement, live blocked). AI tools are stub drafts (`draft_unverified`), require explicit `ApprovalQueue` for consequential. Health `production_ready` stays `false` until `docs/PRODUCTION_READINESS.md` 11-item manual sign-off. `pip-audit` placeholder reports clean because `stdlib-only`. Windows ACL and recovery not verified on Linux. No network, no external secret vault, no `GET /healthz` listener yet.
+
+**Re-run instructions (local, no secrets in output):**
+
+```sh
+python -m compileall -q ai_earn tests tools
+python -m tools.security_check && python -m tools.security_check --audit
+python -m unittest discover -s tests -v 2>&1 | tail -n 5  # expect Ran 963 OK (skipped=17) on Linux
+python -m ai_earn health --json --with-backups | python -m json.tool
+# Windows (clean NTFS checkout):
+# .\.venv\Scripts\python.exe -m unittest discover -v  # expect 17 Windows skips on Linux become passes; verify Skipped is not counted as passed
+```
