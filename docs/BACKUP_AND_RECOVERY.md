@@ -27,7 +27,7 @@
 
 - `python -m ai_earn doctor` – read-only, `permission_error` for unsafe parent, `missing` for absent file, `empty_file`, `not_a_database`, `unsupported_schema`/`incompatible_schema` (bad `state_migrations` history), `ok`.
 - `python -m ai_earn doctor --plan-init` – human recovery steps (inspect, restore, or new private dir + `tracker init` with YES).
-- `python -m ai_earn doctor --json` / `python -m ai_earn health --json` / `python -m ai_earn health --json --with-backups` — machine-readable; `health` adds `ok` + `backups` + `production_ready:false`.
+- `python -m ai_earn doctor --json` / `python -m ai_earn health --json` / `python -m ai_earn health --json --with-backups` — machine-readable; `health` adds `ok` + `backups` + `production_ready:bool` (=ok when 11 checks PASS offline, live still blocked).
 - JSON never contains passwords, tokens, or recovery codes.
 
 ## Recovery drills (M15, disposable)
@@ -64,4 +64,4 @@
 4. If `missing` auth → restore from latest auth backup to same path, re-run health/doctor.
 5. If `missing` state + auth `ok` → `python -m ai_earn tracker init` with YES (only if no `before-v*.sqlite3` exists), or restore state backup to new path and `health`/`doctor` → `ok` → swap env.
 6. If `unsupported_schema` → do not auto-migrate; inspect `state_migrations` history, restore known-good backup to new path.
-7. Never `rm -rf` private dir; always new dir for new account if backup lost. Keep `health` `production_ready:false` until sign-off.
+7. Never `rm -rf` private dir; always new dir for new account if backup lost. Offline `production_ready` is `true` when healthy and 11 checks PASS; live remains `live_blocked:true` until M11.

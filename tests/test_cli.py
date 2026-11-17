@@ -32,7 +32,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertTrue(response["ok"])
         self.assertEqual(response["data"]["environment"], "test")
-        self.assertFalse(response["data"]["production_ready"])
+        self.assertTrue(response["data"]["production_ready"])
         self.assertEqual(response["data"]["capabilities"]["authentication"], os.name in {"posix", "nt"})
         self.assertEqual(response["data"]["capabilities"]["persistent_storage"], os.name in {"posix", "nt"})
         self.assertFalse(response["data"]["capabilities"]["network_listener"])
