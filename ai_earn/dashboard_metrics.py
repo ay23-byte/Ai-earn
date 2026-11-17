@@ -7,6 +7,10 @@ It is an internal application service, not an HTTP or public API.
 from .state_authorization import _authorized_transaction
 from .state_storage import StateStorage
 from .auth import AuthService
+try:
+    from .revenue_analytics import dashboard_for_conn as _rev_dashboard_for_conn
+except Exception:
+    _rev_dashboard_for_conn = None
 
 
 def _count(conn, table, owner):
@@ -450,4 +454,36 @@ class DashboardMetrics:
                     }
                 except Exception:
                     result["analytics"] = {"note": "analytics unavailable", "verification": "unverified"}
+            # Phase 14 revenue intelligence — always provide (real persisted, empty-state aware)
+            try:
+                if _rev_dashboard_for_conn is not None:
+                    rev = _rev_dashboard_for_conn(conn, owner, now, from_ts=0, to_ts=4102444800, version=version)
+                    result["revenue_analytics"] = rev
+                    result["business_intelligence"] = rev
+                    result["revenue_charts"] = rev["revenue_charts"]
+                    result["expense_charts"] = rev["expense_charts"]
+                    result["opportunity_funnel"] = rev["opportunity_funnel"]
+                    result["customer_activity"] = rev["customer_activity"]
+                    result["total_opportunities"] = rev["total_opportunities"]
+                    result["active_opportunities"] = rev["active_opportunities"]
+                    result["applications_submitted"] = rev["applications_submitted"]
+                    result["proposals_accepted"] = rev["proposals_accepted"]
+                    result["active_customers"] = rev["active_customers"]
+                    result["active_projects"] = rev["active_projects"]
+                    result["orders"] = rev["orders"]
+                    result["invoices"] = rev["invoices"]
+                    result["outstanding_amounts"] = rev["outstanding_amounts"]
+                    result["verified_received_payments"] = rev["verified_received_payments"]
+                    result["expenses"] = rev["expenses"]
+                    result["platform_fees"] = rev["platform_fees"]
+                    result["net_realized_income"] = rev["net_realized_income"]
+                    result["monthly_income"] = rev["monthly_income"]
+                    result["monthly_expenses"] = rev["monthly_expenses"]
+                    result["conversion_rate"] = rev["conversion_rate"]
+                    result["average_project_value"] = rev["average_project_value"]
+                    result["workload"] = rev["workload"]
+                    result["task_completion"] = rev["task_completion"]
+                    result["income_separation"] = rev["income_separation"]
+            except Exception as _rev_e:
+                result["revenue_analytics"] = {"error": str(_rev_e), "verification": "unverified", "empty_state": True, "note": "Revenue analytics unavailable"}
             return result

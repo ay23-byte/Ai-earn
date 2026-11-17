@@ -230,6 +230,53 @@
         <div class="rows" id="analyticsBuckets"><div class="empty">No snapshot — MRR buckets are monthly ledger income (YYYY-MM), unverified.</div></div>
         <div class="muted" style="margin-top:10px">Read-only aggregates from persisted owned rows. Time-bounded queries via tracker 42–45; dashboard shows all-time glance. CSV export capped at 1M.</div>
       </div>
+      <div class="panel">
+        <h2>Revenue Analytics — business intelligence (real data only)</h2>
+        <div class="muted" style="margin-bottom:8px">All metrics derived from persisted owned rows. Empty shows honest empty state — never fabricated. Verified income strictly separated from unverified and projected.</div>
+        <div class="rows" style="margin-bottom:10px">
+          <div class="row"><label for="revFrom"><b>From</b><small>YYYY-MM (UTC)</small></label><input id="revFrom" type="month" aria-label="Filter from month"></div>
+          <div class="row"><label for="revTo"><b>To</b><small>YYYY-MM (UTC)</small></label><input id="revTo" type="month" aria-label="Filter to month"><button class="button" id="revFilterBtn" type="button">Apply time filter</button><button class="button" id="revClearFilter" type="button">Clear</button></div>
+        </div>
+        <div id="revFilterStatus" class="muted" style="margin-bottom:10px">Showing all-time (no filter).</div>
+        <div class="rows" id="revenueMetrics">
+          <div class="row"><div><b>Total opportunities</b><small id="revTotalOppsNote">No snapshot</small></div><strong id="revTotalOpps">—</strong></div>
+          <div class="row"><div><b>Active opportunities</b><small>discovered / vetted / pursuing</small></div><strong id="revActiveOpps">—</strong></div>
+          <div class="row"><div><b>Applications submitted</b><small>proposals sent+</small></div><strong id="revAppsSubmitted">—</strong></div>
+          <div class="row"><div><b>Proposals accepted</b><small>accepted</small></div><strong id="revPropsAccepted">—</strong></div>
+          <div class="row"><div><b>Active customers</b><small>lead / contacted / converted</small></div><strong id="revActiveCust">—</strong></div>
+          <div class="row"><div><b>Active projects</b><small>customer_projects + tasks</small></div><strong id="revActiveProj">—</strong></div>
+          <div class="row"><div><b>Orders</b><small id="revOrdersNote">customer_orders</small></div><strong id="revOrders">—</strong></div>
+          <div class="row"><div><b>Invoices</b><small id="revInvoicesNote">issued / overdue</small></div><strong id="revInvoices">—</strong></div>
+          <div class="row"><div><b>Outstanding amounts</b><small id="revOutstandingNote">issued+overdue</small></div><strong id="revOutstanding">—</strong></div>
+          <div class="row"><div><b>Verified received payments</b><small id="revVerifiedNote">verified settled/received</small></div><strong id="revVerified">—</strong></div>
+          <div class="row"><div><b>Expenses</b><small id="revExpensesNote">verified</small></div><strong id="revExpenses">—</strong></div>
+          <div class="row"><div><b>Platform fees</b><small>platform</small></div><strong id="revFees">—</strong></div>
+          <div class="row"><div><b>Net realized income</b><small id="revNetNote">verified settled - refunds - fees - expenses</small></div><strong id="revNet">—</strong></div>
+          <div class="row"><div><b>Average project value</b><small>avg customer_orders</small></div><strong id="revAvgProject">—</strong></div>
+          <div class="row"><div><b>Workload / completion</b><small id="revWorkloadNote">queued + tasks</small></div><strong id="revWorkload">—</strong></div>
+          <div class="row"><div><b>Conversion rate</b><small id="revConversionNote">opps / customers / proposals</small></div><strong id="revConversion">—</strong></div>
+        </div>
+        <h3>Income separation</h3>
+        <div class="rows" id="incomeSeparation">
+          <div class="row"><div><b>Realized income</b><small style="color:var(--ok)">verified</small></div><strong id="incomeRealized">—</strong></div>
+          <div class="row"><div><b>Unverified income</b><small style="color:var(--warn)">unverified — ledger income, not settlement</small></div><strong id="incomeUnverified">—</strong></div>
+          <div class="row"><div><b>Projected revenue</b><small style="color:var(--muted)">projected — order_drafts + assertions, not revenue</small></div><strong id="incomeProjected">—</strong></div>
+        </div>
+        <h3>Monthly trends — revenue</h3>
+        <div class="rows" id="revenueChart"><div class="empty">No snapshot — revenue chart shows monthly realized (verified) vs unverified vs projected.</div></div>
+        <h3>Monthly trends — expenses</h3>
+        <div class="rows" id="expenseChart"><div class="empty">No snapshot — expense chart shows monthly verified expenses (and ledger fallback).</div></div>
+        <h3>Opportunity funnel</h3>
+        <div class="rows" id="oppFunnelDetail"><div class="empty">No snapshot — funnel shows discovered → vetted → pursuing.</div></div>
+        <h3>Customer activity</h3>
+        <div class="rows" id="customerActivityDetail"><div class="empty">No snapshot — customer activity shows by_status + communications / orders.</div></div>
+        <h3>Exportable reports</h3>
+        <div class="rows">
+          <div class="row"><div><b>CSV export</b><small>Business intelligence, 1M cap, verification column</small></div><button class="button" id="revExportBtn" type="button">Download CSV</button></div>
+          <div class="row"><div><b>JSON export</b><small>Full revenue_analytics dump</small></div><button class="button" id="revExportJsonBtn" type="button">Download JSON</button></div>
+        </div>
+        <div class="muted" style="margin-top:8px">When no data exists, every metric shows empty honest state — never attractive fabricated numbers. Use tracker CLI 42–45 for time-bounded queries; dashboard filter is client-side on snapshot month buckets.</div>
+      </div>
     </section>
 
     <!-- AI Approvals -->
