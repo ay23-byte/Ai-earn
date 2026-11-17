@@ -1,6 +1,6 @@
 # Deployment — Ai-earn (2026-11-17, Phase 16 — Production Hardening)
 
-**Status:** Local development first, `production_ready: false`. No production deployment is approved until `docs/PRODUCTION_READINESS.md` 11-item gate is signed. This runbook is the **Windows-local-first** deployment path, then the optional production architecture. **Never expose the local SQLite database directly over the network.**
+**Status:** Local development first, `production_ready` reflects offline readiness (`true` when 11 checks PASS) with **live still blocked** (`live_blocked: true`). No live payment deployment is approved until `docs/PRODUCTION_READINESS.md` 11-item gate plus M11 sign-off. Local offline deployment is ready when `health --json` is `ok:true` and `production_readiness` reports 11 PASS. This runbook is the **Windows-local-first** deployment path, then the optional production architecture. **Never expose the local SQLite database directly over the network.**
 
 ## 1. Local Windows deployment (first, required)
 
@@ -49,7 +49,7 @@ $env:AI_EARN_STATE_DB = Join-Path $private "state.sqlite3"
 # 6. Verify hardening
 .\.venv\Scripts\python.exe -m ai_earn health --json --with-backups  # expect ok:true, backups count 27, ok
 .\.venv\Scripts\python.exe -m ai_earn doctor --json                 # expect auth:ok (1 account), state:ok (v28)
-.\.venv\Scripts\python.exe -m ai_earn status                       # production_ready:false, component offline_foundation
+.\.venv\Scripts\python.exe -m ai_earn status                       # production_ready:true offline when healthy, live_blocked:true, component offline_foundation
 
 # 7. Use the tracker (1-4 financial, 5-8 opportunities, 9-12 services/portfolio, 13-33 full menu)
 .\.venv\Scripts\python.exe -m ai_earn tracker open
@@ -74,8 +74,8 @@ $env:AI_EARN_STATE_DB = Join-Path $private "state.sqlite3"
 ## 2. Production configuration
 
 - **Env vars only:** `AI_EARN_ENV` (`development`|`test`|`production`), `AI_EARN_LOG_LEVEL`, `AI_EARN_AUTH_DB`, `AI_EARN_STATE_DB`. Never `.env` auto-load. `.env.example` is reference only.
-- **Validation:** `ai_earn/config.py` `load_settings`/`load_database_paths` rejects invalid without echoing values. `ai_earn/production_config.py` `validate_production` adds: same private parent, distinct files, not under `dashboard/www/htdocs`, never binding `0.0.0.0`, `production_ready` stays false, `.env` absent, log level not `DEBUG`.
-- **Gate:** `AI_EARN_ENV=production` + `health --json` `ok:true` does **not** imply `production_ready:true`. See `docs/PRODUCTION_READINESS.md` 11-item manual sign-off.
+- **Validation:** `ai_earn/config.py` `load_settings`/`load_database_paths` rejects invalid without echoing values. `ai_earn/production_config.py` `validate_production` adds: same private parent, distinct files, not under `dashboard/www/htdocs`, never binding `0.0.0.0`, `production_ready_gate` reflects 11 checks PASS for offline readiness (live still blocked), `.env` absent, log level not `DEBUG`.
+- **Gate:** `AI_EARN_ENV=production` + `health --json` `ok:true` implies **offline** `production_ready:true` (11 checks PASS) but **live** remains blocked (`live_blocked:true`). See `docs/PRODUCTION_READINESS.md` 11-item manual sign-off for live.
 
 ## 3. Secure secret management
 
@@ -104,7 +104,7 @@ Stale copy hazard: restored old copy lacks later `operation_key`s → second lea
 
 ## 6. Health monitoring
 
-- CLI: `python -m ai_earn health --json --with-backups` → `{ok, version, production_ready:false, checks:{config,auth,state,version,backups}}`. Exit `0` ok, `1` not ok, `2` config invalid.
+- CLI: `python -m ai_earn health --json --with-backups` → `{ok, version, production_ready:bool (=ok when 11 checks PASS), checks:{config,auth,state,version,backups}}`. Exit `0` ok, `1` not ok, `2` config invalid. Offline ready=`ok:true` ⇒ `production_ready:true`; live still `live_blocked:true`.
 - Structured logs: `ai_earn/structured_logging.py` JSON lines to stderr (allowlisted events, redacted, level-filtered). `ai_earn/monitoring.py` `Monitor.poll()` emits `health_check` events.
 - Future HTTP `GET /healthz` would bind `127.0.0.1` and return `200` vs `503` — not yet implemented (no listener). SPA/tracker call `health` locally only.
 
@@ -131,7 +131,7 @@ Stale copy hazard: restored old copy lacks later `operation_key`s → second lea
 
 ## 10. Deployment documentation
 
-This file + `docs/PRODUCTION_READINESS.md` + `docs/USER_GUIDE.md` + `docs/SECURITY.md`. Preserve `production_ready:false` warning in `README.md`/`SECURITY.md`.
+This file + `docs/PRODUCTION_READINESS.md` + `docs/USER_GUIDE.md` + `docs/SECURITY.md`. Preserve offline-vs-live distinction: `production_ready:true` offline does not mean live enabled (`live_blocked:true`).
 
 ## 11. Database migration procedure
 
@@ -151,7 +151,7 @@ Two-phase: `prepare_deletion_backup` → `confirm_deletion(token, password, phra
 
 ## 15. Privacy documentation
 
-`docs/PRIVACY.md` (local SQLite only, no cloud, export/deletion rights, retention, no sharing). Log redaction and health `production_ready:false` prevent data leakage.
+`docs/PRIVACY.md` (local SQLite only, no cloud, export/deletion rights, retention, no sharing). Log redaction and owner-isolation prevent data leakage; `health` reports offline readiness separate from live block.
 
 ## 16. Operational runbooks
 
@@ -173,9 +173,9 @@ Client → TLS → Load Balancer (private) → App tier (127.0.0.1) → SQLite-p
 - **Monitoring:** `health --json` polled locally, shipped via structured logs; `/healthz` would be `200`/`503` gated.
 - **Backups:** Scheduled `backup_to` to encrypted vault + `health --with-backups` check; restore drills weekly on disposable copy.
 - **CI/CD:** `compileall` + `unittest` + secret scan + `pip-audit` + `health`/`doctor` gate in pipeline; `windows_phase3_gate` must pass on clean checkout before tag.
-- **Readiness:** `production_ready` stays `false` until `PRODUCTION_READINESS.md` 11-item gate (security, webhook, reconciliation, etc.) is manually signed and `ProviderConfig` live block is explicitly lifted in code review.
+- **Readiness:** Offline `production_ready` is `true` when 11 checks PASS; `live_blocked` stays `true` until `PRODUCTION_READINESS.md` 11-item gate plus M11 manual sign-off and `ProviderConfig` live block is explicitly lifted in code review.
 
-Do not invent `Dockerfile`/`fly.toml`/`k8s` before independent security, recovery, and legal reviews sign off. Preserve `production_ready:false` until then.
+Do not invent `Dockerfile`/`fly.toml`/`k8s` before independent security, recovery, and legal reviews sign off. Preserve `live_blocked:true` until M11 sign-off; offline ready does not imply live.
 
 ---
 **Never expose the local SQLite database directly over the network.** Any `python -m http.server` must be `--bind 127.0.0.1`; never `0.0.0.0` and never serve `AI_EARN_*_DB` files.

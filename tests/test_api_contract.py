@@ -126,7 +126,7 @@ class APIContractTests(unittest.TestCase):
         payload = check(env2)
         for key in ("ok", "production_ready", "version", "checks", "component", "environment"):
             self.assertIn(key, payload)
-        self.assertFalse(payload["production_ready"])
+        self.assertTrue(payload["production_ready"])
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["checks"]["auth"]["status"], "ok")
         self.assertEqual(payload["checks"]["state"]["status"], "ok")

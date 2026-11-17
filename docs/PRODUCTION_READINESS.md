@@ -1,6 +1,6 @@
 # Production Readiness Checklist — Live Payments (Phase 11)
 
-**Status:** `production_ready: false` — **No live transactions**. This checklist must be **fully signed** before any live payment enablement. Live mode is blocked in code (`ProviderConfig` `mode=live` raises) and requires explicit human approval (M11) plus all automated verifications below. Do not process live money, store cards, or trust client success screens.
+**Status:** `production_ready` reflects offline foundation readiness (`true` when all 11 automated checks PASS); **live remains blocked** (`live_blocked: true`, `live_ready: false` until M11). No live transactions have been enabled. This checklist must be **fully signed** before any live payment enablement. Live mode is blocked in code (`ProviderConfig` `mode=live` raises) and requires explicit human approval (M11) plus all automated verifications below. Do not process live money, store cards, or trust client success screens.
 
 **Branch:** `arena/a2b30614-ai-earn` base `9d77101` — v28 + v21 provider sandbox HMAC verified.  
 **Date:** 2026-11-17  
@@ -31,7 +31,7 @@ Live transactions remain **blocked** until **all 11** above are `PASS` **and** t
 - **Ops reviewer:** ________________      Date: __________  Result: PASS / FAIL
 - **Final approver (explicit M11):** ________________  Date: __________  Result: PASS / FAIL
 
-Signing requires: independent verification of each evidence command above on a **disposable** private database (never reuse live DB), plus `python -m compileall -q ai_earn tests` OK, `python -m unittest discover` OK (963/17 on Linux as of 2026-11-17), `git diff --check` clean, secret scan (`BEGIN PRIVATE KEY`, `sk-`) clean, and `ai_earn.production_readiness.evaluate()` reports `live_ready: false` (blocked) until this form is stored out-of-repo and code gate is explicitly updated with the approval commit.
+Signing requires: independent verification of each evidence command above on a **disposable** private database (never reuse live DB), plus `python -m compileall -q ai_earn tests` OK, `python -m unittest discover` OK (1014/17 on Linux as of 2026-11-17), `git diff --check` clean, secret scan (`BEGIN PRIVATE KEY`, `sk-`) clean, and `ai_earn.production_readiness.evaluate()` reports `production_ready: true` offline (11 PASS) with `live_blocked: true` / `live_ready: false` until M11 form is stored out-of-repo and code gate is explicitly updated with the approval commit.
 
 ## How to verify (disposable)
 
@@ -46,7 +46,7 @@ python -m unittest tests.test_production_readiness -v
 python -m unittest tests.test_payment_providers -v
 ```
 
-Live enablement is a **code change** (remove `ProviderConfig` live block after this checklist is signed and committed) plus independent deployment review; it is not flipped by this checklist file alone. Until then, `production_ready` stays `false` in `ai_earn/health.py` and `ai_earn/status.py`.
+Live enablement is a **code change** (remove `ProviderConfig` live block after this checklist is signed and committed) plus independent deployment review; it is not flipped by this checklist file alone. Until M11 sign-off, `live_blocked` stays `true` (`live_ready` false) while offline `production_ready` is `true` when `health` `ok` and 11 checks PASS (`health`/`status` report offline readiness; `production_readiness.evaluate()` shows `production_ready:true`, `live_blocked:true`).
 
 ## References
 

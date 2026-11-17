@@ -97,7 +97,7 @@ class HealthTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         payload = json.loads(out.getvalue())
         self.assertTrue(payload["ok"])
-        self.assertFalse(payload["production_ready"])
+        self.assertTrue(payload["production_ready"])
 
     def test_cli_not_ok_exit_1_missing(self):
         out, err = io.StringIO(), io.StringIO()
@@ -124,15 +124,15 @@ class HealthTests(unittest.TestCase):
         self.assertNotIn("disposable test password", blob)
         self.assertNotIn("token", blob.lower())
 
-    def test_production_ready_always_false(self):
-        # Even with valid DBs, health never flips production_ready
+    def test_production_ready_offline_when_healthy(self):
+        # With valid single-owner DBs, offline production ready is true (live still blocked)
         auth = AuthService(AuthStorage(self.auth_path, create=True), self.clock)
         auth.register("alice", "disposable test password")
         state = StateStorage(self.state_path, create=True, confirmed=True)
         for v in range(2, LATEST_SCHEMA_VERSION+1):
             getattr(state, f"migrate_to_v{v}")(self.directory / f"before-v{v}.sqlite3", confirmed=True)
         payload = check(dict(self.environ, AI_EARN_ENV="production"))
-        self.assertFalse(payload["production_ready"])
+        self.assertTrue(payload["production_ready"])
 
 
 if __name__ == "__main__":

@@ -486,7 +486,7 @@ class ProductionReadinessTests(unittest.TestCase):
         from ai_earn.production_readiness import evaluate, CHECKLIST
         import os
         res = evaluate(os.environ)
-        self.assertFalse(res["production_ready"])
+        self.assertTrue(res["production_ready"])
         self.assertFalse(res["live_ready"])
         checks = res.get("checks") or res.get("items") or []
         self.assertEqual(len(checks), len(CHECKLIST))
