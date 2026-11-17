@@ -1,7 +1,7 @@
 # Master Implementation Plan — Ai-earn
 
-**Date:** 2026-11-16 (UTC)  
-**Branch:** `arena/c6693e06-ai-earn` based on `ed791020fda9a1975da5f599015072e0b35db7f6` (merge of PR #37, which wired `doctor` CLI and hardened diagnostics).  
+**Date:** 2026-11-17 (UTC)  
+**Branch:** `arena/a2b30614-ai-earn` based on `9d77101a0853e5d8bd0d42d880ff1e8ebef5575d` (merge of PR #37, which wired `doctor` CLI and hardened diagnostics).  
 **Auditor:** autonomous principal agent (this session).  
 **Mode:** local-first, single-user, disposable-data, Windows-compatible, no live payments.
 
@@ -13,11 +13,11 @@ This plan preserves all existing work and does **not** rewrite the repository. I
 
 ### 0.1 Inventory (tracked files)
 
-- **Language/runtime:** Python 3.11+ standard library only; no `pyproject.toml`, `requirements.txt` or lockfile. No frontend framework, no API server, no deployment manifest.
+- **Language/runtime:** Python 3.11+ standard library only; no `pyproject.toml`, `requirements.txt` or lockfile. Vanilla SPA (no framework, no build, 17 views, 1 MB snapshot cap), health (`health [--json] [--with-backups]`), production hardening (`production_config`, `secrets`, `structured_logging`), API contract/E2E tests covering 15 categories, still no HTTP API server, no deployment manifest (production_ready:false).
 - **CLI entrypoint:** `ai_earn/__main__.py` → `status` | `auth {register|login|recover}` | `tracker {init|open}` | `dashboard snapshot` | `doctor [--plan-init|--json]`. All dispatch in-process, no network listener.
 - **Configuration:** `ai_earn/config.py` validates `AI_EARN_ENV`, `AI_EARN_LOG_LEVEL`, `AI_EARN_AUTH_DB`, `AI_EARN_STATE_DB` via absolute-path checks; invalid values raise `ConfigurationError` without leaking values. `.env.example` documents both DB paths.
 - **Auth:** `ai_earn/auth.py` + `auth_storage.py` + `auth_cli.py` + `windows_security.py`. PBKDF2-HMAC-SHA256 600k iterations, random salt, session token 43-char urlsafe, `token_hash` stored, 30-min expiry, rate limits (`register 10/10, login 5/30, recover 5/20` per 15-min window), recovery-code replacement requires live session + `confirmed=True`, audits in `auth_audit`. POSIX 0700 dir / 0600 file, Windows ACL-protected dir/file via `create_private_directory/file` + `verify_private_path`. Experimental, not OS sandbox, not production-ready. User-reported Windows gate `72241cc` for Phase 2.
-- **State storage:** `ai_earn/state_storage.py` – separate SQLite DB, `APPLICATION_ID 0x41494533`, `SCHEMA_VERSION 1` → `LATEST 14`, explicit backup-first migrations (`migrate_to_v2` … `migrate_to_v14`) with `backup_to` verified copy to new path, `_validate_schema` and `_check_integrity` (quick_check, foreign_key_check, creation-event, terminal-transition, multi-step replay, queue consistency, etc.). Transactions via `_PrivateFiles` reusing auth parent checks. `StateStorage` never auto-creates on open; `tracker_cli._initialize_state` creates v1 then migrates to v14 with 13 `before-v*.sqlite3` backups.
+- **State storage:** `ai_earn/state_storage.py` – separate SQLite DB, `APPLICATION_ID 0x41494533`, `SCHEMA_VERSION 1` → `LATEST 28`, explicit backup-first migrations (`migrate_to_v2` … `migrate_to_v28`) with `backup_to` verified copy to new path, `_validate_schema` and `_check_integrity` (quick_check, foreign_key_check, creation-event, terminal-transition, multi-step replay, queue consistency, etc.). Transactions via `_PrivateFiles` reusing auth parent checks. `StateStorage` never auto-creates on open; `tracker_cli._initialize_state` creates v1 then migrates to v14 with 13 `before-v*.sqlite3` backups.
 - **Services (all session-bound, disposable, owner-scoped, idempotent):**
   - `opportunity_drafts` (v3) `draft→archived`
   - `task_plans` (v4) `planned→cancelled`
@@ -38,7 +38,7 @@ This plan preserves all existing work and does **not** rewrite the repository. I
 - **CLI adapters:** `tracker_cli` (financial_assertions menu), `dashboard_cli` (HMAC-checked snapshot beside state DB, exclusive create), `doctor` + `doctor_cli` (read-only classify, `permission_error` for unsafe parent, `immutable=1` open), `auth_cli`.
 - **Dashboard:** `dashboard/connected.html` + `snapshot.js` – static file input, no API/token, `rupees()`/`count()` rendering, 1-MB limit, `Clear data` wipes memory.
 - **Tools:** `windows_phase3_gate`, `windows_candidate_smoke`, `windows_terminal_smoke` – disposable temp dirs, sanitized test-ID reporting, 4 allowed POSIX skips.
-- **Tests:** 636 tests (this baseline, `python -m unittest discover -v` 2026-11-16, Linux, Python 3.11.2), 17 Windows-only skipped, 0 failed. Coverage includes auth, storage, migrations, crash recovery (`os._exit`), concurrency (`ThreadPoolExecutor`), payment sandbox. See §0.3.
+- **Tests:** 963 tests (current, `python -m unittest discover -v` 2026-11-17, Linux, Python 3.11.2), 17 Windows-only skipped, 0 failed. Coverage includes auth, storage, migrations, crash recovery (`os._exit`), concurrency (`ThreadPoolExecutor`), payment sandbox. See §0.3.
 - **Docs:** `README.md` (now mentions tracker+dashboard+doctor), `docs/` 9 files (see inventory above), phase register says Phase 1+2 `PASS_WITH_DOCUMENTED_LIMITATIONS`, Phase 3 `IN_PROGRESS`, remaining `NOT_STARTED`.
 
 ### 0.2 What is incomplete / unsafe / disconnected
@@ -58,7 +58,7 @@ This plan preserves all existing work and does **not** rewrite the repository. I
 ```
 $ python -m compileall -q ai_earn tests tools  → OK
 $ python -m unittest discover -v
-Ran 636 tests in 73.994s
+Ran 963 tests in 176.692s
 OK (skipped=17)
 ```
 - Platform: Linux (sandbox, POSIX), Python 3.11.2
@@ -67,7 +67,7 @@ OK (skipped=17)
 - Focused groups consistent with `tools/windows_phase3_gate` allowed skips (4 POSIX-only). Full history and per-test output archived in CI; see `docs/TESTING.md` for historical per-phase counts.
 - Baseline artifact: `git rev-parse HEAD` = `ed791020fda9a1975da5f599015072e0b35db7f6` (post-#37).
 
-This is the green baseline before any new milestone work.
+This was the green baseline before M2-M16; current baseline is 963/17 (see docs/TESTING.md Phase 16 section). Milestones M1-M16 are done (experimental, local, disposable-data).
 
 ---
 
@@ -97,7 +97,7 @@ Each milestone requires: plan → implement → tests → docs → `PHASE_STATUS
 
 | Milestone | Title | Scope (highest-priority first) | Entry deps | Exit evidence | Owner |
 |---|---|---|---|---|---|
-| **M1** | **Repository audit & baseline** | This document + `FEATURE_MATRIX.md` + `SECURITY_REVIEW.md` + updated `ARCHITECTURE.md`/`PHASE_STATUS.md`, baseline report above | None | Docs merged, `git diff --check` clean, tests still 636/17 | This session |
+| **M1** | **Repository audit & baseline** (done, 636→963 via M2-M16) | This document + `FEATURE_MATRIX.md` + `SECURITY_REVIEW.md` + updated `ARCHITECTURE.md`/`PHASE_STATUS.md`, baseline report above | None | Docs merged, `git diff --check` clean, tests still 636/17 | This session |
 | **M2** | **Phase 3 completion** | Finish database/state/auditability gaps: close legacy association bypass, unify completion semantics, document recovery, add non-fresh reconciliation strategy, expose `doctor`/`state_recovery_comparison` in user guide, add backup-before-migration recovery drills (temp DBs, interrupted `migrate_to_*` via `os._exit`), cover empty vs populated vs corrupt cases | M1, `REQUIREMENTS.DATA-002` | All `DATA-002` sub-requirements verified on Linux + user-reported Windows gate `f26c6b9` reproduced or documented limitation accepted, no destructive auto-repair, `docs/DATABASE.md` added | Next |
 | **M3** | **Opportunity discovery (Phase 4)** | `opportunities` table + manual-import workflow + connector interface (`Connector` ABC, `ManualConnector` impl), source URL, budget, deadline, risk, AI summarize/skill/price helpers marked *draft*, filter/rank; respect ToS/robots, no CAPTCHA bypass | M2 | Manual import works end-to-end, connector interface tested with fake, `OPP-001/002` transition to `UNVERIFIED`→`VERIFIED` with view tests |   |
 | **M4** | **Task mgmt & safe execution (Phase 5)** | Durable background-job runner for current CLI (thread-pool, shutdown, logs), `TASK-001/002` worker with lease fence, retry/backoff, cancellation, audit, human review gate | M2, M3 | Job record + idempotency + recovery after kill -9 tested |   |
@@ -161,7 +161,7 @@ No milestone may weaken existing `636` assertions.
 
 ## 7. Continuation point (if limits hit)
 
-- **Done:** M1 audit + baseline report + this plan (branch `arena/c6693e06-ai-earn`, commit to be pushed).
+- **Done:** M1 audit + baseline report + this plan (original branch `arena/c6693e06-ai-earn` at `ed79102`; current branch `arena/a2b30614-ai-earn` at `9d77101`, LATEST 28, 963 tests).
 - **Next:** Implement `docs/FEATURE_MATRIX.md`, `SECURITY_REVIEW.md`, `DATABASE.md` stub, then M2 backup drill PR. If interrupted, resume reading this file §0.3 and §2 M2 row.
 - **Blockers needing user:** Razorpay/Stripe sandbox credentials (M9), Gmail/Drive OAuth (M11), AI provider key/Ollama URL (M12) – interfaces will be built with manual fallback so work can proceed.
 - **Do not:** mark Phase 3 complete without Windows gate + recovery proof, invent earnings, enable live payments, expose DB over network.

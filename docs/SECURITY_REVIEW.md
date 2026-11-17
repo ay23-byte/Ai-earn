@@ -1,6 +1,6 @@
-# Security Review — Ai-earn (2026-11-16)
+# Security Review — Ai-earn (2026-11-17)
 
-**Branch:** `arena/c6693e06-ai-earn` (base `ed79102`, post-#37)  
+**Branch:** `arena/a2b30614-ai-earn` (base `9d77101`, post-#37)  
 **Baseline tests:** `636 passed / 17 skipped` (Linux)  
 **Scope:** Offline local CLI + SQLite, no network listener, no provider credentials in repo. This review is a point-in-time assessment, not a certification.
 
@@ -8,7 +8,7 @@
 
 **NOT READY for production or real customer/financial data.** Phase 1+2 passed offline scope with documented limitations; Phase 3 `IN_PROGRESS`. Preserve all warnings in `README.md`, `SECURITY.md`, `PHASE_STATUS.md`.
 
-## Implemented controls (verified where noted)
+## Implemented controls (updated — now includes production hardening: 127.0.0.1-only, no .env, secrets redacted, structured logs allowlisted, SafeError 8-hex, backup verified 27 chain, monitoring poll, export 50MB redacted, deletion DELETE <8>, security_check, CI hardening; see docs/PRIVACY.md, SECRET_MANAGEMENT.md, OPERATIONAL_RUNBOOKS.md) 2026-11-17, production hardening added) (verified where noted)
 
 - **Configuration:** `config.py` validates `AI_EARN_ENV`/`LOG_LEVEL`/`AUTH_DB`/`STATE_DB` without logging raw values; `load_database_paths` checks absolute paths before any file open. `ConfigurationError` leaks only variable name.
 - **Auth storage:** `auth_storage.py` `create=True` vs `create=False` semantics (register may init, login/recover must not), `_check_parent` + `_ensure_file` (POSIX 0700/0600, Windows `verify_private_path`), `PRAGMA user_version` schema gate, `BEGIN IMMEDIATE` transactions, `mode=rw` URI prevents recreation race.

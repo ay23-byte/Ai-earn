@@ -6,6 +6,7 @@
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#050b13">
 <title>Earn OS — Local Workspace</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
@@ -13,22 +14,23 @@
 <div class="shell">
 <header class="top" role="banner">
   <div class="brand" aria-label="Earn OS brand">
-    <div class="mark" aria-hidden="true">E</div>
+    <div class="mark" aria-hidden="true">◆</div>
     <div><b>EARN OS</b><small>PERSONAL BUSINESS INTELLIGENCE</small></div>
   </div>
-  <div>
+  <div class="title-block">
     <div class="eyebrow">LOCAL WORKSPACE</div>
-    <h1 style="font-size:18px;margin:4px 0">Single-user · Offline-first · No network API</h1>
-    <div class="muted" style="font-size:11px">Account-scoped · read-only · snapshot file only · <a href="connected.html">legacy dashboard</a></div>
+    <h1>Single-user · Offline-first · No network API</h1>
+    <div class="muted">Account-scoped · read-only · snapshot file only · <a href="connected.html">legacy dashboard</a></div>
   </div>
   <div class="header-actions">
-    <label class="load" for="snapshotFile">Load snapshot<input id="snapshotFile" type="file" accept="application/json,.json"></label>
-    <button class="button" id="clearSnapshot" type="button">Clear data</button>
+    <label class="load" for="snapshotFile">Load snapshot<input id="snapshotFile" type="file" accept="application/json,.json" aria-label="Load snapshot file"></label>
+    <button class="button ghost" id="clearSnapshot" type="button">Clear data</button>
     <button class="button" id="themeToggle" type="button" aria-pressed="false" aria-label="Toggle dark and light theme">Light mode</button>
   </div>
 </header>
 
 <div class="status" id="snapshotStatus" role="status" aria-live="polite" aria-atomic="true">No snapshot loaded. Your browser has not received any account data. Load the JSON created by <code>python -m ai_earn dashboard snapshot</code>.</div>
+<div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
 
 <div class="layout">
   <nav class="nav" id="primaryNav" aria-label="Primary">
@@ -37,80 +39,95 @@
       <button class="nav-toggle" id="navToggle" type="button" aria-expanded="false" aria-controls="navList">Menu</button>
     </div>
     <ul class="nav-list" id="navList">
-      <li><a href="#/overview" data-route="overview" aria-current="page">Overview <span class="badge">snapshot</span></a></li>
-      <li><a href="#/opportunities" data-route="opportunities">Opportunities</a></li>
-      <li><a href="#/services" data-route="services">Services</a></li>
-      <li><a href="#/portfolio" data-route="portfolio">Portfolio</a></li>
-      <li><a href="#/products" data-route="products">Products</a></li>
-      <li><a href="#/customers" data-route="customers">Customers</a></li>
-      <li><a href="#/communications" data-route="communications">Communications</a></li>
-      <li><a href="#/followups" data-route="followups">Followups</a></li>
-      <li><a href="#/ledger" data-route="ledger">Ledger</a></li>
-      <li><a href="#/invoices" data-route="invoices">Invoices</a></li>
-      <li><a href="#/provider" data-route="provider">Provider</a></li>
-      <li><a href="#/analytics" data-route="analytics">Analytics</a></li>
-      <li><a href="#/ai-approvals" data-route="ai-approvals">AI Approvals</a></li>
-      <li><a href="#/connectors" data-route="connectors">Connectors</a></li>
-      <li><a href="#/queue" data-route="queue">Task Queue</a></li>
-      <li><a href="#/workflows" data-route="workflows">Workflows</a></li>
-      <li><a href="#/diagnostics" data-route="diagnostics">Diagnostics</a></li>
+      <li><a href="#/dashboard" data-route="dashboard" aria-current="page"><span class="nav-icon" aria-hidden="true">◈</span> Dashboard <span class="badge">live</span></a></li>
+      <li><a href="#/opportunities" data-route="opportunities"><span class="nav-icon">◎</span> Opportunities</a></li>
+      <li><a href="#/services" data-route="services"><span class="nav-icon">▣</span> Services</a></li>
+      <li><a href="#/proposals" data-route="proposals"><span class="nav-icon">✎</span> Proposals</a></li>
+      <li><a href="#/customers" data-route="customers"><span class="nav-icon">◐</span> Customers</a></li>
+      <li><a href="#/projects" data-route="projects"><span class="nav-icon">⬡</span> Projects</a></li>
+      <li><a href="#/tasks" data-route="tasks"><span class="nav-icon">☰</span> Tasks</a></li>
+      <li><a href="#/ai-assistant" data-route="ai-assistant"><span class="nav-icon">✦</span> AI Assistant</a></li>
+      <li><a href="#/digital-products" data-route="digital-products"><span class="nav-icon">⬢</span> Digital Products</a></li>
+      <li><a href="#/orders" data-route="orders"><span class="nav-icon">⧉</span> Orders</a></li>
+      <li><a href="#/invoices" data-route="invoices"><span class="nav-icon">⎙</span> Invoices</a></li>
+      <li><a href="#/payments" data-route="payments"><span class="nav-icon">◧</span> Payments</a></li>
+      <li><a href="#/expenses" data-route="expenses"><span class="nav-icon">⬔</span> Expenses</a></li>
+      <li><a href="#/analytics" data-route="analytics"><span class="nav-icon">▦</span> Analytics</a></li>
+      <li><a href="#/integrations" data-route="integrations"><span class="nav-icon">⛓</span> Integrations</a></li>
+      <li><a href="#/settings" data-route="settings"><span class="nav-icon">⚙</span> Settings</a></li>
+      <li><a href="#/security" data-route="security"><span class="nav-icon">🛡</span> Security &amp; Audit</a></li>
     </ul>
   </nav>
 
   <main id="main" tabindex="-1" class="content" aria-live="polite">
-    <!-- Overview -->
-    <section class="view active" id="view-overview" data-view="overview" aria-labelledby="h-overview">
-      <div class="panel">
-        <h2 id="h-overview">Overview — account workspace</h2>
-        <div class="muted" id="overviewMode">Waiting for a snapshot. No fabricated data is shown.</div>
-        <div class="metrics" style="margin-top:12px">
-          <article class="metric"><div class="label">Asserted pipeline · unverified</div><div class="value" id="metricPipeline">—</div><div class="note" id="metricPipelineNote">Load a snapshot</div></article>
-          <article class="metric"><div class="label">Invoice draft value</div><div class="value" id="metricInvoices">—</div><div class="note" id="metricInvoicesNote">Drafts are not issued invoices</div></article>
-          <article class="metric"><div class="label">Payment observations</div><div class="value" id="metricObservations">—</div><div class="note" id="metricObservationsNote">Unverified observations only</div></article>
-          <article class="metric"><div class="label">Verified received income</div><div class="value" id="metricIncome">Not available</div><div class="note" id="metricIncomeNote">No verified payment ledger</div></article>
+    <!-- Dashboard -->
+    <section class="view active" id="view-dashboard" data-view="dashboard" aria-labelledby="h-dashboard">
+      <div class="panel hero">
+        <div class="hero-head">
+          <h2 id="h-dashboard">Dashboard — real-time workspace</h2>
+          <span class="pill" id="overviewMode">Waiting for a snapshot. No fabricated data is shown.</span>
+        </div>
+        <div class="metrics">
+          <article class="metric"><div class="label">Total opportunities</div><div class="value" id="dashTotalOpps">—</div><div class="note" id="dashTotalOppsNote">No snapshot</div></article>
+          <article class="metric"><div class="label">Active projects</div><div class="value" id="dashActiveProj">—</div><div class="note" id="dashActiveProjNote">customer_projects linked</div></article>
+          <article class="metric"><div class="label">Verified income</div><div class="value" id="dashVerified">—</div><div class="note" id="dashVerifiedNote">Verified settled</div></article>
+          <article class="metric"><div class="label">Net realized</div><div class="value" id="dashNet">—</div><div class="note" id="dashNetNote">settled − fees − expenses</div></article>
+        </div>
+        <div class="metrics" style="margin-top:10px">
+          <article class="metric"><div class="label">Outstanding</div><div class="value" id="dashOutstanding">—</div><div class="note" id="dashOutstandingNote">issued + overdue</div></article>
+          <article class="metric"><div class="label">Active customers</div><div class="value" id="dashActiveCust">—</div><div class="note">lead / contacted / converted</div></article>
+          <article class="metric"><div class="label">Tasks completion</div><div class="value" id="dashTasks">—</div><div class="note" id="dashTasksNote">completed / total</div></article>
+          <article class="metric"><div class="label">MRR (unverified)</div><div class="value" id="dashMrr">—</div><div class="note" id="dashMrrNote">ledger income buckets</div></article>
         </div>
         <div class="streams" style="margin-top:14px">
           <div class="stream"><span>Opportunities</span><strong id="workOpps">—</strong><small id="workOppsNote">Discovered, unverified</small></div>
           <div class="stream"><span>Services</span><strong id="workServices">—</strong><small>Catalog drafts</small></div>
-          <div class="stream"><span>Products</span><strong id="workProducts">—</strong><small>Product drafts</small></div>
+          <div class="stream"><span>Digital products</span><strong id="workProducts">—</strong><small>Product drafts</small></div>
           <div class="stream"><span>Customers</span><strong id="workCustomers">—</strong><small>CRM leads</small></div>
           <div class="stream"><span>Ledger net</span><strong id="workLedgerNet">—</strong><small>Income − costs</small></div>
-          <div class="stream"><span>Invoices</span><strong id="workInvoicesIssued">—</strong><small>Draft→issued + PDF stub</small></div>
-          <div class="stream"><span>Provider orders</span><strong id="workProvider">—</strong><small>razorpay/stripe sandbox</small></div>
+          <div class="stream"><span>Invoices</span><strong id="workInvoicesIssued">—</strong><small>Draft→issued</small></div>
+          <div class="stream"><span>Payments</span><strong id="workProvider">—</strong><small>verified / sandbox</small></div>
           <div class="stream"><span>AI approvals</span><strong id="workAI">—</strong><small>pending/approved</small></div>
           <div class="stream"><span>Analytics funnel</span><strong id="workFunnel">—</strong><small>opp/cust/inv</small></div>
         </div>
         <div class="empty" id="overviewEmpty" style="margin-top:12px">No snapshot loaded — metrics show honest empty states. Use the tracker CLI to create records, then export a snapshot.</div>
       </div>
       <div class="panel">
-        <h2>Financial integrity</h2>
+        <h2>Financial integrity — verified vs unverified vs projected</h2>
         <div class="rows">
-          <div class="row"><div><b>Asserted pipeline</b><small id="pipelineStatus">No snapshot loaded</small></div><strong>Unverified</strong></div>
-          <div class="row"><div><b>11-concept</b><small id="ledger11Status">No snapshot loaded</small></div><strong>Unverified</strong></div>
-          <div class="row"><div><b>Provider orders</b><small id="providerStatus">No snapshot loaded</small></div><strong>Sandbox only</strong></div>
-          <div class="row"><div><b>Verified income</b><small id="incomeStatus">No verified payment ledger</small></div><strong>Not available</strong></div>
+          <div class="row"><div><b>Realized income</b><small id="dashRealizedNote" style="color:var(--ok)">verified — settled payments only</small></div><strong id="dashRealized" style="color:var(--ok)">—</strong></div>
+          <div class="row"><div><b>Unverified income</b><small style="color:var(--warn)">ledger income, not settlement</small></div><strong id="dashUnverified" style="color:var(--warn)">—</strong></div>
+          <div class="row"><div><b>Projected revenue</b><small style="color:var(--muted)">order_drafts + assertions, not revenue</small></div><strong id="dashProjected">—</strong></div>
         </div>
+        <div class="muted" style="margin-top:10px">Snapshot is read-only, account-scoped. No attractive fabricated numbers — empty shows as 0 with note.</div>
       </div>
     </section>
 
     <!-- Opportunities -->
     <section class="view" id="view-opportunities" data-view="opportunities" aria-labelledby="h-opportunities" hidden>
       <div class="panel">
-        <h2 id="h-opportunities">Opportunities — manual &amp; connector discovery</h2>
+        <div class="panel-head">
+          <h2 id="h-opportunities">Opportunities — manual &amp; connector discovery</h2>
+          <div class="panel-actions"><input id="oppSearch" class="input" placeholder="Filter by title or status…" aria-label="Filter opportunities"><button class="button" id="oppClear" type="button">Clear</button></div>
+        </div>
         <div class="rows">
           <div class="row"><div><b>Total opportunities</b><small id="oppStatus">No snapshot loaded</small></div><strong id="oppCount">—</strong></div>
+          <div class="row"><div><b>Active</b><small>discovered / vetted / pursuing</small></div><strong id="oppActiveCount">—</strong></div>
           <div class="row"><div><b>Budget sum</b><small>INR, unverified, not revenue</small></div><strong id="oppAmount">—</strong></div>
         </div>
         <h3>By status</h3>
         <div class="rows" id="oppByStatus"><div class="empty">No snapshot loaded — statuses appear after you create opportunities.</div></div>
-        <div class="muted" style="margin-top:10px">Source `manual` or `connector`, ranking is draft heuristic. Use tracker 5–8 (add/list/manage/ranked) or connectors import.</div>
+        <div class="chart-wrap" id="oppChart" aria-hidden="true"></div>
       </div>
     </section>
 
     <!-- Services -->
     <section class="view" id="view-services" data-view="services" aria-labelledby="h-services" hidden>
       <div class="panel">
-        <h2 id="h-services">Services — sellable service catalog</h2>
+        <div class="panel-head">
+          <h2 id="h-services">Services — sellable catalog</h2>
+          <div class="panel-actions"><input id="svcSearch" class="input" placeholder="Filter services…" aria-label="Filter services"></div>
+        </div>
         <div class="rows">
           <div class="row"><div><b>Services</b><small id="svcStatus">No snapshot loaded</small></div><strong id="svcCount">—</strong></div>
           <div class="row"><div><b>Price sum</b><small>INR, draft/published unverified</small></div><strong id="svcAmount">—</strong></div>
@@ -120,19 +137,84 @@
       </div>
     </section>
 
-    <!-- Portfolio -->
-    <section class="view" id="view-portfolio" data-view="portfolio" aria-labelledby="h-portfolio" hidden>
+    <!-- Proposals -->
+    <section class="view" id="view-proposals" data-view="proposals" aria-labelledby="h-proposals" hidden>
       <div class="panel">
-        <h2 id="h-portfolio">Portfolio — demo items</h2>
-        <div class="rows"><div class="row"><div><b>Portfolio items</b><small id="portfolioStatus">No snapshot loaded</small></div><strong id="portfolioCount">—</strong></div></div>
-        <div class="empty" id="portfolioEmpty" style="margin-top:10px">Linked to owned services. Initially empty — add via tracker 12. No external publish.</div>
+        <div class="panel-head">
+          <h2 id="h-proposals">Proposals — sent &amp; accepted</h2>
+          <span class="pill" id="propStatus">No snapshot</span>
+        </div>
+        <div class="rows">
+          <div class="row"><div><b>Applications submitted</b><small>sent / accepted / rejected</small></div><strong id="propSubmitted">—</strong></div>
+          <div class="row"><div><b>Proposals accepted</b><small>accepted</small></div><strong id="propAccepted">—</strong></div>
+          <div class="row"><div><b>Conversion</b><small>accepted / total</small></div><strong id="propConversion">—</strong></div>
+        </div>
+        <h3>Recent activity</h3>
+        <div class="rows" id="propByStatus"><div class="empty">No snapshot — proposals via tracker 53–55.</div></div>
       </div>
     </section>
 
-    <!-- Products -->
-    <section class="view" id="view-products" data-view="products" aria-labelledby="h-products" hidden>
+    <!-- Customers -->
+    <section class="view" id="view-customers" data-view="customers" aria-labelledby="h-customers" hidden>
       <div class="panel">
-        <h2 id="h-products">Products — workspace</h2>
+        <div class="panel-head">
+          <h2 id="h-customers">Customers — CRM leads</h2>
+          <div class="panel-actions"><input id="custSearch" class="input" placeholder="Filter customers…" aria-label="Filter customers"></div>
+        </div>
+        <div class="rows"><div class="row"><div><b>Leads</b><small id="custStatus">No snapshot loaded</small></div><strong id="custCount">—</strong></div><div class="row"><div><b>Active</b><small>lead / contacted / converted</small></div><strong id="custActive">—</strong></div></div>
+        <h3>By status</h3>
+        <div class="rows" id="custByStatus"><div class="empty">No snapshot — add via tracker 16–18.</div></div>
+        <h3>Activity</h3>
+        <div class="rows" id="customerActivityDetail"><div class="empty">No snapshot — customer activity appears after data.</div></div>
+      </div>
+    </section>
+
+    <!-- Projects -->
+    <section class="view" id="view-projects" data-view="projects" aria-labelledby="h-projects" hidden>
+      <div class="panel">
+        <h2 id="h-projects">Projects — customer-linked work</h2>
+        <div class="rows">
+          <div class="row"><div><b>Active projects</b><small>customer_projects linked</small></div><strong id="projActive">—</strong></div>
+          <div class="row"><div><b>Total projects</b><small>linked tasks</small></div><strong id="projTotal">—</strong></div>
+        </div>
+        <h3>Projects by customer</h3>
+        <div class="rows" id="projByCustomer"><div class="empty">No snapshot — link via tracker 79.</div></div>
+      </div>
+    </section>
+
+    <!-- Tasks -->
+    <section class="view" id="view-tasks" data-view="tasks" aria-labelledby="h-tasks" hidden>
+      <div class="panel">
+        <h2 id="h-tasks">Tasks — execution &amp; completion</h2>
+        <div class="rows">
+          <div class="row"><div><b>Queued tasks</b><small id="taskQueuedNote">queued / leased</small></div><strong id="taskQueued">—</strong></div>
+          <div class="row"><div><b>Project tasks</b><small id="taskProjNote">by status</small></div><strong id="taskProjCount">—</strong></div>
+          <div class="row"><div><b>Completion</b><small>completed / total</small></div><strong id="taskCompletion">—</strong></div>
+        </div>
+        <h3>By status</h3>
+        <div class="rows" id="taskByStatus"><div class="empty">No snapshot — tasks via tracker &amp; project_tasks.</div></div>
+        <div class="chart-wrap" id="taskChart"></div>
+      </div>
+    </section>
+
+    <!-- AI Assistant -->
+    <section class="view" id="view-ai-assistant" data-view="ai-assistant" aria-labelledby="h-ai-assistant" hidden>
+      <div class="panel">
+        <h2 id="h-ai-assistant">AI Assistant — controlled autonomy</h2>
+        <div class="rows">
+          <div class="row"><div><b>Approvals</b><small id="aiStatus">No snapshot loaded</small></div><strong id="aiCount">—</strong></div>
+          <div class="row"><div><b>Emergency</b><small id="emergencyStatus">No snapshot loaded</small></div><strong id="emergencyState">—</strong></div>
+        </div>
+        <h3>By approval status</h3>
+        <div class="rows" id="aiByStatus"><div class="empty">No snapshot — approvals via tracker 34–41.</div></div>
+        <dl class="kv"><dt>Tool scopes</dt><dd>read = direct, draft = draft_unverified, consequential = approval_required</dd><dt>Provider</dt><dd>stub sandbox only; live OpenAI/Ollama blocked</dd><dt>Injection</dt><dd>external content treated as data, never as instruction</dd></dl>
+      </div>
+    </section>
+
+    <!-- Digital Products -->
+    <section class="view" id="view-digital-products" data-view="digital-products" aria-labelledby="h-digital-products" hidden>
+      <div class="panel">
+        <h2 id="h-digital-products">Digital Products — workspace</h2>
         <div class="rows">
           <div class="row"><div><b>Products</b><small id="prodStatus">No snapshot loaded</small></div><strong id="prodCount">—</strong></div>
           <div class="row"><div><b>Price sum</b><small>INR drafts</small></div><strong id="prodAmount">—</strong></div>
@@ -142,49 +224,16 @@
       </div>
     </section>
 
-    <!-- Customers -->
-    <section class="view" id="view-customers" data-view="customers" aria-labelledby="h-customers" hidden>
+    <!-- Orders -->
+    <section class="view" id="view-orders" data-view="orders" aria-labelledby="h-orders" hidden>
       <div class="panel">
-        <h2 id="h-customers">Customers — CRM leads</h2>
-        <div class="rows"><div class="row"><div><b>Leads</b><small id="custStatus">No snapshot loaded</small></div><strong id="custCount">—</strong></div></div>
-        <h3>By status</h3>
-        <div class="rows" id="custByStatus"><div class="empty">No snapshot — add via tracker 16–18, CSV 26–27.</div></div>
-      </div>
-    </section>
-
-    <!-- Communications -->
-    <section class="view" id="view-communications" data-view="communications" aria-labelledby="h-communications" hidden>
-      <div class="panel">
-        <h2 id="h-communications">Communications — CRM comms</h2>
-        <div class="rows"><div class="row"><div><b>Communications</b><small id="commStatus">No snapshot loaded</small></div><strong id="commCount">—</strong></div></div>
-        <h3>By status</h3>
-        <div class="rows" id="commByStatus"><div class="empty">No snapshot — draft→sent→archived via tracker 19–21.</div></div>
-      </div>
-    </section>
-
-    <!-- Followups -->
-    <section class="view" id="view-followups" data-view="followups" aria-labelledby="h-followups" hidden>
-      <div class="panel">
-        <h2 id="h-followups">Followups — pending tasks</h2>
-        <div class="rows"><div class="row"><div><b>Followups</b><small id="followStatus">No snapshot loaded</small></div><strong id="followCount">—</strong></div></div>
-        <h3>By status</h3>
-        <div class="rows" id="followByStatus"><div class="empty">No snapshot — pending→completed/cancelled via tracker 23–25.</div></div>
-      </div>
-    </section>
-
-    <!-- Ledger -->
-    <section class="view" id="view-ledger" data-view="ledger" aria-labelledby="h-ledger" hidden>
-      <div class="panel">
-        <h2 id="h-ledger">Ledger — local net &amp; 11-concept</h2>
+        <h2 id="h-orders">Orders — customer orders &amp; drafts</h2>
         <div class="rows">
-          <div class="row"><div><b>Ledger entries</b><small id="ledgerStatus">No snapshot loaded</small></div><strong id="ledgerCount">—</strong></div>
-          <div class="row"><div><b>Net paise</b><small>income − expense − refund − fee, unverified</small></div><strong id="ledgerNet">—</strong></div>
+          <div class="row"><div><b>Orders</b><small id="ordersStatus">No snapshot</small></div><strong id="ordersCount">—</strong></div>
+          <div class="row"><div><b>Amount</b><small>INR, unverified</small></div><strong id="ordersAmount">—</strong></div>
+          <div class="row"><div><b>Order drafts</b><small>projected</small></div><strong id="orderDrafts">—</strong></div>
         </div>
-        <h3>By kind</h3>
-        <div class="rows" id="ledgerByKind"><div class="empty">No snapshot — add via tracker 22.</div></div>
-        <h3>11-concept breakdown</h3>
-        <div class="rows" id="ledger11Rows"><div class="empty">No snapshot — proposed→net_realized_synthetic separation shown after data.</div></div>
-        <div class="muted" style="margin-top:10px">Ledger is append-only locally; net is arithmetic, not bank-verified. Verified income remains not available.</div>
+        <div class="rows" id="ordersByStatus"><div class="empty">No snapshot — orders via tracker 78.</div></div>
       </div>
     </section>
 
@@ -195,106 +244,155 @@
         <div class="rows">
           <div class="row"><div><b>Invoices</b><small id="invoiceStatus">No snapshot loaded</small></div><strong id="invoiceCount">—</strong></div>
           <div class="row"><div><b>Amount sum</b><small>INR, draft→issued→paid/overdue/void</small></div><strong id="invoiceAmount">—</strong></div>
+          <div class="row"><div><b>Outstanding</b><small>issued + overdue</small></div><strong id="invoiceOutstanding">—</strong></div>
         </div>
         <h3>By status</h3>
         <div class="rows" id="invoiceByStatus"><div class="empty">No snapshot — create via tracker 28–30.</div></div>
-        <div class="muted" style="margin-top:10px">PDF stub is deterministic SHA-256 text, not issued demand or tax document.</div>
       </div>
     </section>
 
-    <!-- Provider -->
-    <section class="view" id="view-provider" data-view="provider" aria-labelledby="h-provider" hidden>
+    <!-- Payments -->
+    <section class="view" id="view-payments" data-view="payments" aria-labelledby="h-payments" hidden>
       <div class="panel">
-        <h2 id="h-provider">Provider — Razorpay / Stripe sandbox</h2>
+        <h2 id="h-payments">Payments — verified &amp; sandbox</h2>
         <div class="rows">
+          <div class="row"><div><b>Verified received</b><small id="payVerifiedNote">verified</small></div><strong id="payVerified">—</strong></div>
           <div class="row"><div><b>Provider orders</b><small id="providerCountNote">No snapshot loaded</small></div><strong id="providerCount">—</strong></div>
-          <div class="row"><div><b>Events</b><small>HMAC verified, idempotent by event_id</small></div><strong id="providerEventsCount">—</strong></div>
+          <div class="row"><div><b>Events</b><small>HMAC verified</small></div><strong id="providerEventsCount">—</strong></div>
         </div>
         <h3>By status</h3>
         <div class="rows" id="providerByStatus"><div class="empty">No snapshot — sandbox orders via tracker 31–33.</div></div>
         <h3>By provider</h3>
-        <div class="rows" id="providerByProvider"><div class="empty">razorpay / stripe breakdown appears after sandbox orders.</div></div>
-        <div class="muted" style="margin-top:10px">Sandbox only — HMAC verified locally, no card storage, no bank settlement. Live is blocked.</div>
+        <div class="rows" id="providerByProvider"><div class="empty">razorpay / stripe breakdown appears after data.</div></div>
+        <h3>11-concept &amp; verified ledger</h3>
+        <div class="rows" id="ledger11Rows"><div class="empty">No snapshot — 11-concept separation shown after data.</div></div>
+      </div>
+    </section>
+
+    <!-- Expenses -->
+    <section class="view" id="view-expenses" data-view="expenses" aria-labelledby="h-expenses" hidden>
+      <div class="panel">
+        <h2 id="h-expenses">Expenses — platform fees &amp; ledger</h2>
+        <div class="rows">
+          <div class="row"><div><b>Expenses</b><small id="expStatus">No snapshot</small></div><strong id="expCount">—</strong></div>
+          <div class="row"><div><b>Amount</b><small>verified</small></div><strong id="expAmount">—</strong></div>
+          <div class="row"><div><b>Platform fees</b><small>platform</small></div><strong id="expFees">—</strong></div>
+          <div class="row"><div><b>Ledger net</b><small>unverified</small></div><strong id="ledgerNet">—</strong></div>
+        </div>
+        <h3>By kind</h3>
+        <div class="rows" id="ledgerByKind"><div class="empty">No snapshot — add via tracker 22.</div></div>
+        <div class="rows" id="expChart"><div class="empty">No snapshot — expense chart appears after data.</div></div>
       </div>
     </section>
 
     <!-- Analytics -->
     <section class="view" id="view-analytics" data-view="analytics" aria-labelledby="h-analytics" hidden>
       <div class="panel">
-        <h2 id="h-analytics">Analytics — funnel / MRR / conversion / workload</h2>
+        <h2 id="h-analytics">Analytics — funnel / MRR / conversion</h2>
         <div class="rows">
           <div class="row"><div><b>Funnel</b><small id="funnelStatus">No analytics</small></div><strong id="analyticsFunnel">—</strong></div>
           <div class="row"><div><b>MRR total</b><small id="mrrStatus">No MRR</small></div><strong id="analyticsMrr">—</strong></div>
         </div>
         <h3>Monthly buckets (UTC)</h3>
-        <div class="rows" id="analyticsBuckets"><div class="empty">No snapshot — MRR buckets are monthly ledger income (YYYY-MM), unverified.</div></div>
-        <div class="muted" style="margin-top:10px">Read-only aggregates from persisted owned rows. Time-bounded queries via tracker 42–45; dashboard shows all-time glance. CSV export capped at 1M.</div>
+        <div class="rows" id="analyticsBuckets"><div class="empty">No snapshot — MRR buckets are monthly ledger income, unverified.</div></div>
       </div>
-    </section>
-
-    <!-- AI Approvals -->
-    <section class="view" id="view-ai-approvals" data-view="ai-approvals" aria-labelledby="h-ai" hidden>
       <div class="panel">
-        <h2 id="h-ai">AI Assistant — ToolRegistry &amp; approvals</h2>
-        <div class="rows">
-          <div class="row"><div><b>Approvals</b><small id="aiStatus">No snapshot loaded</small></div><strong id="aiCount">—</strong></div>
-          <div class="row"><div><b>Emergency</b><small id="emergencyStatus">No snapshot loaded</small></div><strong id="emergencyState">—</strong></div>
+        <h2>Revenue Analytics — business intelligence</h2>
+        <div class="muted" style="margin-bottom:8px">All metrics derived from persisted owned rows. Empty shows honest empty state — never fabricated. Verified strictly separated.</div>
+        <div class="filter-bar">
+          <label class="field"><span>From</span><input id="revFrom" type="month" aria-label="Filter from month"></label>
+          <label class="field"><span>To</span><input id="revTo" type="month" aria-label="Filter to month"></label>
+          <button class="button" id="revFilterBtn" type="button">Apply filter</button>
+          <button class="button ghost" id="revClearFilter" type="button">Clear</button>
         </div>
-        <h3>By approval status</h3>
-        <div class="rows" id="aiByStatus"><div class="empty">No snapshot — approvals via tracker 34–41 (TTL 15 min virtual expiry).</div></div>
-        <dl class="kv"><dt>Tool scopes</dt><dd>read = direct, draft = draft_unverified, consequential = approval_required</dd><dt>Provider</dt><dd>stub sandbox only; live OpenAI/Ollama blocked</dd><dt>Injection</dt><dd>external content treated as data, never as instruction</dd></dl>
+        <div id="revFilterStatus" class="muted" style="margin-bottom:10px">Showing all-time (no filter).</div>
+        <div class="rows" id="revenueMetrics">
+          <div class="row"><div><b>Total opportunities</b><small id="revTotalOppsNote">No snapshot</small></div><strong id="revTotalOpps">—</strong></div>
+          <div class="row"><div><b>Active opportunities</b><small>discovered / vetted / pursuing</small></div><strong id="revActiveOpps">—</strong></div>
+          <div class="row"><div><b>Applications submitted</b><small>proposals sent+</small></div><strong id="revAppsSubmitted">—</strong></div>
+          <div class="row"><div><b>Proposals accepted</b><small>accepted</small></div><strong id="revPropsAccepted">—</strong></div>
+          <div class="row"><div><b>Active customers</b><small>lead / contacted / converted</small></div><strong id="revActiveCust">—</strong></div>
+          <div class="row"><div><b>Active projects</b><small>projects + tasks</small></div><strong id="revActiveProj">—</strong></div>
+          <div class="row"><div><b>Orders</b><small id="revOrdersNote">customer_orders</small></div><strong id="revOrders">—</strong></div>
+          <div class="row"><div><b>Invoices</b><small id="revInvoicesNote">issued / overdue</small></div><strong id="revInvoices">—</strong></div>
+          <div class="row"><div><b>Outstanding</b><small id="revOutstandingNote">issued+overdue</small></div><strong id="revOutstanding">—</strong></div>
+          <div class="row"><div><b>Verified received</b><small id="revVerifiedNote">verified</small></div><strong id="revVerified">—</strong></div>
+          <div class="row"><div><b>Expenses</b><small id="revExpensesNote">verified</small></div><strong id="revExpenses">—</strong></div>
+          <div class="row"><div><b>Platform fees</b><small>platform</small></div><strong id="revFees">—</strong></div>
+          <div class="row"><div><b>Net realized</b><small id="revNetNote">verified</small></div><strong id="revNet">—</strong></div>
+          <div class="row"><div><b>Avg project value</b><small>avg orders</small></div><strong id="revAvgProject">—</strong></div>
+          <div class="row"><div><b>Workload</b><small id="revWorkloadNote">queued + tasks</small></div><strong id="revWorkload">—</strong></div>
+          <div class="row"><div><b>Conversion</b><small id="revConversionNote">opps / customers</small></div><strong id="revConversion">—</strong></div>
+        </div>
+        <h3>Income separation</h3>
+        <div class="rows" id="incomeSeparation">
+          <div class="row"><div><b>Realized</b><small style="color:var(--ok)">verified</small></div><strong id="incomeRealized">—</strong></div>
+          <div class="row"><div><b>Unverified</b><small style="color:var(--warn)">ledger</small></div><strong id="incomeUnverified">—</strong></div>
+          <div class="row"><div><b>Projected</b><small style="color:var(--muted)">not revenue</small></div><strong id="incomeProjected">—</strong></div>
+        </div>
+        <h3>Revenue trends</h3>
+        <div class="chart" id="revenueChart"><div class="empty">No snapshot — revenue chart shows monthly realized vs projected.</div></div>
+        <h3>Expense trends</h3>
+        <div class="chart" id="expenseChart"><div class="empty">No snapshot — expense chart appears after data.</div></div>
+        <h3>Opportunity funnel</h3>
+        <div class="rows" id="oppFunnelDetail"><div class="empty">No snapshot — funnel shows discovered → vetted → pursuing.</div></div>
+        <h3>Customer activity</h3>
+        <div class="rows" id="customerActivityDetail"><div class="empty">No snapshot — customer activity appears after data.</div></div>
+        <h3>Exportable reports</h3>
+        <div class="rows">
+          <div class="row"><div><b>CSV</b><small>Business intelligence, verification column</small></div><button class="button" id="revExportBtn" type="button">Download CSV</button></div>
+          <div class="row"><div><b>JSON</b><small>Full dump</small></div><button class="button" id="revExportJsonBtn" type="button">Download JSON</button></div>
+        </div>
       </div>
     </section>
 
-    <!-- Connectors -->
-    <section class="view" id="view-connectors" data-view="connectors" aria-labelledby="h-connectors" hidden>
+    <!-- Integrations -->
+    <section class="view" id="view-integrations" data-view="integrations" aria-labelledby="h-integrations" hidden>
       <div class="panel">
-        <h2 id="h-connectors">Connectors — Gmail / Drive / GitHub stubs</h2>
+        <h2 id="h-integrations">Integrations — connectors</h2>
         <div class="rows">
-          <div class="row"><div><b>Framework</b><small>10/min per owner/connector, retry capped, manual fallback always</small></div><strong>EXPERIMENTAL</strong></div>
-          <div class="row"><div><b>Gmail / Drive / GitHub</b><small>deterministic 2-item stubs, no network, bounded normalize, throttle per owner</small></div><strong>stub sandbox</strong></div>
+          <div class="row"><div><b>Framework</b><small>10/min per owner/connector, retry capped</small></div><strong>READY</strong></div>
+          <div class="row"><div><b>Gmail / Drive / GitHub</b><small>deterministic stubs, no network</small></div><strong>stub sandbox</strong></div>
         </div>
         <h3>How to use</h3>
         <div class="rows">
-          <div class="row"><div><b>Tracker 46–48</b><small>46 list, 47 fetch bounded, 48 import via connector (prefix idempotency)</small></div></div>
-          <div class="row"><div><b>Manual fallback</b><small>ManualConnector always available; stubs validate 32..128 API key, revoke, throttle</small></div></div>
+          <div class="row"><div><b>Tracker 46–48</b><small>list, fetch, import</small></div><strong>—</strong></div>
+          <div class="row"><div><b>Manual fallback</b><small>always available</small></div><strong>—</strong></div>
         </div>
-        <div class="muted" style="margin-top:10px">Real OAuth is BLOCKED until credentials are configured; normalization caps title 1..200, url 1..2048, budget 0..1e12.</div>
+        <div class="muted" style="margin-top:10px">Real OAuth is BLOCKED until credentials are configured; caps title 1..200, url 1..2048.</div>
+        <div class="rows" id="integrationStatus"><div class="empty">No snapshot — connectors via tracker.</div></div>
       </div>
     </section>
 
-    <!-- Task Queue -->
-    <section class="view" id="view-queue" data-view="queue" aria-labelledby="h-queue" hidden>
+    <!-- Settings -->
+    <section class="view" id="view-settings" data-view="settings" aria-labelledby="h-settings" hidden>
       <div class="panel">
-        <h2 id="h-queue">Task Queue — durable scheduling</h2>
+        <h2 id="h-settings">Settings — workspace preferences</h2>
+        <form id="settingsForm" novalidate>
+          <div class="form-grid">
+            <label class="field"><span>Workspace name <em>*</em></span><input id="settName" class="input" type="text" placeholder="My workspace" maxlength="40" required aria-describedby="settNameErr"><span class="field-error" id="settNameErr" role="alert"></span></label>
+            <label class="field"><span>Contact email <em>*</em></span><input id="settEmail" class="input" type="email" placeholder="you@example.com" required aria-describedby="settEmailErr"><span class="field-error" id="settEmailErr" role="alert"></span></label>
+            <label class="field"><span>Currency</span><select id="settCurrency" class="input" aria-label="Currency"><option value="INR" selected>INR — Indian Rupee</option><option value="USD">USD — US Dollar (preview)</option></select></label>
+            <label class="field"><span>Notifications</span><select id="settNotify" class="input"><option value="all">All</option><option value="important">Important only</option><option value="none">None</option></select></label>
+          </div>
+          <div class="form-actions"><button class="button primary" type="submit">Save settings</button><button class="button ghost" type="button" id="settReset" >Reset</button></div>
+          <div class="muted" style="margin-top:8px">Settings are stored locally in your browser (localStorage) — no server. Validation is client-side.</div>
+        </form>
+      </div>
+      <div class="panel">
+        <h2>Data &amp; privacy</h2>
         <div class="rows">
-          <div class="row"><div><b>Queued tasks</b><small id="queueStatus">No snapshot loaded</small></div><strong id="queueCount">—</strong></div>
-          <div class="row"><div><b>Task workflows</b><small>planned→completed with hash/size</small></div><strong id="workflowCount">—</strong></div>
+          <div class="row"><div><b>Snapshot file</b><small id="settSnapshotName">None loaded</small></div><strong id="settSnapshotSchema">—</strong></div>
+          <div class="row"><div><b>Storage</b><small>Private file, 1 MB cap, never uploaded</small></div><strong>local</strong></div>
         </div>
-        <div class="muted" style="margin-top:10px">Lease-fenced managed runner via <code>ai_earn.task_runner</code>. Queued/leased only; exhausted/cancelled excluded from ready.</div>
+        <div class="muted" style="margin-top:10px">Load snapshot via header. Clear data removes it from this browser only.</div>
       </div>
     </section>
 
-    <!-- Workflows -->
-    <section class="view" id="view-workflows" data-view="workflows" aria-labelledby="h-workflows" hidden>
+    <!-- Security -->
+    <section class="view" id="view-security" data-view="security" aria-labelledby="h-security" hidden>
       <div class="panel">
-        <h2 id="h-workflows">Task Workflows — review &amp; associations</h2>
-        <div class="rows">
-          <div class="row"><div><b>Managed pairs</b><small>owner-scoped, atomic claim_next_managed, manual fallback</small></div><strong>v12</strong></div>
-          <div class="row"><div><b>Paired completions</b><small>local recorded decision, not proof of human review</small></div><strong>v11</strong></div>
-        </div>
-        <h3>Boundaries</h3>
-        <div class="rows">
-          <div class="row"><div><b>No external fence</b><small>Leases do not fence external effects; stale snapshots can diverge</small></div></div>
-          <div class="row"><div><b>No fabricated completion</b><small>review_pair → complete_pair requires unexpired lease + matching output</small></div></div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Diagnostics -->
-    <section class="view" id="view-diagnostics" data-view="diagnostics" aria-labelledby="h-diagnostics" hidden>
-      <div class="panel">
-        <h2 id="h-diagnostics">Diagnostics — snapshot &amp; recovery</h2>
+        <h2 id="h-security">Security &amp; Audit Logs</h2>
         <dl class="kv">
           <dt>Snapshot generated</dt><dd id="snapshotGenerated">Not loaded</dd>
           <dt>Database schema</dt><dd id="snapshotSchema">Not loaded</dd>
@@ -303,21 +401,22 @@
           <dt>Schema version</dt><dd id="diagSchema">—</dd>
           <dt>Read-only</dt><dd id="diagReadonly">Snapshot data is read into this page only and is not uploaded.</dd>
         </dl>
+        <h3>Audit trail (snapshot)</h3>
+        <div class="rows" id="auditRows"><div class="empty">No snapshot — audit logs appear after data. History is owner-scoped, not tamper-evident.</div></div>
         <h3>Boundaries</h3>
         <div class="rows">
-          <div class="row"><div><b>Private data</b><small>File must be selected manually; max 1 MB; path is never sent to a server.</small></div></div>
-          <div class="row"><div><b>Doctor</b><small><code>python -m ai_earn doctor</code> checks permission_error, immutable=1, and backups before-v2..v22.</small></div></div>
-          <div class="row"><div><b>Recovery</b><small>Backups are explicit copies to a new path; restore is another copy. Old snapshots can diverge.</small></div></div>
+          <div class="row"><div><b>Private data</b><small>File must be selected manually; path never sent to server.</small></div></div>
+          <div class="row"><div><b>Doctor</b><small><code>python -m ai_earn doctor</code> checks permission_error, immutable=1, backups.</small></div></div>
+          <div class="row"><div><b>Recovery</b><small>Backups are explicit copies to new path; restore is another copy.</small></div></div>
         </div>
-        <div class="empty" style="margin-top:12px">Load a snapshot to populate diagnostics. Use <code>dashboard-snapshot-*.json</code> created beside the state DB.</div>
       </div>
       <div class="panel">
         <h2>Data boundaries</h2>
         <div class="rows">
-          <div class="row"><div><b>Pipeline</b><small>Owner-entered assertions, not guaranteed contracts or revenue.</small></div></div>
-          <div class="row"><div><b>Invoice drafts</b><small>Local proposals only; no invoice has been issued or delivered.</small></div></div>
-          <div class="row"><div><b>Payment observations</b><small>Unverified notes; a screenshot is not settlement proof.</small></div></div>
-          <div class="row"><div><b>Verified income</b><small>Unavailable until an independently verified payment ledger exists.</small></div></div>
+          <div class="row"><div><b>Pipeline</b><small>Owner-entered assertions, not guaranteed contracts.</small></div></div>
+          <div class="row"><div><b>Invoice drafts</b><small>Local proposals only; not issued.</small></div></div>
+          <div class="row"><div><b>Payment observations</b><small>Unverified notes; screenshot is not proof.</small></div></div>
+          <div class="row"><div><b>Verified income</b><small>Only verified ledger counts as realized.</small></div></div>
         </div>
       </div>
     </section>
@@ -326,6 +425,7 @@
   </main>
 </div>
 </div>
+<div id="loadingOverlay" class="loading-overlay" hidden aria-hidden="true"><div class="spinner" aria-label="Loading"></div><span>Loading snapshot…</span></div>
 <script src="app.js" defer></script>
 </body>
 </html>

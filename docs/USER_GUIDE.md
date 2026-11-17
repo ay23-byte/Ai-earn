@@ -1,4 +1,4 @@
-# User Guide — Ai-earn (2026-11-16, branch arena/c6693e06-ai-earn)
+# User Guide — Ai-earn (2026-11-17, branch arena/a2b30614-ai-earn, LATEST 28)
 
 > **Warning:** Experimental, local-only, disposable data, not production. `production_ready:false`. Any “income” you see is **unverified** until a real provider confirms settlement.
 
@@ -12,14 +12,14 @@ export AI_EARN_AUTH_DB=~/.ai-earn-private/auth.sqlite3
 export AI_EARN_STATE_DB=~/.ai-earn-private/state.sqlite3
 .venv/bin/python -m ai_earn auth register   # hidden password, save one-time code
 .venv/bin/python -m ai_earn tracker init    # type YES, creates state.sqlite3 + 21 before-v*.sqlite3 (v2→v22)
-.venv/bin/python -m ai_earn tracker open    # login: 1-4 financial, 5-8 opportunities, 9-12 services/portfolio, 13-33 full menu, 0=logout
+.venv/bin/python -m ai_earn tracker open` + `data {export|delete}` (owner-scoped export 50MB redacted, deletion `DELETE <8>`) + `health [--json] [--with-backups]` + `production`    # login: 1-4 financial, 5-8 opportunities, 9-12 services/portfolio, 13-33 full menu, 0=logout
 ```
 
 Windows: same via PowerShell `create_private_directory` (see `README.md`). The private dir must be on a fixed NTFS drive, not a reparse point; never reuse an untrusted ancestor.
 
 ## Everyday use
 
-- **Add financial:** `tracker open` → `1` → title → INR amount (e.g., `123.45`). Stored as `potential` (unverified), amount immutable.
+- **Add financial:** `tracker open` + `data {export|delete}` (owner-scoped export 50MB redacted, deletion `DELETE <8>`) + `health [--json] [--with-backups]` + `production`` → `1` → title → INR amount (e.g., `123.45`). Stored as `potential` (unverified), amount immutable.
 - **Advance financial:** `3` → ID → `YES` → `potential → quote_asserted → contract_asserted → invoice_asserted → initiated_asserted` (each requires `YES`, `confirmed=True`).
 - **Withdraw financial:** `4` → ID → `YES` → `withdrawn`.
 - **List financial:** `2` → pages 100 at a time, `YES` for next.
@@ -43,7 +43,8 @@ Windows: same via PowerShell `create_private_directory` (see `README.md`). The p
 - **List services:** `10` → optional status filter draft/published/archived → pages 50.
 - **Manage service:** `11` → ID → 1 publish / 2 archive → YES (transitions `draft→published→archived` etc, `draft→archived` allowed).
 - **Portfolio:** `12` → 1 add item (service ID + title + description) / 2 list items (service filter, pages 50). Items are demo only, linked via FK `service_id`.
-- **Dashboard:** `python -m ai_earn dashboard snapshot` (needs login, interactive), then `python -m http.server 8000 --bind 127.0.0.1` and open `dashboard/connected.html` → `Load snapshot` → pick `dashboard-snapshot-*.json` beside state DB. `Verified income` is `Not available` (no ledger).
+- **Dashboard:** `python -m ai_earn dashboard snapshot  # or: python -m ai_earn data export (50MB redacted, owner-scoped) / python -m ai_earn data delete (DELETE <8> two-phase)
+python -m ai_earn health --json --with-backups  # 27 backups expected, production_ready:false` (needs login, interactive), then `python -m http.server 8000 --bind 127.0.0.1` and open `dashboard/connected.html` → `Load snapshot` → pick `dashboard-snapshot-*.json` beside state DB. `Verified income` is `Not available` (no ledger).
 
 ## Troubleshooting with doctor
 

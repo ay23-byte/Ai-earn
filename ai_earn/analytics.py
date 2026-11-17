@@ -19,6 +19,14 @@ from .auth import AuthService
 from .state_authorization import _authorized_transaction
 from .state_storage import StateStorage, StateStorageError
 
+# Revenue analytics delegate (real persisted data only)
+try:
+    from .revenue_analytics import RevenueAnalytics as _RevenueAnalytics
+    from .revenue_analytics import RevenueAnalyticsError as _RevenueAnalyticsError
+except Exception as _e:
+    _RevenueAnalytics = None
+    _RevenueAnalyticsError = Exception
+
 _MAX_TS = 4102444800
 
 class AnalyticsError(Exception):
@@ -311,3 +319,64 @@ class Analytics:
             if len(csv_text) > 1_000_000:
                 raise AnalyticsError("Export exceeds 1M chars.")
             return csv_text
+
+    # --- Phase 14 Revenue Intelligence delegation (real persisted data) ---
+    def _rev(self):
+        if _RevenueAnalytics is None:
+            raise AnalyticsError("Revenue analytics unavailable.")
+        return _RevenueAnalytics(self._auth, self._state)
+
+    def dashboard(self, token: str, *, from_ts: int = 0, to_ts: int = _MAX_TS) -> dict:
+        return self._rev().dashboard(token, from_ts=from_ts, to_ts=to_ts)
+
+    def revenue_analytics(self, token: str, *, from_ts: int = 0, to_ts: int = _MAX_TS) -> dict:
+        return self.dashboard(token, from_ts=from_ts, to_ts=to_ts)
+
+    def business_intelligence(self, token: str, *, from_ts: int = 0, to_ts: int = _MAX_TS) -> dict:
+        return self.dashboard(token, from_ts=from_ts, to_ts=to_ts)
+
+    def monthly_trends(self, token: str, *, from_ts: int = 0, to_ts: int = _MAX_TS) -> dict:
+        return self._rev().monthly_trends(token, from_ts=from_ts, to_ts=to_ts)
+
+    def revenue_trends(self, token: str, *, from_ts: int = 0, to_ts: int = _MAX_TS) -> dict:
+        return self._rev().revenue_trends(token, from_ts=from_ts, to_ts=to_ts)
+
+    def expense_trends(self, token: str, *, from_ts: int = 0, to_ts: int = _MAX_TS) -> dict:
+        return self._rev().expense_trends(token, from_ts=from_ts, to_ts=to_ts)
+
+    def opportunity_funnel(self, token: str, *, from_ts: int = 0, to_ts: int = _MAX_TS) -> dict:
+        return self._rev().opportunity_funnel(token, from_ts=from_ts, to_ts=to_ts)
+
+    def customer_activity(self, token: str, *, from_ts: int = 0, to_ts: int = _MAX_TS) -> dict:
+        return self._rev().customer_activity(token, from_ts=from_ts, to_ts=to_ts)
+
+    def revenue_charts(self, token: str, *, from_ts: int = 0, to_ts: int = _MAX_TS) -> dict:
+        d = self.dashboard(token, from_ts=from_ts, to_ts=to_ts)
+        return d["revenue_charts"]
+
+    def expense_charts(self, token: str, *, from_ts: int = 0, to_ts: int = _MAX_TS) -> dict:
+        d = self.dashboard(token, from_ts=from_ts, to_ts=to_ts)
+        return d["expense_charts"]
+
+    def outstanding_amounts(self, token: str, *, from_ts: int = 0, to_ts: int = _MAX_TS) -> dict:
+        d = self.dashboard(token, from_ts=from_ts, to_ts=to_ts)
+        return d["outstanding_amounts"]
+
+    def net_realized_income(self, token: str, *, from_ts: int = 0, to_ts: int = _MAX_TS) -> dict:
+        d = self.dashboard(token, from_ts=from_ts, to_ts=to_ts)
+        return d["net_realized_income"]
+
+    def export_report(self, token: str, *, from_ts: int = 0, to_ts: int = _MAX_TS, fmt: str = "csv") -> str:
+        return self._rev().export_report(token, from_ts=from_ts, to_ts=to_ts, fmt=fmt)
+
+    def workload_extended(self, token: str, *, from_ts: int = 0, to_ts: int = _MAX_TS) -> dict:
+        d = self.dashboard(token, from_ts=from_ts, to_ts=to_ts)
+        return d["workload"]
+
+    def task_completion(self, token: str, *, from_ts: int = 0, to_ts: int = _MAX_TS) -> dict:
+        return self._rev().task_completion(token, from_ts=from_ts, to_ts=to_ts)
+
+    def average_project_value(self, token: str, *, from_ts: int = 0, to_ts: int = _MAX_TS) -> dict:
+        d = self.dashboard(token, from_ts=from_ts, to_ts=to_ts)
+        return d["average_project_value"]
+

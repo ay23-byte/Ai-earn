@@ -201,11 +201,11 @@ class ProductWorkspaceTests(unittest.TestCase):
             ideas2.create(token2, "Other Ideas", "Other", operation_key="idea_scope")
 
     def test_migrations_and_integrity(self):
-        self.assertEqual(LATEST_SCHEMA_VERSION, 27)
+        self.assertEqual(LATEST_SCHEMA_VERSION, 28)
         with StateStorage(self.state_path).transaction() as conn:
-            self.assertEqual(_validate_schema(conn), 27)
+            self.assertEqual(_validate_schema(conn), LATEST_SCHEMA_VERSION)
             _check_integrity(conn)
-        self.assertEqual(len(list(self.priv.glob("before-v*.sqlite3"))), 26)
+        self.assertEqual(len(list(self.priv.glob("before-v*.sqlite3"))), LATEST_SCHEMA_VERSION-1)
 
 if __name__=="__main__":
     unittest.main()

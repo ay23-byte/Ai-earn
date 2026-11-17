@@ -148,6 +148,45 @@ def _ttl(value: int) -> int:
         raise CRMError("Invalid ttl.")
     return value
 
+def _due_at(value: int | None) -> int | None:
+    if value is None:
+        return None
+    if type(value) is not int or not 0 <= value <= 4102444800:
+        raise CRMError("Invalid due_at.")
+    return value
+
+def _billing_name(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not 1 <= len(value) <= 200 or len(value.strip()) == 0:
+        raise CRMError("Invalid billing_name.")
+    if any(ord(c) < 32 or ord(c) == 127 for c in value):
+        raise CRMError("Invalid billing_name.")
+    return value
+
+def _billing_address(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or len(value) > 1000:
+        raise CRMError("Invalid billing_address.")
+    if any(ord(c) < 32 or ord(c) == 127 for c in value if c not in "\n\t"):
+        raise CRMError("Invalid billing_address.")
+    return value
+
+def _tax_rate_bps(value: int | None) -> int | None:
+    if value is None:
+        return None
+    if type(value) is not int or not 0 <= value <= 10000:
+        raise CRMError("Invalid tax_rate_bps.")
+    return value
+
+def _tax_amount_paise(value: int | None) -> int | None:
+    if value is None:
+        return None
+    if type(value) is not int or not 0 <= value <= 1_000_000_000_000:
+        raise CRMError("Invalid tax_amount_paise.")
+    return value
+
 def _version_check(conn: sqlite3.Connection, min_version: int = 27) -> None:
     ver = conn.execute("PRAGMA user_version").fetchone()[0]
     from .state_storage import SUPPORTED_STATE_VERSIONS
@@ -299,6 +338,8 @@ class CustomerOrders:
             raise StateStorageError("Customer order history inconsistent.")
         replayed = None
         for (ev,) in events:
+            if ev in ("customer_order_due_updated", "customer_order_billing_updated", "customer_order_tax_updated"):
+                continue
             if (replayed, ev) not in _ORDER_TRANSITIONS:
                 raise StateStorageError("Customer order history inconsistent.")
             replayed = _ORDER_TRANSITIONS[(replayed, ev)]
@@ -309,13 +350,18 @@ class CustomerOrders:
             raise StateStorageError("Customer order history inconsistent.")
         return row
 
-    def create(self, token: str, customer_id: str, title: str, description: str = "", amount_paise: int = 0, *, operation_key: str) -> str:
+    def create(self, token: str, customer_id: str, title: str, description: str = "", amount_paise: int = 0, *, operation_key: str, due_at: int | None = None, billing_name: str | None = None, billing_address: str | None = None, tax_rate_bps: int | None = None, tax_amount_paise: int | None = None) -> str:
         cid = _input(_record_id, customer_id)
         title_v = _input(_title, title)
         desc_v = _input(_description, description)
         amount_v = _input(_amount, amount_paise)
+        due = _input(_due_at, due_at) if due_at is not None else None
+        bn = _input(_billing_name, billing_name) if billing_name is not None else None
+        ba = _input(_billing_address, billing_address) if billing_address is not None else None
+        tr = _input(_tax_rate_bps, tax_rate_bps) if tax_rate_bps is not None else None
+        ta = _input(_tax_amount_paise, tax_amount_paise) if tax_amount_paise is not None else None
         key = _input(_key, operation_key)
-        digest = _request("customer_order_create", [cid, title_v, desc_v, amount_v])
+        digest = _request("customer_order_create", [cid, title_v, desc_v, amount_v, str(due), bn or "", ba or "", str(tr), str(ta)])
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
             _version_check(conn)
             existing = _retry(conn, owner, key, digest, _RESOURCE_ORDER, "customer_orders")
@@ -323,7 +369,11 @@ class CustomerOrders:
                 return existing
             _owned_customer(conn, owner, cid)
             ident = secrets.token_hex(16)
-            conn.execute("INSERT INTO customer_orders(id, owner_id, customer_id, title, description, amount_paise, currency, status, created_at, updated_at) VALUES(?,?,?,?,?,?, 'INR', 'draft', ?, ?)", (ident, owner, cid, title_v, desc_v, amount_v, now, now))
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+            if version >= 28:
+                conn.execute("INSERT INTO customer_orders(id, owner_id, customer_id, title, description, amount_paise, currency, status, created_at, updated_at, due_at, billing_name, billing_address, tax_rate_bps, tax_amount_paise) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (ident, owner, cid, title_v, desc_v, amount_v, "INR", "draft", now, now, due, bn, ba, tr, ta))
+            else:
+                conn.execute("INSERT INTO customer_orders(id, owner_id, customer_id, title, description, amount_paise, currency, status, created_at, updated_at) VALUES(?,?,?,?,?,?, 'INR', 'draft', ?, ?)", (ident, owner, cid, title_v, desc_v, amount_v, now, now))
             _audit(conn, now, owner, "customer_order_created", _RESOURCE_ORDER, ident)
             _remember(conn, owner, key, digest, _RESOURCE_ORDER, ident)
             return ident
@@ -405,6 +455,88 @@ class CustomerOrders:
                 raise CRMError("Transition not allowed.")
             conn.execute("UPDATE customer_orders SET status='cancelled', updated_at=? WHERE id=? AND owner_id=?", (now, oid, owner))
             _audit(conn, now, owner, "customer_order_cancelled", _RESOURCE_ORDER, oid)
+            _remember(conn, owner, key, digest, _RESOURCE_ORDER, oid)
+            return oid
+
+    def set_due_date(self, token: str, order_id: str, due_at: int, *, operation_key: str) -> str:
+        oid = _input(_record_id, order_id)
+        key = _input(_key, operation_key)
+        due = _input(_due_at, due_at)
+        if due is None:
+            raise CRMError("Invalid due_at.")
+        digest = _request("customer_order_due", [oid, due])
+        with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
+            _version_check(conn)
+            if conn.execute("PRAGMA user_version").fetchone()[0] < 28:
+                raise StateStorageError("State schema version 28 is required for finance.")
+            row = self._owned(conn, owner, oid)
+            existing = _retry(conn, owner, key, digest, _RESOURCE_ORDER, "customer_orders")
+            if existing:
+                return oid
+            if row["status"] != "draft":
+                raise CRMError("Due date can only be set on draft orders.")
+            conn.execute("UPDATE customer_orders SET due_at=?, updated_at=? WHERE id=? AND owner_id=?", (due, now, oid, owner))
+            _audit(conn, now, owner, "customer_order_due_updated", _RESOURCE_ORDER, oid)
+            _remember(conn, owner, key, digest, _RESOURCE_ORDER, oid)
+            return oid
+
+    def set_billing(self, token: str, order_id: str, *, billing_name: str | None = None, billing_address: str | None = None, operation_key: str) -> str:
+        oid = _input(_record_id, order_id)
+        key = _input(_key, operation_key)
+        bn = _input(_billing_name, billing_name) if billing_name is not None else None
+        ba = _input(_billing_address, billing_address) if billing_address is not None else None
+        if bn is None and ba is None:
+            raise CRMError("No billing fields provided.")
+        digest = _request("customer_order_billing", [oid, bn or "", ba or ""])
+        with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
+            _version_check(conn)
+            if conn.execute("PRAGMA user_version").fetchone()[0] < 28:
+                raise StateStorageError("State schema version 28 is required for finance.")
+            row = self._owned(conn, owner, oid)
+            existing = _retry(conn, owner, key, digest, _RESOURCE_ORDER, "customer_orders")
+            if existing:
+                return oid
+            if row["status"] != "draft":
+                raise CRMError("Billing can only be set on draft orders.")
+            updates = {}
+            if bn is not None:
+                updates["billing_name"] = bn
+            if ba is not None:
+                updates["billing_address"] = ba
+            set_clause = ", ".join(f"{k}=?" for k in updates) + ", updated_at=?"
+            params = list(updates.values()) + [now, oid, owner]
+            conn.execute(f"UPDATE customer_orders SET {set_clause} WHERE id=? AND owner_id=?", tuple(params))
+            _audit(conn, now, owner, "customer_order_billing_updated", _RESOURCE_ORDER, oid)
+            _remember(conn, owner, key, digest, _RESOURCE_ORDER, oid)
+            return oid
+
+    def set_tax(self, token: str, order_id: str, *, tax_rate_bps: int | None = None, tax_amount_paise: int | None = None, operation_key: str) -> str:
+        oid = _input(_record_id, order_id)
+        key = _input(_key, operation_key)
+        tr = _input(_tax_rate_bps, tax_rate_bps) if tax_rate_bps is not None else None
+        ta = _input(_tax_amount_paise, tax_amount_paise) if tax_amount_paise is not None else None
+        if tr is None and ta is None:
+            raise CRMError("No tax fields provided.")
+        digest = _request("customer_order_tax", [oid, str(tr), str(ta)])
+        with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
+            _version_check(conn)
+            if conn.execute("PRAGMA user_version").fetchone()[0] < 28:
+                raise StateStorageError("State schema version 28 is required for finance.")
+            row = self._owned(conn, owner, oid)
+            existing = _retry(conn, owner, key, digest, _RESOURCE_ORDER, "customer_orders")
+            if existing:
+                return oid
+            if row["status"] != "draft":
+                raise CRMError("Tax can only be set on draft orders.")
+            updates = {}
+            if tr is not None:
+                updates["tax_rate_bps"] = tr
+            if ta is not None:
+                updates["tax_amount_paise"] = ta
+            set_clause = ", ".join(f"{k}=?" for k in updates) + ", updated_at=?"
+            params = list(updates.values()) + [now, oid, owner]
+            conn.execute(f"UPDATE customer_orders SET {set_clause} WHERE id=? AND owner_id=?", tuple(params))
+            _audit(conn, now, owner, "customer_order_tax_updated", _RESOURCE_ORDER, oid)
             _remember(conn, owner, key, digest, _RESOURCE_ORDER, oid)
             return oid
 

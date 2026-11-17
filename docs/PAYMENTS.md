@@ -1,6 +1,6 @@
-# Payments — Ai-earn (2026-11-16)
+# Payments — Ai-earn (2026-11-17)
 
-**Status:** Sandbox provider HMAC verified (v21) + AI Assistant v22 (approval-gated), **no live transactions**, **no card storage**. Razorpay/Stripe shaped, sandbox only until explicit approval.
+**Status:** Sandbox provider HMAC verified (v21, 963 tests) + AI Assistant v22 (approval-gated), **no live transactions**, **no card storage**. Razorpay/Stripe shaped, sandbox only until explicit approval.
 
 ## Current synthetic implementation (experimental)
 
@@ -31,8 +31,24 @@ Only **6 & 7** after independent **live** provider verification (M11 gate) may c
 - **Implemented sandbox (M9 v21):** `PaymentProviders` `ProviderConfig` `provider=razorpay|stripe` `mode=sandbox` `webhook_secret` 32..128, `create_order` local, `handle_webhook` raw-body HMAC before JSON parse (Razorpay hex, Stripe `t=,v1=`), reject extra/duplicate fields, amount/currency strictly equals `payment_provider_orders`, idempotency via `operation_key` + `event_id` `raw_body_hash`, replay 300s, transition `created→authorized→captured→settled→refunded/failed`, `compare_snapshot` `provider_events`, `dashboard` `provider_orders` `sandbox_only`, `reconcile` local-only.
 - **Required before any live (M11 gate):** Real Razorpay/Stripe webhook secret verified against live provider, `live` mode enablement after explicit approval, settlement polling, bank reconciliation, `PAYMENTS.md` checklist signed, `live` transactions still blocked.
 
-## Gate (M11)
+## Gate (M11) — expanded Phase 11 production readiness checklist
 
-No live mode without: eligibility, HMAC + replay tests, duplicate/ordering tests, refund/failed/settlement tests, audit + ledger tests, backup/recovery tests, config separation review, explicit approval. Live transactions remain unauthorized.
+No live mode without all 11 checks (see `PRODUCTION_READINESS.md`):
+
+1. Complete security review.
+2. Complete webhook verification tests.
+3. Verify reconciliation.
+4. Verify duplicate event handling.
+5. Verify refunds.
+6. Verify failed payments.
+7. Verify settlement records.
+8. Verify audit trails.
+9. Verify backups.
+10. Verify error recovery.
+11. Verify configuration separation.
+
+Live remains blocked in code (`ProviderConfig` `mode=live` raises) and in `ai_earn/production_readiness.evaluate()` (`production_ready:false`, `live_blocked:true`). Checklist signing + explicit approval + code gate update are required. Live transactions remain unauthorized.
+
+Automated verification: `python -c "from ai_earn.production_readiness import evaluate; import json,os; print(json.dumps(evaluate(os.environ), indent=2))"` and `python -m unittest tests.test_production_readiness -v`. Human sign-off table in `PRODUCTION_READINESS.md` must be completed.
 
 Preserve warning: “Never mark a payment as received based only on a client-side success screen or unverified placeholder.”

@@ -16,6 +16,13 @@ class Event(Enum):
     INTERNAL_ERROR = ("internal_error", "ERROR")
     DOCTOR_REQUESTED = ("doctor_requested", "INFO")
     DOCTOR_PLAN_REQUESTED = ("doctor_plan_requested", "INFO")
+    HEALTH_REQUESTED = ("health_requested", "INFO")
+    BACKUP_STARTED = ("backup_started", "INFO")
+    BACKUP_FAILED = ("backup_failed", "ERROR")
+    EXPORT_STARTED = ("export_started", "INFO")
+    EXPORT_FAILED = ("export_failed", "ERROR")
+    DELETION_REQUESTED = ("deletion_requested", "WARNING")
+    DELETION_FAILED = ("deletion_failed", "ERROR")
 
 
 _LEVELS = {"DEBUG": 10, "INFO": 20, "WARNING": 30, "ERROR": 40}

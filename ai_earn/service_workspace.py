@@ -116,7 +116,7 @@ def _message(value: str) -> str:
 
 def _version(conn):
     ver = conn.execute("PRAGMA user_version").fetchone()[0]
-    if ver not in (25, 26, 27):
+    if ver not in (25, 26, 27, 28):
         # allow 25 only; but also allow higher future? For now require >=25
         from .state_storage import SUPPORTED_STATE_VERSIONS
         if ver not in SUPPORTED_STATE_VERSIONS or ver < 25:
