@@ -47,12 +47,24 @@ class DashboardMetrics:
         self._state = state
 
     def get(self, token: str) -> dict:
+        # P0-5: fetch UI display_name before locks (read-only profile, never for isolation)
+        display_name = None
+        username = None
+        _owner_via_profile = None
+        try:
+            _prof = self._auth.profile(token)
+            _owner_via_profile = _prof.get("id")
+            username = _prof.get("username")
+            display_name = _prof.get("display_name")
+        except Exception:
+            pass
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
             version = conn.execute("PRAGMA user_version").fetchone()[0]
             result = {
                 "generated_at": now,
                 "schema_version": version,
                 "read_only": True,
+                "account": {"id": owner, "username": username, "display_name": display_name},
                 "work": {
                     "opportunity_drafts": 0,
                     "task_plans": 0,
