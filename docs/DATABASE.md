@@ -6,7 +6,7 @@
 
 - **Auth DB** (`AI_EARN_AUTH_DB`, `user_version 1`): `accounts(id, username UNIQUE, password_salt, password_hash, password_iterations, recovery_hash, created_at)`, `sessions(token_hash PK, account_id FK, expires_at, revoked_at)`, `auth_attempts(action, subject, occurred_at) + index`, `auth_audit(id PK, occurred_at, event, account_id FK)`. Private POSIX 0700/0600 or Windows ACL, `BEGIN IMMEDIATE`, `mode=rw` URI.
 
-- **State DB** (`AI_EARN_STATE_DB`, `APPLICATION_ID 0x41494533`, `user_version 1→27`): `state_meta`, `state_migrations(version PK, applied_at)`, plus versioned tables:
+- **State DB** (`AI_EARN_STATE_DB`, `APPLICATION_ID 0x41494533`, `user_version 1→28`): `state_meta`, `state_migrations(version PK, applied_at)`, plus versioned tables:
   - `v2` `state_audit`, `state_operations(owner_id, operation_key) PK, request_hash, resource_type, resource_id`
   - `v3` `opportunity_drafts`
   - `v4` `task_plans`
@@ -33,14 +33,15 @@
   - `v25` `service_packages`/`service_requirements`/`service_attachments`/`proposals`/`customer_requests` (service FK, customer FK, status state machines, ai_generated 0/1) + 5 indexes
   - `v26` `product_ideas` (title 1..200, description 0..2000, status `idea→validated→rejected→archived`) + `product_validations` (criteria 1..500, result pass/fail/pending, evidence 0..1000) FK products + `market_research`/`pricing_suggestions` (ai_generated 0/1, verification unverified/verified, evidence_url 0..2048 http) + `product_versions` (version 1..20 regex, notes 0..2000, updates products.version) + `product_files`/`product_deliverables` (file_name 1..200, file_hash BLOB 32, size 0..104857600, mime 1..100) + `product_sales` (quantity 1..1e6, amount 0..1e12, sale_at, evidence_url, verification) + `product_documentation` (title 1..200, content 1..10000) + 9 indexes
   - `v27` `customer_notes` (note 1..2000) + `customer_requirements` (requirement 1..500) + `customer_orders` (title 1..200, description 0..2000, amount 0..1e12 INR, status `draft→confirmed→fulfilled/cancelled`) + `customer_projects` (customer FK ↔ project_tasks FK, UNIQUE) + `crm_communication_approvals` (communication FK, status pending→approved/rejected/expired, TTL 60..86400, expires_at) + `crm_outbound_configs` (owner PK, enabled 0/1, allowed_channels 0..500, daily_limit 1..100) + 9 indexes
+  - `v28` `tax_configs` (owner_id PK, name 1..200, rate_bps 0..10000) + `billing_profiles` (id 32hex, owner_id, customer_id FK, name 1..200, address 0..1000) + `payment_records` (id 32hex, owner_id, invoice_id FK, amount 0..1e12, status `pending→confirmed→settled→refunded/failed`, provider razorpay/stripe, mode sandbox/live) + `expense_records`/`refund_records`/`fee_records` (id 32hex, payment_id FK, amount 0..1e12) + ALTER `invoices`/`customer_orders` add `due_at`, `billing_name/contact/address`, `tax_rate_bps`, `tax_amount_paise` nullable bounded + 10 indexes (`tax_configs_owner_idx`, `billing_profiles_id_owner_idx`, `billing_profiles_customer_idx`, `payment_records_id_owner_idx`, `payment_records_invoice_idx`, `payment_records_status_idx`, `expense_records_id_owner_idx`, `refund_records_id_owner_idx`, `refund_records_payment_idx`, `fee_records_id_owner_idx`, `fee_records_payment_idx`)
 
 All tables have `CHECK (length(owner_id)=32 AND hex)` except `state_*`, plus `CHECK (owner_id = hex)`, and foreign keys to `owner_id`. Amounts are `CHECK typeof='integer' AND BETWEEN 0 AND 1e12`.
 
 ## Migrations
 
-- Explicit, backup-first: `StateStorage.migrate_to_v2` … `migrate_to_v18, migrate_to_v19, migrate_to_v20, migrate_to_v21, migrate_to_v23, migrate_to_v24, migrate_to_v25, migrate_to_v26`, each holds `transaction` write lock, calls `backup_to(verified_new_path, confirmed=True)`, applies DDL, inserts `state_migrations`, `PRAGMA user_version = N`, then `validate_schema` + `check_integrity`. `backup_to` verifies source integrity, `create_exclusive` on destination (fails if exists), `source.backup(destination)`, verifies destination.
+- Explicit, backup-first: `StateStorage.migrate_to_v2` … `migrate_to_v18, migrate_to_v19, migrate_to_v20, migrate_to_v21, migrate_to_v23, migrate_to_v24, migrate_to_v25, migrate_to_v26, migrate_to_v27, migrate_to_v28`, each holds `transaction` write lock, calls `backup_to(verified_new_path, confirmed=True)`, applies DDL, inserts `state_migrations`, `PRAGMA user_version = N`, then `validate_schema` + `check_integrity`. `backup_to` verifies source integrity, `create_exclusive` on destination (fails if exists), `source.backup(destination)`, verifies destination.
 - New files start at `v1`; no auto-upgrade; unknown `user_version` or missing `state_migrations` history → `StateStorageError`.
-- `tracker_cli._initialize_state` creates `state.sqlite3` (v1) then migrates `v2→v27` with 27 `before-v*.sqlite3` backups, never overwriting.
+- `tracker_cli._initialize_state` creates `state.sqlite3` (v1) then migrates `v2→v28` with 27 `before-v*.sqlite3` backups, never overwriting.
 
 ## Integrity & ownership
 
@@ -80,6 +81,6 @@ All tables have `CHECK (length(owner_id)=32 AND hex)` except `state_*`, plus `CH
 - `financial_assertions`: `potential → quote_asserted → contract_asserted → invoice_asserted → initiated_asserted → withdrawn`
 - `sandbox_payments`: `sandbox_awaiting → sandbox_confirmed → sandbox_settled → sandbox_refunded` plus `sandbox_failed` branch
 
-Disposal: all data is disposable, validated via `python -m unittest discover -v` (963/17, incl. v15 opportunity discovery + managed runner + v16 services/portfolio + v17 products/customers + v18 comms/ledger + v19 followups/CSV + v20 invoices/11-concept + v21 provider sandbox HMAC + v22 AI ToolRegistry/ApprovalQueue, Linux Python 3.11.2). No customer or payment data, no production use.
+Disposal: all data is disposable, validated via `python -m unittest discover -v` (983/17, incl. v15 opportunity discovery + managed runner + v16 services/portfolio + v17 products/customers + v18 comms/ledger + v19 followups/CSV + v20 invoices/11-concept + v21 provider sandbox HMAC + v22 AI ToolRegistry/ApprovalQueue + v28 finance tax/billing/payments/expenses v23/v24 tasks v25/v26 workspaces v27 CRM, Linux Python 3.11.2). No customer or payment data, no production use.
 
 See `ARCHITECTURE.md`, `SECURITY_REVIEW.md`, `TESTING.md` for limits, and `PHASE_STATUS.md` for phase gates. Real-data recovery and production hardening are future milestones (M2, M15).
