@@ -6,7 +6,7 @@ The runtime application has no third-party dependencies. Static-analysis tools a
 python -m pip install -r requirements-dev.txt
 python -m ruff check ai_earn tests tools
 python -m mypy
-python -m mypy --strict ai_earn/financial_math.py ai_earn/migrations
+python -m mypy --strict ai_earn/financial_math.py ai_earn/migrations ai_earn/postgres_adapter.py ai_earn/structured_logging.py ai_earn/connectors
 python -m compileall -q ai_earn tests tools
 python -m unittest discover -v
 ```

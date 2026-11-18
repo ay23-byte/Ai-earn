@@ -90,7 +90,7 @@ class BaseAPIClient:
                     result = handler(**params)
                 else:
                     # default fetch path
-                    result = self.connector.fetch(**params)  # type: ignore[arg-type]
+                    result = self.connector.fetch(**params)
                 return result
             except Exception as exc:
                 err = normalize_error(exc)

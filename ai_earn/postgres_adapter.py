@@ -51,7 +51,7 @@ def connect(dsn: str | None = None):  # pragma: no cover - optional dependency
     if not dsn:
         raise PostgresAdapterUnavailable("No Postgres DSN configured; SQLite remains the storage engine.")
     try:
-        import psycopg  # type: ignore[import-not-found]
+        import psycopg
     except ImportError as exc:
         raise PostgresAdapterUnavailable("psycopg is not installed; Postgres PoC is unavailable.") from exc
     return psycopg.connect(dsn)

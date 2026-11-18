@@ -12,11 +12,20 @@ python -m unittest discover
 python -m tools.security_check && python -m tools.security_check --audit
 ```
 
-Latest agent-run drill (disposable data, 2026-11-18): **11/11 checks PASS** —
+Latest agent-run drill (disposable data, 2026-11-18, re-run for v1.0 RC): **11/11 checks PASS** —
 security_review, webhook_verification, reconciliation, duplicate_handling,
 refunds, failed_payments, settlement_records, audit_trails, backups,
 error_recovery, configuration_separation — with `live_blocked: true`,
 `live_ready: false`. Passing automated checks is necessary, not sufficient.
+
+## v1.0 RC evidence attached
+
+- `docs/V1_RELEASE_AUDIT.md`, `docs/V1_RELEASE_REPORT.md`,
+  `docs/DATABASE_RELEASE_VALIDATION.md`, `docs/SECURITY_RELEASE_REVIEW.md`,
+  `docs/ACCESSIBILITY_RELEASE_VALIDATION.md`,
+  `docs/BACKUP_RECOVERY_RELEASE_VALIDATION.md`, `docs/CI_RELEASE_VALIDATION.md`.
+- OAuth live validation: BLOCKED (operator disposable account) — see
+  `docs/OAUTH_LIVE_VALIDATION.md`. Pentest: PENDING (third party).
 
 ## Human checklist (each requires a named reviewer + date)
 
