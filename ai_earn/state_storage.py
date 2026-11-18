@@ -19,7 +19,7 @@ from .auth_storage import AuthStorage, StorageError, _windows_auth_verified
 
 APPLICATION_ID = 0x41494533  # AIE3, distinct from the auth-only database.
 SCHEMA_VERSION = 1  # New files still bootstrap as version 1; upgrades are explicit.
-LATEST_SCHEMA_VERSION = 28
+LATEST_SCHEMA_VERSION = 29
 SUPPORTED_STATE_VERSIONS = frozenset(range(1, LATEST_SCHEMA_VERSION + 1))
 
 
@@ -123,6 +123,12 @@ from .migrations.v27 import (
     _V27_SCHEMA,
 )
 from .migrations import v28 as _migration_v28
+from .migrations import v29 as _migration_v29
+from .migrations.v29 import (
+    _V29_AI_CONFIG_INDEX,
+    _V29_AI_USAGE_INDEX,
+    _V29_SETTLEMENT_INDEX,
+)
 from .migrations.v28 import (
     _V28_TAX_INDEX,
     _V28_BILLING_ID_INDEX,
@@ -165,6 +171,7 @@ _apply_v25 = _migration_v25.apply
 _apply_v26 = _migration_v26.apply
 _apply_v27 = _migration_v27.apply
 _apply_v28 = _migration_v28.apply
+_apply_v29 = _migration_v29.apply
 
 
 class StateStorageError(Exception):
@@ -555,6 +562,16 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
             expected_columns["fee_records"] = [
                 ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("payment_id", "TEXT", 0, 0), ("amount_paise", "INTEGER", 1, 0), ("currency", "TEXT", 1, 0), ("fee_type", "TEXT", 1, 0), ("note", "TEXT", 1, 0), ("verified", "INTEGER", 1, 0), ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
             ]
+    if version >= 29:
+        expected_columns["ai_provider_configs"] = [
+            ("owner_id", "TEXT", 1, 1), ("provider", "TEXT", 1, 0), ("model", "TEXT", 1, 0), ("base_url", "TEXT", 1, 0), ("api_key_hash", "BLOB", 0, 0), ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["ai_token_usage"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("provider", "TEXT", 1, 0), ("model", "TEXT", 1, 0), ("prompt_tokens", "INTEGER", 1, 0), ("completion_tokens", "INTEGER", 1, 0), ("created_at", "INTEGER", 1, 0),
+        ]
+        expected_columns["settlement_evidence"] = [
+            ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("payment_id", "TEXT", 1, 0), ("statement_ref", "TEXT", 1, 0), ("amount_paise", "INTEGER", 1, 0), ("matched", "INTEGER", 1, 0), ("confirmed", "INTEGER", 1, 0), ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
+        ]
     if version >= 20:
         if version >= 28:
             expected_columns["invoices"] = [
@@ -642,6 +659,10 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         expected_objects.append(("index", "refund_records_payment_idx"))
         expected_objects.append(("index", "fee_records_id_owner_idx"))
         expected_objects.append(("index", "fee_records_payment_idx"))
+    if version >= 29:
+        expected_objects.append(("index", "ai_provider_configs_owner_idx"))
+        expected_objects.append(("index", "ai_token_usage_owner_idx"))
+        expected_objects.append(("index", "settlement_evidence_payment_idx"))
     if version >= 20:
         expected_objects.append(("index", "invoices_id_owner_idx"))
         expected_objects.append(("index", "invoices_number_owner_idx"))
@@ -794,6 +815,15 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
                 ("refund_records_payment_idx", _V28_REFUND_PAYMENT_INDEX),
                 ("fee_records_id_owner_idx", _V28_FEE_ID_INDEX),
                 ("fee_records_payment_idx", _V28_FEE_PAYMENT_INDEX),
+            ]:
+                row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name=?", (name,)).fetchone()
+                if row is None or row[0] != sql:
+                    raise StateStorageError("State database schema constraints are incompatible.")
+        if version >= 29:
+            for name, sql in [
+                ("ai_provider_configs_owner_idx", _V29_AI_CONFIG_INDEX),
+                ("ai_token_usage_owner_idx", _V29_AI_USAGE_INDEX),
+                ("settlement_evidence_payment_idx", _V29_SETTLEMENT_INDEX),
             ]:
                 row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name=?", (name,)).fetchone()
                 if row is None or row[0] != sql:
@@ -1886,6 +1916,19 @@ class StateStorage:
             self.backup_to(backup, confirmed=True)
             _apply_v27(conn)
             if _validate_schema(conn) != 27:
+                raise StateStorageError("Migration produced an incompatible schema.")
+            _check_integrity(conn)
+
+    def migrate_to_v29(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 28 only after a checked non-overwriting backup."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 28:
+                raise StateStorageError("Only version 28 can be upgraded to version 29.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v29(conn)
+            if _validate_schema(conn) != 29:
                 raise StateStorageError("Migration produced an incompatible schema.")
             _check_integrity(conn)
 

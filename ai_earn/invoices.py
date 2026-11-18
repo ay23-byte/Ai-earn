@@ -156,25 +156,52 @@ def _request(action: str, values: list) -> bytes:
     return _base_digest(action, json.dumps(values, ensure_ascii=True, separators=(",", ":")))
 
 
+def _pdf_escape(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
 def _pdf_bytes(invoice_number: str, order_id: str, owner: str, amount: int, *, due_at: int | None = None, billing_name: str | None = None, billing_contact: str | None = None, billing_address: str | None = None, tax_rate_bps: int | None = None, tax_amount_paise: int | None = None) -> bytes:
-    # Stub PDF content: deterministic text, not a real PDF binary, 11-concept note
-    # Include optional billing/tax/due for v28, but keep backward compat when None
-    parts = [f"INVOICE {invoice_number}", f"Order {order_id}", f"Owner {owner}", f"Amount {amount} INR"]
+    """Render a real, deterministic single-page PDF invoice (stdlib only)."""
+    lines = [f"INVOICE {invoice_number}", f"Order {order_id}", f"Owner {owner}", f"Amount {amount} INR"]
     if due_at is not None:
-        parts.append(f"Due {due_at}")
+        lines.append(f"Due {due_at}")
     if billing_name is not None:
-        parts.append(f"BillingName {billing_name}")
+        lines.append(f"BillingName {billing_name}")
     if billing_contact is not None:
-        parts.append(f"BillingContact {billing_contact}")
+        lines.append(f"BillingContact {billing_contact}")
     if billing_address is not None:
-        parts.append(f"BillingAddress {billing_address}")
+        lines.append(f"BillingAddress {billing_address}")
     if tax_rate_bps is not None:
-        parts.append(f"TaxRate {tax_rate_bps}bps")
+        lines.append(f"TaxRate {tax_rate_bps}bps")
     if tax_amount_paise is not None:
-        parts.append(f"TaxAmount {tax_amount_paise}")
-    parts.append("STUB|11-CONCEPT")
-    content = "|".join(parts) + "\n"
-    return content.encode("utf-8")
+        lines.append(f"TaxAmount {tax_amount_paise}")
+    text_ops = ["BT", "/F1 14 Tf", "72 770 Td"]
+    for index, line in enumerate(lines):
+        if index:
+            text_ops.append("0 -22 Td")
+        safe = _pdf_escape("".join(c if 32 <= ord(c) < 127 else "?" for c in line))
+        text_ops.append(f"({safe}) Tj")
+    text_ops.append("ET")
+    stream = "\n".join(text_ops).encode("ascii")
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Length " + str(len(stream)).encode("ascii") + b" >>\nstream\n" + stream + b"\nendstream",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for number, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += f"{number} 0 obj\n".encode("ascii") + body + b"\nendobj\n"
+    xref = len(out)
+    out += f"xref\n0 {len(objects) + 1}\n".encode("ascii")
+    out += b"0000000000 65535 f \n"
+    for offset in offsets:
+        out += f"{offset:010d} 00000 n \n".encode("ascii")
+    out += f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode("ascii")
+    return bytes(out)
 
 
 def _owned(conn, owner, record_id):
@@ -403,7 +430,7 @@ class Invoices:
             return ident
 
     def pdf_stub(self, token: str, record_id: str) -> bytes:
-        """Return deterministic PDF stub bytes for an issued/paid/overdue invoice."""
+        """Return deterministic real PDF bytes for an issued/paid/overdue invoice."""
         ident = _input(_record_id, record_id)
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, _now):
             _version_check(conn)

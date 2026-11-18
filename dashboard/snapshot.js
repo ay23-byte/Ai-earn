@@ -86,3 +86,36 @@ $("clearSnapshot").addEventListener("click", () => {
   document.querySelector(".status").textContent="NO DATA LOADED";
   $("snapshotFile").value="";
 });
+
+// Opt-in live polling (P4-2): re-renders when the supplied loader returns a
+// changed snapshot. No network is performed by this file; the loader decides
+// where the snapshot comes from (e.g. a re-exported local file object).
+(function () {
+  let lastJson = "";
+  let lastAt = 0;
+  let timer = null;
+  function ago() {
+    const el = document.getElementById("lastUpdated");
+    if (!el || !lastAt) return;
+    el.textContent = "Last updated " + Math.max(0, Math.round((Date.now() - lastAt) / 1000)) + "s ago";
+  }
+  window.AiEarnSnapshot = {
+    render,
+    poll(loader, intervalMs) {
+      if (typeof loader !== "function") throw Error("Snapshot poll requires a loader function.");
+      const interval = Number.isSafeInteger(intervalMs) && intervalMs >= 5000 ? intervalMs : 30000;
+      this.stop();
+      timer = setInterval(() => {
+        try {
+          const snapshot = loader();
+          if (!snapshot) { ago(); return; }
+          const json = JSON.stringify(snapshot);
+          if (json !== lastJson) { render(snapshot); lastJson = json; lastAt = Date.now(); }
+          ago();
+        } catch (_err) { ago(); }
+      }, interval);
+      return timer;
+    },
+    stop() { if (timer) { clearInterval(timer); timer = null; } },
+  };
+})();

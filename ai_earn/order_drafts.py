@@ -37,7 +37,7 @@ def _amount(value: int) -> int:
 
 
 def _check_version(conn: sqlite3.Connection) -> None:
-    if conn.execute("PRAGMA user_version").fetchone()[0] not in (5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28):
+    if conn.execute("PRAGMA user_version").fetchone()[0] not in (5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29):
         raise StateStorageError("State schema version 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 or 15 is required for order drafts.")
 
 

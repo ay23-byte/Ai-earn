@@ -12,3 +12,4 @@ __pycache__/
 # Dashboard snapshots contain private local aggregates; never commit them.
 dashboard-snapshot-*.json
 dashboard/snapshot-*.json
+dashboard/demo-snapshot.json

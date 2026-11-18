@@ -116,7 +116,7 @@ def _message(value: str) -> str:
 
 def _version(conn):
     ver = conn.execute("PRAGMA user_version").fetchone()[0]
-    if ver not in (25, 26, 27, 28):
+    if ver not in (25, 26, 27, 28, 29):
         # allow 25 only; but also allow higher future? For now require >=25
         from .state_storage import SUPPORTED_STATE_VERSIONS
         if ver not in SUPPORTED_STATE_VERSIONS or ver < 25:
@@ -638,6 +638,39 @@ class Proposals:
             conn.execute("UPDATE proposals SET status=?, updated_at=? WHERE id=? AND owner_id=?", (target, now, pid, owner))
             _audit(conn, now, owner, event, _RESOURCE_PROPOSAL, pid)
             _remember(conn, owner, key, digest, _RESOURCE_PROPOSAL, pid)
+            return pid
+
+    def accept_for_request(self, token: str, proposal_id: str, request_id: str, *, operation_key: str) -> str:
+        """Accept a sent proposal bound to a matching pending customer request (P2-3).
+
+        Both records must belong to the caller and agree on service and
+        customer. Proposal and request transition atomically; each side keeps
+        its own audit event and operation row (derived key) so history-replay
+        invariants hold. Idempotent on ``operation_key``.
+        """
+        pid = _input(_record_id, proposal_id)
+        rid = _input(_record_id, request_id)
+        key = _input(_key, operation_key)
+        digest = _request("proposal_accept_for_request", [pid, rid])
+        with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
+            _version(conn)
+            proposal = self._owned(conn, owner, pid)
+            existing = _retry(conn, owner, key, digest, _RESOURCE_PROPOSAL)
+            if existing is not None:
+                return pid
+            request = CustomerRequests(self._auth, self._state)._owned(conn, owner, rid)
+            if proposal["status"] != "sent":
+                raise ServiceWorkspaceError("Only a sent proposal can be accepted for a request.")
+            if request["status"] != "pending":
+                raise ServiceWorkspaceError("Only a pending customer request can accept a proposal.")
+            if proposal["service_id"] != request["service_id"] or proposal["customer_id"] != request["customer_id"]:
+                raise ServiceWorkspaceError("Proposal does not match the customer request.")
+            conn.execute("UPDATE proposals SET status='accepted', updated_at=? WHERE id=? AND owner_id=?", (now, pid, owner))
+            _audit(conn, now, owner, "proposal_accepted", _RESOURCE_PROPOSAL, pid)
+            _remember(conn, owner, key, digest, _RESOURCE_PROPOSAL, pid)
+            conn.execute("UPDATE customer_requests SET status='accepted', updated_at=? WHERE id=? AND owner_id=?", (now, rid, owner))
+            _audit(conn, now, owner, "request_accepted", _RESOURCE_REQUEST, rid)
+            _remember(conn, owner, key + "-request", _request("request_transition", [rid, "accepted"]), _RESOURCE_REQUEST, rid)
             return pid
 
     def send(self, token: str, proposal_id: str, *, operation_key: str) -> str:

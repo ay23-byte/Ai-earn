@@ -4,7 +4,7 @@ The runtime application has no third-party dependencies. Static-analysis tools a
 
 ```powershell
 python -m pip install -r requirements-dev.txt
-python -m ruff check ai_earn/migrations ai_earn/financial_math.py tests/test_migration_modules.py tests/test_financial_math.py
+python -m ruff check ai_earn/migrations ai_earn/settlement_reconciliation.py ai_earn/ai_provider_config.py ai_earn/postgres_adapter.py ai_earn/connectors/auth.py ai_earn/connectors/drive.py ai_earn/connectors/gmail.py ai_earn/connectors/github.py ai_earn/connectors/client.py tests/test_remaining_roadmap.py ai_earn/financial_math.py tests/test_migration_modules.py tests/test_financial_math.py
 python -m mypy
 python -m compileall -q ai_earn tests tools
 python -m unittest discover -v

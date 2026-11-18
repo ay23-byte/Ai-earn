@@ -273,7 +273,7 @@ class Phase5Tests(unittest.TestCase):
 
     def test_transactional_migrations_and_integrity(self):
         # Verify LATEST is 25 and backups count
-        self.assertEqual(LATEST_SCHEMA_VERSION, 28)
+        self.assertEqual(LATEST_SCHEMA_VERSION, 29)
         with StateStorage(self.state_path).transaction() as conn:
             self.assertEqual(_validate_schema(conn), LATEST_SCHEMA_VERSION)
             _check_integrity(conn)
