@@ -37,7 +37,7 @@ jobs:
         run: |
           python -m ruff check ai_earn tests tools
           python -m mypy
-          python -m mypy --strict ai_earn/financial_math.py ai_earn/migrations
+          python -m mypy --strict ai_earn/financial_math.py ai_earn/migrations ai_earn/postgres_adapter.py ai_earn/structured_logging.py ai_earn/connectors
 
       - name: Diagnose Windows test identity
         if: runner.os == 'Windows'
