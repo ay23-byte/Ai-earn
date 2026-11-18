@@ -26,6 +26,7 @@ class InvoiceTests(unittest.TestCase):
         self.directory = Path(self.tmp.name) / "private"
         if os.name == "nt":
             from ai_earn.windows_security import create_private_directory
+
             create_private_directory(self.directory)
         else:
             self.directory.mkdir(mode=0o700)
@@ -41,7 +42,9 @@ class InvoiceTests(unittest.TestCase):
         self.bob_token = self.auth.login("bob", "disposable test password")
         state = StateStorage(self.state_path, create=True, confirmed=True)
         for v in range(2, 21):
-            getattr(state, f"migrate_to_v{v}")(self.directory / f"before-v{v}.sqlite3", confirmed=True)
+            getattr(state, f"migrate_to_v{v}")(
+                self.directory / f"before-v{v}.sqlite3", confirmed=True
+            )
         self.state = StateStorage(self.state_path)
         self.orders = OrderDrafts(self.auth, self.state)
         self.invoices = Invoices(self.auth, self.state)
@@ -169,9 +172,11 @@ class InvoiceTests(unittest.TestCase):
         with self.assertRaises(InvoiceError):
             self.invoices.list(self.alice_token, limit=0)
         with self.assertRaises(InvoiceError):
-            self.invoices.issued(self.alice_token, "a"*32, operation_key="bad key!")
+            self.invoices.issued(self.alice_token, "a" * 32, operation_key="bad key!")
         # order not owned
-        oid_bob = OrderDrafts(self.auth, self.state).create(self.bob_token, "bobclient", 10000, operation_key="kb1")
+        oid_bob = OrderDrafts(self.auth, self.state).create(
+            self.bob_token, "bobclient", 10000, operation_key="kb1"
+        )
         with self.assertRaises(AccessDenied):
             self.invoices.create(self.alice_token, oid_bob, operation_key="k99")
 
@@ -188,28 +193,36 @@ class InvoiceTests(unittest.TestCase):
         iid_retry = self.invoices.issued(self.alice_token, iid, operation_key="ik")
         self.assertEqual(iid, iid_retry)
         with self.assertRaises(InvoiceError):
-            self.invoices.paid(self.alice_token, iid, operation_key="ik")  # same key different request
+            self.invoices.paid(
+                self.alice_token, iid, operation_key="ik"
+            )  # same key different request
 
     def test_concurrent_same_key(self):
         oid = self._order(op="ok1")
         results = []
         errors = []
+
         def attempt():
             try:
                 iid = self.invoices.create(self.alice_token, oid, operation_key="concurrent")
                 results.append(iid)
             except Exception as e:
                 errors.append(e)
+
         threads = [threading.Thread(target=attempt) for _ in range(5)]
-        for t in threads: t.start()
-        for t in threads: t.join()
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
         self.assertEqual(len(results), 5)
         self.assertEqual(len(set(results)), 1)
         self.assertEqual(len(errors), 0)
 
     def test_isolation(self):
         oid_alice = self._order(op="ok1")
-        oid_bob = OrderDrafts(self.auth, self.state).create(self.bob_token, "bobc", 50000, operation_key="okb1")
+        oid_bob = OrderDrafts(self.auth, self.state).create(
+            self.bob_token, "bobc", 50000, operation_key="okb1"
+        )
         i_alice = self.invoices.create(self.alice_token, oid_alice, operation_key="k1")
         i_bob = Invoices(self.auth, self.state).create(self.bob_token, oid_bob, operation_key="k1")
         self.assertNotEqual(i_alice, i_bob)
@@ -237,7 +250,9 @@ class InvoiceTests(unittest.TestCase):
         self.assertEqual(metrics["invoices"]["count"], 1)
         self.assertIn("ledger_11", metrics)
         self.assertEqual(metrics["ledger_11"]["invoices_issued"]["count"], 1)
-        self.assertEqual(metrics["ledger_11"]["payment_received_verified"]["verification"], "not_implemented")
+        self.assertEqual(
+            metrics["ledger_11"]["payment_received_verified"]["verification"], "not_implemented"
+        )
         self.assertEqual(metrics["ledger_11"]["payment_received_verified"]["amount_paise"], 0)
         # ledger 11 includes net_realized_synthetic
         self.assertIn("net_realized_synthetic", metrics["ledger_11"])
@@ -263,9 +278,13 @@ class InvoiceTests(unittest.TestCase):
         self.assertEqual(eleven["proposed"]["amount_paise"], 50000)
         self.assertEqual(eleven["payment_received_verified"]["amount_paise"], 0)
         self.assertEqual(eleven["payment_received_verified"]["verification"], "not_implemented")
-        self.assertEqual(eleven["ledger_net_unverified"]["amount_paise"], 100000-20000-5000-1000)
+        self.assertEqual(
+            eleven["ledger_net_unverified"]["amount_paise"], 100000 - 20000 - 5000 - 1000
+        )
         self.assertEqual(eleven["net_realized_synthetic"]["verification"], "synthetic")
-        self.assertEqual(eleven["net_realized_synthetic"]["amount_paise"], 0 - 5000 - 1000 - 20000)  # settled 0
+        self.assertEqual(
+            eleven["net_realized_synthetic"]["amount_paise"], 0 - 5000 - 1000 - 20000
+        )  # settled 0
 
     def test_migration_v19_to_v20(self):
         tmp2 = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
@@ -273,6 +292,7 @@ class InvoiceTests(unittest.TestCase):
         dir2 = Path(tmp2.name) / "priv"
         if os.name == "nt":
             from ai_earn.windows_security import create_private_directory
+
             create_private_directory(dir2)
         else:
             dir2.mkdir(mode=0o700)
@@ -303,6 +323,7 @@ class InvoiceTests(unittest.TestCase):
         dir2 = Path(tmp2.name) / "priv"
         if os.name == "nt":
             from ai_earn.windows_security import create_private_directory
+
             create_private_directory(dir2)
         else:
             dir2.mkdir(mode=0o700)
@@ -316,4 +337,4 @@ class InvoiceTests(unittest.TestCase):
             getattr(state2, f"migrate_to_v{v}")(dir2 / f"before-v{v}.sqlite3", confirmed=True)
         inv2 = Invoices(auth2, state2)
         with self.assertRaises(StateStorageError):
-            inv2.create(token2, "a"*32, operation_key="k1")
+            inv2.create(token2, "a" * 32, operation_key="k1")

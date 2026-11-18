@@ -24,8 +24,8 @@ try:
     from .revenue_analytics import RevenueAnalytics as _RevenueAnalytics
     from .revenue_analytics import RevenueAnalyticsError as _RevenueAnalyticsError
 except Exception as _e:
-    _RevenueAnalytics = None
-    _RevenueAnalyticsError = Exception
+    _RevenueAnalytics = None  # type: ignore[misc,assignment]
+    _RevenueAnalyticsError = Exception  # type: ignore[misc,assignment]
 
 _MAX_TS = 4102444800
 
@@ -186,7 +186,7 @@ class Analytics:
             if version >= 20:
                 inv = _group_status(conn, "invoices", owner, f, t, "status")
                 draft = inv.get("draft", 0)
-                issued = inv.get("issued", 0) + inv.get("paid", 0) + inv.get("overdue", 0)  # issued includes those later? but we count issued separately
+                inv.get("issued", 0) + inv.get("paid", 0) + inv.get("overdue", 0)  # issued includes those later? but we count issued separately
                 # Better: use direct counts
                 issued_only = inv.get("issued", 0)
                 paid = inv.get("paid", 0)

@@ -1,8 +1,6 @@
 # Postgres Row-Level Security — design + PoC (P5-1)
 
-**Status:** design document and DDL PoC only. SQLite is the shipped storage
-engine; no Postgres dependency is bundled and no Postgres server is required
-or contacted by the test suite.
+**Status:** adapter implemented (`PostgresAdapter` with owner-bound transactions, `apply_rls`, `healthcheck`), tested with a fake driver. SQLite remains the default shipped storage; Postgres activates only with the optional `requirements-postgres.txt` dependency (`psycopg`) and an explicit `AI_EARN_POSTGRES_DSN`. No Postgres server is contacted by the test suite.
 
 ## Decision under evaluation
 
@@ -21,6 +19,9 @@ or contacted by the test suite.
 - `connect()` refuses unless `psycopg` is separately installed **and**
   `AI_EARN_POSTGRES_DSN` is explicitly set; otherwise it raises
   `PostgresAdapterUnavailable` and SQLite remains authoritative.
+- `PostgresAdapter.transaction(owner)` binds `app.owner_id` transaction-locally
+  before yielding a cursor; `apply_rls(owner, tables)` enables RLS policies;
+  `healthcheck(owner)` verifies the binding round-trips.
 
 ## Migration sketch (future, not implemented)
 
@@ -37,3 +38,12 @@ or contacted by the test suite.
 Disposable Postgres instance; RLS bypass attempts (missing setting, foreign
 owner, superuser role excluded) all fail; full unittest suite green against
 the adapter; separate human sign-off. Until then this is documentation only.
+
+## Integration evidence (2026-11-18)
+
+The gated test `tests/test_postgres_integration.py` was run against a real,
+disposable local Postgres (via the `pgserver` sandbox package, not a repo
+dependency): RLS policies applied through `PostgresAdapter.apply_rls`, and a
+non-owner role bound to owner A saw only A's row while owner B saw only B's
+row. The test skips unless `AI_EARN_POSTGRES_DSN` and
+`AI_EARN_POSTGRES_APP_DSN` are set, so CI remains server-free.

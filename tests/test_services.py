@@ -58,7 +58,7 @@ class ServiceTests(unittest.TestCase):
 
     def test_list_and_filter(self):
         s1 = self.services.create(self.alice_token, "Alpha", "", "Deliv", 100000, 1, operation_key="k1")
-        s2 = self.services.create(self.alice_token, "Beta", "", "Deliv", 200000, 0, operation_key="k2")
+        self.services.create(self.alice_token, "Beta", "", "Deliv", 200000, 0, operation_key="k2")
         self.services.publish(self.alice_token, s1, operation_key="p1")
         lst = self.services.list(self.alice_token, status="published")
         self.assertEqual(len(lst), 1)
@@ -151,7 +151,7 @@ class ServiceTests(unittest.TestCase):
 
     def test_dashboard_and_recovery(self):
         sid = self.services.create(self.alice_token, "Svc", "", "Deliv", 12345, 1, operation_key="k1")
-        pid = self.portfolio.create(self.alice_token, sid, "Item", "Desc", operation_key="p1")
+        self.portfolio.create(self.alice_token, sid, "Item", "Desc", operation_key="p1")
         metrics = DashboardMetrics(self.auth, self.state).get(self.alice_token)
         self.assertIn("services", metrics)
         self.assertEqual(metrics["services"]["count"], 1)

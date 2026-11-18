@@ -53,7 +53,7 @@ class LedgerTests(unittest.TestCase):
 
     def test_list_and_filter(self):
         l1 = self.ledger.add(self.alice_token, "income", 100000, "", operation_key="k1")
-        l2 = self.ledger.add(self.alice_token, "expense", 20000, "", operation_key="k2")
+        self.ledger.add(self.alice_token, "expense", 20000, "", operation_key="k2")
         lst = self.ledger.list(self.alice_token, kind="income")
         self.assertEqual(len(lst), 1)
         self.assertEqual(lst[0]["id"], l1)

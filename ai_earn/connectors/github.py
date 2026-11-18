@@ -46,10 +46,10 @@ class GitHubConnector(Connector):
         return os.environ.get("AI_EARN_CONNECTOR_LIVE") == "1"
 
     @classmethod
-    def from_environment(cls, *, owner_id: str, throttle: Throttle | None = None) -> "GitHubConnector":
+    def from_environment(cls, *, owner_id: str, throttle: Throttle | None = None, opener=None) -> "GitHubConnector":
         enabled = os.environ.get("AI_EARN_CONNECTOR_LIVE") == "1"
         token = os.environ.get("AI_EARN_GITHUB_TOKEN", "") if enabled else ""
-        return cls(api_key=token or None, connector_id="github" if enabled else "github-stub", owner_id=owner_id, throttle=throttle)
+        return cls(api_key=token or None, connector_id="github" if enabled else "github-stub", owner_id=owner_id, throttle=throttle, opener=opener)
 
     def validate_config(self) -> None:
         if self._revoked:

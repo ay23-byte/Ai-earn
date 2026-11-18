@@ -222,8 +222,6 @@ def _owned(conn, owner, record_id):
     if not events or events[0][0] != "invoice_created":
         raise StateStorageError("Invoice history is inconsistent.")
     # Replay multi-step
-    replayed = None
-    expected = None
     # Build replay: start None, then apply each event
     current = None
     for ev in events:

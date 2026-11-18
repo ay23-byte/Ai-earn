@@ -118,7 +118,7 @@ def _verify_parent_is_private(candidate: Path) -> bool:
     parent = candidate.parent
     if os.name == "nt":
         try:
-            from .windows_security import WindowsSecurityError, verify_private_path
+            from .windows_security import verify_private_path
             verify_private_path(parent, directory=True)
             return True
         except Exception:
@@ -174,7 +174,7 @@ def _classify(variable: str, value: str) -> StoreReport:
                                "The database file permissions could not be verified.")
     else:
         try:
-            from .windows_security import WindowsSecurityError, verify_private_path
+            from .windows_security import verify_private_path
             verify_private_path(candidate, directory=False)
         except Exception:
             return StoreReport(variable, PERMISSION_ERROR,

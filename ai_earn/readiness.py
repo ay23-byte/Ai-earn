@@ -23,7 +23,6 @@ from . import __version__
 from .auth_storage import _windows_auth_verified
 from .config import load_settings
 from .doctor import _classify, AUTH_VARIABLE, STATE_VARIABLE, OK
-from .state_storage import LATEST_SCHEMA_VERSION
 
 # Live is always blocked in code until M11 sign-off + `AI_EARN_LIVE_APPROVAL=signed`
 LIVE_BLOCKED = True
@@ -60,7 +59,7 @@ def _is_offline_ready(environ: Mapping[str, str] | None = None) -> bool:
     try:
         from .production_readiness import evaluate
 
-        report = evaluate(environ)
+        report = evaluate(dict(environ))
         return bool(report.get("production_ready"))
     except Exception:
         return False
@@ -73,7 +72,7 @@ def _is_live_ready(environ: Mapping[str, str] | None = None) -> bool:
     try:
         from .production_readiness import evaluate
 
-        report = evaluate(environ)
+        report = evaluate(dict(environ))
         return bool(report.get("live_ready"))
     except Exception:
         return False

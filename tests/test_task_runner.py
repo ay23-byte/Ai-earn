@@ -2,6 +2,7 @@
 
 Disposable only, no external effects, no production deployment.
 """
+
 import os
 import tempfile
 import time
@@ -27,6 +28,7 @@ class TaskRunnerTests(unittest.TestCase):
         self.directory = Path(self.tmp.name) / "private"
         if os.name == "nt":
             from ai_earn.windows_security import create_private_directory
+
             create_private_directory(self.directory)
         else:
             self.directory.mkdir(mode=0o700)
@@ -40,7 +42,9 @@ class TaskRunnerTests(unittest.TestCase):
         self.token = self.auth.login("alice", "disposable test password")
         state = StateStorage(self.state_path, create=True, confirmed=True)
         for v in range(2, 16):
-            getattr(state, f"migrate_to_v{v}")(self.directory / f"before-v{v}.sqlite3", confirmed=True)
+            getattr(state, f"migrate_to_v{v}")(
+                self.directory / f"before-v{v}.sqlite3", confirmed=True
+            )
         self.state = StateStorage(self.state_path)
         self.queue = TaskQueue(self.auth, self.state)
         self.workflows = TaskWorkflows(self.auth, self.state)
@@ -49,16 +53,22 @@ class TaskRunnerTests(unittest.TestCase):
         self.addCleanup(lambda: self.runner.shutdown(wait=True))
 
     def _create_managed(self, title="work", priority=5):
-        qid = self.queue.enqueue(self.token, title, operation_key=f"q_{title}_{time.time_ns()}", priority=priority)
+        qid = self.queue.enqueue(
+            self.token, title, operation_key=f"q_{title}_{time.time_ns()}", priority=priority
+        )
         wid = self.workflows.create(self.token, title, operation_key=f"w_{title}_{time.time_ns()}")
-        aid = self.associations.create_managed(self.token, qid, wid, operation_key=f"m_{title}_{time.time_ns()}")
+        aid = self.associations.create_managed(
+            self.token, qid, wid, operation_key=f"m_{title}_{time.time_ns()}"
+        )
         return qid, wid, aid
 
     def test_successful_run_once(self):
         qid, wid, aid = self._create_managed("hello", priority=5)
+
         def handler(ctx):
             self.assertEqual(ctx["association_id"], aid)
             return "hello world output"
+
         result = self.runner.run_once(self.token, handler, lease_seconds=60, operation_key="run1")
         self.assertIsNotNone(result)
         self.assertEqual(result["association_id"], aid)
@@ -74,8 +84,10 @@ class TaskRunnerTests(unittest.TestCase):
 
     def test_handler_failure_triggers_retry(self):
         qid, wid, aid = self._create_managed("failcase", priority=5)
+
         def bad_handler(ctx):
             raise ValueError("simulated handler failure")
+
         with self.assertRaises(RunnerError) as cm:
             self.runner.run_once(self.token, bad_handler, lease_seconds=60, operation_key="fail1")
         self.assertIn("Handler failed", str(cm.exception))
@@ -89,9 +101,11 @@ class TaskRunnerTests(unittest.TestCase):
     def test_lease_fence_blocks_submit_after_expiry(self):
         # Use short lease and handler that sleeps past expiry
         qid, wid, aid = self._create_managed("expiry", priority=5)
+
         def slow_handler(ctx):
             time.sleep(2)  # lease is 1 sec, so will expire before submit
             return "slow output"
+
         with self.assertRaises(RunnerError) as cm:
             self.runner.run_once(self.token, slow_handler, lease_seconds=1, operation_key="expiry1")
         self.assertIn("lease fence", str(cm.exception).lower() + str(cm.exception))
@@ -110,6 +124,7 @@ class TaskRunnerTests(unittest.TestCase):
         # Two concurrent run_once with different operation keys should claim distinct tasks
         results = []
         errors = []
+
         def handler(ctx):
             time.sleep(0.1)
             return "output " + ctx["association_id"][:4]
@@ -123,20 +138,29 @@ class TaskRunnerTests(unittest.TestCase):
 
         t1 = threading.Thread(target=run_with_key, args=("conc1",))
         t2 = threading.Thread(target=run_with_key, args=("conc2",))
-        t1.start(); t2.start(); t1.join(); t2.join()
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
         # Both should succeed claiming different tasks (since 2 ready, highest priority first)
         self.assertEqual(len(results), 2)
         self.assertEqual(len(errors), 0)
         ids = {r["association_id"] for r in results if r}
         self.assertEqual(ids, {a1, a2})
         # Third claim should return None (no ready)
-        self.assertIsNone(self.runner.run_once(self.token, handler, lease_seconds=60, operation_key="conc3"))
+        self.assertIsNone(
+            self.runner.run_once(self.token, handler, lease_seconds=60, operation_key="conc3")
+        )
 
     def test_submit_background_future(self):
         qid, wid, aid = self._create_managed("bg", priority=5)
+
         def handler(ctx):
             return "bg output"
-        fut = self.runner.submit_background(self.token, handler, lease_seconds=60, operation_key="bg1")
+
+        fut = self.runner.submit_background(
+            self.token, handler, lease_seconds=60, operation_key="bg1"
+        )
         result = fut.result(timeout=5)
         self.assertEqual(result["association_id"], aid)
         wf = self.workflows.get(self.token, wid)
@@ -145,15 +169,24 @@ class TaskRunnerTests(unittest.TestCase):
     def test_polling_start_stop(self):
         # Create 3 managed tasks
         for i in range(3):
-            self._create_managed(f"poll{i}", priority=5-i)
+            self._create_managed(f"poll{i}", priority=5 - i)
         outputs = []
+
         def handler(ctx):
             outputs.append(ctx["association_id"])
             return f"out for {ctx['association_id'][:4]}"
+
         # Token provider returns same token (still valid within test)
         def token_provider():
             return self.token
-        self.runner.start_polling(token_provider, handler, lease_seconds=60, poll_interval=0.2, operation_key_prefix="poll")
+
+        self.runner.start_polling(
+            token_provider,
+            handler,
+            lease_seconds=60,
+            poll_interval=0.2,
+            operation_key_prefix="poll",
+        )
         # Wait for tasks to be processed
         time.sleep(2)
         self.runner.stop(wait=True)
@@ -170,8 +203,10 @@ class TaskRunnerTests(unittest.TestCase):
 
     def test_operation_key_idempotency(self):
         qid, wid, aid = self._create_managed("idem", priority=5)
+
         def handler(ctx):
             return "idem output"
+
         # First run
         r1 = self.runner.run_once(self.token, handler, lease_seconds=60, operation_key="idem1")
         self.assertIsNotNone(r1)
@@ -196,9 +231,13 @@ class TaskRunnerTests(unittest.TestCase):
         with self.assertRaises(RunnerError):
             self.runner.run_once(self.token, "not callable", lease_seconds=60, operation_key="bad")
         with self.assertRaises((RunnerError, AssociationError)):
-            self.runner.run_once(self.token, lambda ctx: "ok", lease_seconds=99999, operation_key="bad")
+            self.runner.run_once(
+                self.token, lambda ctx: "ok", lease_seconds=99999, operation_key="bad"
+            )
+
         def handler(ctx):
             return "x" * 5000  # too large
+
         qid, wid, aid = self._create_managed("invalid", priority=5)
         with self.assertRaises(RunnerError):
             self.runner.run_once(self.token, handler, lease_seconds=60, operation_key="invalid1")

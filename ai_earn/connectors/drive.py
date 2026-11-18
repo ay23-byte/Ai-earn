@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import os
 import urllib.parse
 
@@ -32,9 +33,9 @@ class DriveConnector(Connector):
         self._revoked = False
 
     @classmethod
-    def from_environment(cls, *, owner_id: str, throttle: Throttle | None = None) -> "DriveConnector":
+    def from_environment(cls, *, owner_id: str, throttle: Throttle | None = None, opener=None) -> "DriveConnector":
         enabled = os.environ.get(_LIVE_ENV) == "1"
-        flow = OAuthFlow.from_environment(scopes=("drive.file",)) if enabled else None
+        flow = OAuthFlow.from_environment(scopes=("drive.file",), opener=opener) if enabled else None
         return cls(connector_id="drive" if enabled else "drive-stub", oauth_flow=flow, owner_id=owner_id, throttle=throttle)
 
     @property
@@ -132,7 +133,7 @@ class DriveConnector(Connector):
         if self.live_enabled:
             self.validate_config()
 
-    def _list_live(self, limit: int) -> list[dict]:
+    def _list_live(self, limit: int) -> builtins.list[dict]:
         if self._oauth is None:
             raise ConnectorError("Live Drive OAuth is not configured.")
         results: list[dict] = []
@@ -166,7 +167,7 @@ class DriveConnector(Connector):
             page_token = next_page_token
         return results[:limit]
 
-    def list(self, *, limit: int = _MAX_LIST_LIMIT, owner_id: str | None = None) -> list[dict]:
+    def list(self, *, limit: int = _MAX_LIST_LIMIT, owner_id: str | None = None) -> builtins.list[dict]:
         """List up to 10,000 files; live HTTP is impossible unless explicitly enabled."""
         try:
             self._check_access(limit, owner_id)
@@ -177,7 +178,7 @@ class DriveConnector(Connector):
         except Exception as exc:
             raise normalize_error(exc) from exc
 
-    def fetch(self, *, limit: int = 20, owner_id: str | None = None) -> list[dict]:
+    def fetch(self, *, limit: int = 20, owner_id: str | None = None) -> builtins.list[dict]:
         if type(limit) is not int or not 1 <= limit <= 100:
             raise ConnectorError("Invalid limit.")
         return self.list(limit=limit, owner_id=owner_id)

@@ -1,6 +1,7 @@
 """Phase 8 — CRM (v27)."""
 import os
-import tempfile, unittest, time
+import tempfile
+import unittest
 from pathlib import Path
 from unittest.mock import patch
 
@@ -16,7 +17,7 @@ from ai_earn.project_tasks import ProjectTasks
 from ai_earn.crm import (
     CustomerNotes, CustomerRequirements, CustomerOrders, CustomerProjects,
     CommunicationApprovals, OutboundWorkflowConfig, CRMCommunications,
-    ActivityTimeline, CustomerProfile, CustomerCSV, CRMError
+    ActivityTimeline, CustomerProfile, CustomerCSV
 )
 
 class Clock:
@@ -208,12 +209,12 @@ class CRMTestsFull(CRMTests):
         aid=self.approvals.request(self.token, did, operation_key="appr_tl")
         self.approvals.approve(self.token, aid, operation_key="appr_tl_ok")
         self.crm_comms.send(self.token, did, operation_key="send_tl", approval_id=aid)
-        oid=self.orders.create(self.token, cid, "Order TL", "", 20000, operation_key="o_tl")
+        self.orders.create(self.token, cid, "Order TL", "", 20000, operation_key="o_tl")
         tid=self.pt.create(self.token, "Feature X", operation_key="t_tl", description="dx")
         self.projects.link(self.token, cid, tid, operation_key="link_tl")
         sid=self.svc.create(self.token, "Svc TL", "Scope", "Deliver", 10000, 1, operation_key="svc_tl")
-        prop_id=self.prop.create(self.token, sid, "Prop TL", "Desc", 10000, 5, operation_key="prop_tl", customer_id=cid)
-        fid=self.foll.create(self.token, cid, 1800000600, "Follow TL", operation_key="foll_tl")
+        self.prop.create(self.token, sid, "Prop TL", "Desc", 10000, 5, operation_key="prop_tl", customer_id=cid)
+        self.foll.create(self.token, cid, 1800000600, "Follow TL", operation_key="foll_tl")
         tl=self.timeline.get(self.token, cid, limit=50)
         # timeline should contain at least customer, note, requirement, communication, order, project, proposal, followup
         types = [e["type"] for e in tl]

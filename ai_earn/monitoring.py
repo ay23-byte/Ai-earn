@@ -11,7 +11,6 @@ import json
 import os
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Mapping
 
 from .health import check, check_with_backups

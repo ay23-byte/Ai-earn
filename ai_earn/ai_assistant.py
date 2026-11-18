@@ -25,15 +25,15 @@ Explains intent before consequential actions via preview.
 
 from __future__ import annotations
 
-import hashlib
+import builtins
 import hmac
 import json
 import re
 import secrets
 import sqlite3
 import time
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from dataclasses import dataclass
+from typing import Any, Dict, List
 
 from .auth import AccessDenied, AuthService
 from .opportunity_drafts import _digest as _base_digest, _key, _record_id
@@ -85,7 +85,7 @@ class ToolDefinition:
 def _input(validator, value):
     try:
         return validator(value)
-    except (AssistantError, ApprovalError, ToolError) as exc:
+    except (AssistantError, ApprovalError, ToolError):
         raise
     except Exception as exc:
         raise AssistantError("Invalid assistant input.") from exc
@@ -510,7 +510,7 @@ class ToolRegistry:
             raise ToolError("Tool not found.")
         return self._tools[name]
 
-    def list(self) -> list[dict]:
+    def list(self) -> builtins.list[dict]:
         return [{"name": t.name, "description": t.description, "scope": t.scope} for t in self._tools.values()]
 
     def requires_approval(self, name: str) -> bool:
@@ -521,7 +521,7 @@ class ToolRegistry:
     def _handle_read_opportunity(self, args: dict, owner: str, token: str, auth: AuthService, state: StateStorage) -> dict:
         if frozenset(args) != {"opportunity_id"}:
             raise ToolError("Invalid arguments.")
-        oid = _input(_record_id, args["opportunity_id"])
+        _input(_record_id, args["opportunity_id"])
         raise ToolError("Not implemented directly.")
 
     def _handle_read_service(self, args: dict, owner: str, token: str, auth: AuthService, state: StateStorage) -> dict:
@@ -557,7 +557,7 @@ class ToolRegistry:
     def _handle_draft_summary(self, args: dict, owner: str, token: str, auth: AuthService, state: StateStorage) -> dict:
         if frozenset(args) != {"title", "source_url"} and frozenset(args) != {"title", "source_url", "external_content"}:
             raise ToolError("Invalid arguments.")
-        title = _input(lambda v: v if isinstance(v, str) and 1 <= len(v) <= 200 and not any(ord(c) < 32 or ord(c)==127 for c in v) else (_ for _ in ()).throw(AssistantError("x")), args["title"])
+        _input(lambda v: v if isinstance(v, str) and 1 <= len(v) <= 200 and not any(ord(c) < 32 or ord(c)==127 for c in v) else (_ for _ in ()).throw(AssistantError("x")), args["title"])
         raise ToolError("Not implemented directly.")
 
     def _handle_draft_proposal(self, args: dict, owner: str, token: str, auth: AuthService, state: StateStorage) -> dict:
@@ -709,7 +709,7 @@ class ToolRegistry:
                 "research_opportunity": {"query", "limit", "external_content"},
                 "analyze_opportunity": {"opportunity_id", "external_content"},
             }
-            allowed = per_tool_allowed.get(tool.name)
+            allowed = per_tool_allowed.get(tool.name)  # type: ignore[assignment]
             if allowed is not None:
                 if not frozenset(args).issubset(allowed):
                     raise ToolError("Invalid arguments.")
@@ -837,7 +837,7 @@ class ToolRegistry:
                     else:
                         result = {"tool": tool_name, "scope": tool.scope, "verification": "draft_unverified", "args": args, "result": "draft_executed", "note": note}
                 else:  # consequential
-                    result = {"tool": tool_name, "scope": tool.scope, "verification": "approved_consequential", "args": args, "result": "consequential_executed", "approval_id": approval_id}
+                    result = {"tool": tool_name, "scope": tool.scope, "verification": "approved_consequential", "args": args, "result": "consequential_executed", "approval_id": approval_id}  # type: ignore[dict-item]
                 entry["status"] = "success"
                 entry["result"] = result
                 self._history.append(entry)
@@ -848,7 +848,7 @@ class ToolRegistry:
             self._history.append(entry)
             raise
 
-    def history(self, limit: int = 20) -> list[dict]:
+    def history(self, limit: int = 20) -> builtins.list[dict]:
         if not isinstance(limit, int) or not 1 <= limit <= 100:
             raise ToolError("Invalid limit.")
         return [dict(h) for h in self._history[-limit:]]
@@ -929,7 +929,7 @@ class ApprovalQueue:
             d["emergency_stopped"] = _is_emergency(conn, owner)
             return d
 
-    def list(self, token: str, *, after_id: str | None = None, limit: int = 20, status: str | None = None) -> list[dict]:
+    def list(self, token: str, *, after_id: str | None = None, limit: int = 20, status: str | None = None) -> builtins.list[dict]:
         cursor = "" if after_id is None else _input(_record_id, after_id)
         if type(limit) is not int or not 1 <= limit <= 100:
             raise ApprovalError("Invalid page size.")
@@ -1125,7 +1125,7 @@ class AIAssistant:
     def propose_tool(self, token: str, tool_name: str, args: dict, *, operation_key: str) -> dict:
         _tool_name(tool_name)
         tool = self.registry.get(tool_name)
-        canonical = self.registry.validate_args(tool_name, args)
+        self.registry.validate_args(tool_name, args)
         # preview before creation
         preview = self.registry.preview(tool_name, args)
         if tool.scope != "consequential":
@@ -1139,7 +1139,7 @@ class AIAssistant:
         self._chat_history.append({"type": "propose", "tool": tool_name, "scope": tool.scope, "approval_id": approval_id, "preview": preview, "at": int(time.time())})
         return preview
 
-    def history(self, limit: int = 20) -> list[dict]:
+    def history(self, limit: int = 20) -> builtins.list[dict]:
         if not isinstance(limit, int) or not 1 <= limit <= 100:
             raise AssistantError("Invalid limit.")
         return [dict(h) for h in self._chat_history[-limit:]]

@@ -72,7 +72,8 @@ class WindowsAuthenticationTests(unittest.TestCase):
 
     def test_session_expiry_uses_time_after_transaction_lock(self):
         now = [1_800_000_000]
-        clock = lambda: now[0]
+        def clock():
+            return now[0]
         service = AuthService(self.storage, clock)
         service.register("alice", self.password)
         tokens = [service.login("alice", self.password) for _ in range(3)]

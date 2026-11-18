@@ -4,12 +4,11 @@ All data is disposable, validated, and owner-scoped. No external network.
 """
 import os
 import tempfile
-import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from ai_earn.auth import AuthService, AccessDenied
+from ai_earn.auth import AuthService
 from ai_earn.auth_storage import AuthStorage
 from ai_earn.state_storage import StateStorage
 from ai_earn.opportunities import (

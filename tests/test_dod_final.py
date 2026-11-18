@@ -19,12 +19,11 @@ from ai_earn.auth_storage import AuthStorage
 from ai_earn.state_storage import StateStorage, LATEST_SCHEMA_VERSION
 from ai_earn.opportunities import Opportunities
 from ai_earn.services import Services
-from ai_earn.service_workspace import ServiceEditor, ServicePackages, ServiceRequirements, ServiceAttachments, Proposals
+from ai_earn.service_workspace import ServicePackages, Proposals
 from ai_earn.customers import Customers
-from ai_earn.crm import CustomerNotes, CustomerRequirements, CustomerOrders, CustomerProjects, CustomerCSV
+from ai_earn.crm import CustomerNotes, CustomerOrders
 from ai_earn.project_tasks import ProjectTasks
 from ai_earn.project_task_runner import ProjectTaskRunner
-from ai_earn.communications import Communications
 from ai_earn.ledger import Ledger
 from ai_earn.invoices import Invoices
 from ai_earn.order_drafts import OrderDrafts
@@ -34,7 +33,6 @@ from ai_earn.analytics import Analytics
 from ai_earn.revenue_analytics import RevenueAnalytics
 from ai_earn.dashboard_metrics import DashboardMetrics
 from ai_earn.data_export import export_user_data
-from ai_earn.account_deletion import prepare_deletion_backup, confirm_deletion
 from ai_earn.backup import list_backups, verify_backup
 from ai_earn.health import check as health_check, check_with_backups
 from ai_earn.connectors.registry import available_connectors, create_connector
@@ -103,7 +101,7 @@ class FinalDefinitionOfDoneTests(unittest.TestCase):
         self.alice = tok2
         # private data: export is owner-scoped redacted
         out = self.dir / "export.json"
-        res = export_user_data(self.alice, auth_db=self.auth_path, state_db=self.state_path, destination=out)
+        export_user_data(self.alice, auth_db=self.auth_path, state_db=self.state_path, destination=out)
         self.assertTrue(out.exists())
         self.assertLess(out.stat().st_size, 50 * 1024 * 1024)
         data = json.loads(out.read_text(encoding="utf-8"))
@@ -166,7 +164,7 @@ class FinalDefinitionOfDoneTests(unittest.TestCase):
         prp = props.create(self.alice, sid, "Client needs X", "Desc X", 100000, 7, operation_key=key5)
         self.assertIsNotNone(prp)
         # proposals are draft-unverified until approval, not fabricated earnings
-        got = props.get(self.alice, prp) if hasattr(props, "get") else None
+        props.get(self.alice, prp) if hasattr(props, "get") else None
         # ensure idempotency same key same args returns same id
         prp2 = props.create(self.alice, sid, "Client needs X", "Desc X", 100000, 7, operation_key=key5)
         self.assertEqual(prp, prp2)
@@ -466,7 +464,7 @@ class FinalDefinitionOfDoneTests(unittest.TestCase):
         out = self.dir / "dod_export.json"
         # ledger entry to export
         Ledger(self.auth, self.state).add(self.alice, "income", 12345, "export income", operation_key=_k("exp19"))
-        res = export_user_data(self.alice, auth_db=self.auth_path, state_db=self.state_path, destination=out)
+        export_user_data(self.alice, auth_db=self.auth_path, state_db=self.state_path, destination=out)
         self.assertTrue(out.exists())
         self.assertLess(out.stat().st_size, 50*1024*1024)
         txt = out.read_text(encoding="utf-8")

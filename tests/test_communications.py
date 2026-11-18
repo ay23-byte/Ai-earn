@@ -61,7 +61,7 @@ class CommunicationTests(unittest.TestCase):
 
     def test_list_and_filter(self):
         c1 = self.comms.create(self.alice_token, self.cust_alice, "email", "Body1", operation_key="k1")
-        c2 = self.comms.create(self.alice_token, self.cust_alice, "phone", "Body2", operation_key="k2")
+        self.comms.create(self.alice_token, self.cust_alice, "phone", "Body2", operation_key="k2")
         self.comms.sent(self.alice_token, c1, operation_key="p1")
         lst = self.comms.list(self.alice_token, status="sent")
         self.assertEqual(len(lst), 1)
@@ -198,7 +198,7 @@ class CommunicationTests(unittest.TestCase):
     def test_empty_and_boundaries(self):
         # empty list, zero-filter, body boundary 1 and 2000
         self.assertEqual(self.comms.list(self.alice_token), [])
-        ident = self.comms.create(self.alice_token, self.cust_alice, "a", "x", operation_key="k1")
+        self.comms.create(self.alice_token, self.cust_alice, "a", "x", operation_key="k1")
         body_max = "y" * 2000
         ident2 = self.comms.create(self.alice_token, self.cust_alice, "b", body_max, operation_key="k2")
         self.assertEqual(self.comms.get(self.alice_token, ident2)["body"], body_max)

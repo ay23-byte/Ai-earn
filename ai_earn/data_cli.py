@@ -10,11 +10,8 @@ Both require a real terminal (hidden input). Secrets are never echoed.
 from __future__ import annotations
 
 import getpass
-import json
-import os
 import sys
-from pathlib import Path
-from typing import Mapping, Sequence, TextIO
+from typing import Mapping, TextIO
 
 from .config import ConfigurationError, load_settings, load_database_paths
 from .auth import AuthService

@@ -6,7 +6,6 @@ stale clients but are not credentials; this is not an OS or public API boundary.
 import hmac
 import json
 import secrets
-import sqlite3
 
 from .auth import AccessDenied, AuthService
 from .opportunity_drafts import DraftError, _digest, _key, _record_id, _title

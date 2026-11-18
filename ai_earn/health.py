@@ -6,7 +6,6 @@ on the 11 automated readiness checks (offline foundation); live payments
 remain blocked (see production_readiness.live_blocked).
 """
 from pathlib import Path
-import sqlite3
 from typing import Mapping
 
 from . import __version__

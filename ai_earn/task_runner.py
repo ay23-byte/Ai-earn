@@ -12,9 +12,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import threading
-import time
-import traceback
-from typing import Callable, Any
+from typing import Callable
 
 from .auth import AuthService
 from .state_storage import StateStorage, StateStorageError
@@ -230,7 +228,7 @@ class ManagedTaskRunner:
                     else:
                         # Successful work — small delay to avoid tight loop
                         self._stop_event.wait(0.1)
-                except RunnerError as exc:
+                except RunnerError:
                     # Log via allowlisted event (stderr) without leaking secrets
                     try:
                         write_event(Event.INTERNAL_ERROR, sys.stderr)

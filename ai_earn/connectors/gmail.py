@@ -38,9 +38,9 @@ class GmailConnector(Connector):
         self._revoked = False
 
     @classmethod
-    def from_environment(cls, *, owner_id: str, throttle: Throttle | None = None) -> "GmailConnector":
+    def from_environment(cls, *, owner_id: str, throttle: Throttle | None = None, opener=None) -> "GmailConnector":
         enabled = os.environ.get(_LIVE_ENV) == "1"
-        flow = OAuthFlow.from_environment(scopes=("gmail.readonly",)) if enabled else None
+        flow = OAuthFlow.from_environment(scopes=("gmail.readonly",), opener=opener) if enabled else None
         return cls(connector_id="gmail" if enabled else "gmail-stub", oauth_flow=flow, owner_id=owner_id, throttle=throttle)
 
     @property

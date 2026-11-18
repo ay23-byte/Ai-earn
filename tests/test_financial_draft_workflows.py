@@ -1,6 +1,5 @@
 """Disposable draft-only coordination; no real payment or invoice issuance."""
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
 import json
 import os
 from pathlib import Path

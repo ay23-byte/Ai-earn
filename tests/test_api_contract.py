@@ -29,7 +29,7 @@ from ai_earn.dashboard_metrics import DashboardMetrics
 from ai_earn.events import Event, write_event
 from ai_earn.config import load_settings
 from ai_earn.payment_providers import PaymentProviders, ProviderConfig, ProviderError
-from ai_earn.ai_assistant import AIAssistant, ToolError, ApprovalError
+from ai_earn.ai_assistant import AIAssistant
 
 
 def _h(api):
@@ -443,7 +443,6 @@ class APIContractTests(unittest.TestCase):
 
     # ---- Windows policy (unit) ----
     def test_windows_policy_unit(self):
-        import ai_earn.windows_security  # ensure module loads
         from ai_earn.auth_storage import AuthStorage
         with self.assertRaises(Exception):
             AuthStorage(self.directory / "dashboard" / "auth.sqlite3", create=True)

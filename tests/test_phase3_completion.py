@@ -18,7 +18,7 @@ from ai_earn.state_storage import StateStorage, StateStorageError
 from ai_earn.opportunities import Opportunities, OpportunityError
 from ai_earn.task_queue import TaskQueue, QueueError
 from ai_earn.task_workflows import TaskWorkflows
-from ai_earn.task_associations import TaskAssociations, AssociationError
+from ai_earn.task_associations import TaskAssociations
 from ai_earn.invoices import Invoices
 from ai_earn.ledger import Ledger
 
@@ -213,7 +213,7 @@ with patch("ai_earn.auth.PASSWORD_ITERATIONS", 1000):
     except SystemExit:
         pass
 """
-        result = subprocess.run([sys.executable, "-c", code], capture_output=True, timeout=10)
+        subprocess.run([sys.executable, "-c", code], capture_output=True, timeout=10)
         # After subprocess, state should not contain badid
         with self.state.transaction() as conn:
             row = conn.execute("SELECT 1 FROM task_queue WHERE id='badid1234567890123456789012345678'").fetchone()

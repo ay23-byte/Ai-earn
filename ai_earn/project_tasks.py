@@ -9,10 +9,9 @@ retry policy, cancellation strategy.
 """
 from __future__ import annotations
 
-import hashlib
+import builtins
 import hmac
 import json
-import re
 import secrets
 import sqlite3
 
@@ -280,7 +279,7 @@ class ProjectTasks:
             view["execution_log_count"] = log_cnt
             return view
 
-    def list(self, token: str, *, after_id: str | None = None, limit: int = 20, status: str | None = None, priority: int | None = None, opportunity_id: str | None = None, parent_task_id: str | None = None) -> list[dict]:
+    def list(self, token: str, *, after_id: str | None = None, limit: int = 20, status: str | None = None, priority: int | None = None, opportunity_id: str | None = None, parent_task_id: str | None = None) -> builtins.list[dict]:
         cursor = "" if after_id is None else _input(_record_id, after_id)
         if type(limit) is not int or not 1 <= limit <= 100:
             raise ProjectTaskError("Invalid page size.")
@@ -587,7 +586,7 @@ class ProjectTasks:
             conn.execute("INSERT INTO task_execution_logs(id, owner_id, task_id, message, created_at) VALUES(?,?,?,?,?)", (log_id, owner, row["task_id"], f"Dependency removed {did[:8]}", now))
             return did
 
-    def list_dependencies(self, token: str, task_id: str) -> list[dict]:
+    def list_dependencies(self, token: str, task_id: str) -> builtins.list[dict]:
         tid = _input(_record_id, task_id)
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, _now):
             _version(conn)
@@ -618,7 +617,7 @@ class ProjectTasks:
             conn.execute("INSERT INTO state_operations(owner_id, operation_key, request_hash, resource_type, resource_id) VALUES(?,?,?,?,?)", (owner, key, digest, "task_execution_log", ident))
             return ident
 
-    def list_logs(self, token: str, task_id: str, *, limit: int = 50) -> list[dict]:
+    def list_logs(self, token: str, task_id: str, *, limit: int = 50) -> builtins.list[dict]:
         tid = _input(_record_id, task_id)
         if type(limit) is not int or not 1 <= limit <= 100:
             raise ProjectTaskError("Invalid page size.")

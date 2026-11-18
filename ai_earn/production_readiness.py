@@ -25,13 +25,9 @@ explicitly updated. This file does NOT flip production_ready by itself.
 
 from __future__ import annotations
 
-import hashlib
-import hmac
-import json
 import os
 import re
 import sqlite3
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -192,7 +188,7 @@ def check_webhook_verification() -> ItemResult:
                 return ItemResult("webhook_verification", "Complete webhook verification tests.", False, f"Razorpay authorized failed: {res}", evidence)
             # tamper should fail
             tampered = body[:-2] + b"00"
-            sig_tampered = _hmac.new(secret_rzp, tampered, _hl.sha256).hexdigest()
+            _hmac.new(secret_rzp, tampered, _hl.sha256).hexdigest()
             # alter body but use old sig => should fail signature
             try:
                 rzp.handle_webhook(alice, tampered, sig, operation_key="wh-op-tamper")
@@ -256,7 +252,10 @@ def check_reconciliation() -> ItemResult:
     """Create lifecycle then reconcile checks audit replay and amount binding."""
     evidence = ["ai_earn/payment_providers.py"]
     try:
-        import tempfile, json, hashlib, hmac
+        import tempfile
+        import json
+        import hashlib
+        import hmac
         from ai_earn.payment_providers import PaymentProviders, ProviderConfig
 
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
@@ -267,7 +266,7 @@ def check_reconciliation() -> ItemResult:
             pp = PaymentProviders(auth, state, cfg)
             oid = pp.create_order(alice, 75000, operation_key="rec-1")
             info = pp.get(alice, oid)
-            cur = int(auth.clock())
+            int(auth.clock())
             for evt, op in [("authorized", "rec-wh-1"), ("captured", "rec-wh-2"), ("settled", "rec-wh-3")]:
                 bd = {
                     "event_id": f"evt_rec_{evt}",
@@ -298,7 +297,10 @@ def check_reconciliation() -> ItemResult:
 def check_duplicate_handling() -> ItemResult:
     evidence = ["ai_earn/payment_providers.py"]
     try:
-        import tempfile, json, hashlib, hmac
+        import tempfile
+        import json
+        import hashlib
+        import hmac
         from ai_earn.payment_providers import PaymentProviders, ProviderConfig
 
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
@@ -367,7 +369,10 @@ def check_duplicate_handling() -> ItemResult:
 def check_refunds() -> ItemResult:
     evidence = ["ai_earn/payment_providers.py"]
     try:
-        import tempfile, json, hashlib, hmac
+        import tempfile
+        import json
+        import hashlib
+        import hmac
         from ai_earn.payment_providers import PaymentProviders, ProviderConfig
 
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
@@ -379,7 +384,7 @@ def check_refunds() -> ItemResult:
             # captured -> refunded allowed
             oid = pp.create_order(alice, 90000, operation_key="ref-1")
             info = pp.get(alice, oid)
-            cur = int(auth.clock())
+            int(auth.clock())
             for evt, op in [("authorized", "ref-wh-1"), ("captured", "ref-wh-2")]:
                 bd = {"event_id": f"evt_ref_{evt}", "event_type": evt, "provider_order_id": info["provider_order_id"], "amount_paise": 90000, "currency": "INR", "occurred_at": int(auth.clock())}
                 body = json.dumps(bd, separators=(",", ":")).encode()
@@ -416,7 +421,10 @@ def check_refunds() -> ItemResult:
 def check_failed_payments() -> ItemResult:
     evidence = ["ai_earn/payment_providers.py"]
     try:
-        import tempfile, json, hashlib, hmac
+        import tempfile
+        import json
+        import hashlib
+        import hmac
         from ai_earn.payment_providers import PaymentProviders, ProviderConfig
 
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
@@ -471,7 +479,10 @@ def check_failed_payments() -> ItemResult:
 def check_settlement_records() -> ItemResult:
     evidence = ["ai_earn/payment_providers.py"]
     try:
-        import tempfile, json, hashlib, hmac
+        import tempfile
+        import json
+        import hashlib
+        import hmac
         from ai_earn.payment_providers import PaymentProviders, ProviderConfig
 
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
@@ -515,7 +526,10 @@ def check_settlement_records() -> ItemResult:
 def check_audit_trails() -> ItemResult:
     evidence = ["ai_earn/state_audit.py", "ai_earn/state_storage.py", "ai_earn/state_authorization.py"]
     try:
-        import tempfile, json, hashlib, hmac
+        import tempfile
+        import json
+        import hashlib
+        import hmac
         from ai_earn.payment_providers import PaymentProviders, ProviderConfig
 
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
@@ -621,7 +635,7 @@ def check_error_recovery() -> ItemResult:
             candidate = ss.StateStorage(new_state)
             comparer = StateRecoveryComparison(auth, state, candidate)
             try:
-                result = comparer.compare_snapshot(alice)
+                comparer.compare_snapshot(alice)
             except Exception as exc:
                 return ItemResult("error_recovery", "Verify error recovery.", False, f"compare_snapshot failed: {exc}", evidence)
             # check doctor classify still ok
@@ -636,7 +650,7 @@ def check_error_recovery() -> ItemResult:
                 return ItemResult("error_recovery", "Verify error recovery.", False, f"integrity_check not ok: {integrity}", evidence)
             # identical copy should have no table differences
             # result["tables"] values are diffs; if not empty, report detail but still pass if comparison succeeded
-            return ItemResult("error_recovery", "Verify error recovery.", True, f"Error recovery verified: snapshot comparison ok, doctor ok, integrity ok.", evidence)
+            return ItemResult("error_recovery", "Verify error recovery.", True, "Error recovery verified: snapshot comparison ok, doctor ok, integrity ok.", evidence)
     except Exception as exc:
         return ItemResult("error_recovery", "Verify error recovery.", False, f"Error recovery failed: {exc}", evidence)
 
@@ -668,7 +682,10 @@ def check_configuration_separation() -> ItemResult:
         except Exception as exc:
             return ItemResult("configuration_separation", "Verify configuration separation.", False, f"Sandbox configs should be allowed: {exc}", evidence)
         # check provider/mode isolation via webhook cross-access
-        import tempfile, json, hashlib, hmac
+        import tempfile
+        import json
+        import hashlib
+        import hmac
 
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
             tmp = Path(td)

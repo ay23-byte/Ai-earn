@@ -17,12 +17,6 @@ from typing import Iterator
 from .auth_storage import AuthStorage, StorageError, _windows_auth_verified
 
 
-APPLICATION_ID = 0x41494533  # AIE3, distinct from the auth-only database.
-SCHEMA_VERSION = 1  # New files still bootstrap as version 1; upgrades are explicit.
-LATEST_SCHEMA_VERSION = 29
-SUPPORTED_STATE_VERSIONS = frozenset(range(1, LATEST_SCHEMA_VERSION + 1))
-
-
 from .migrations import v02 as _migration_v2
 from .migrations.v02 import _V2_SCHEMA
 from .migrations import v03 as _migration_v3
@@ -79,12 +73,6 @@ from .migrations.v23 import (
 )
 from .migrations import v24 as _migration_v24
 from .migrations.v24 import (
-    _V24_LEASE_COL,
-    _V24_UNTIL_COL,
-    _V24_ATTEMPTS_COL,
-    _V24_MAX_ATTEMPTS_COL,
-    _V24_BACKOFF_COL,
-    _V24_AVAILABLE_COL,
     _V24_SCHEMA,
 )
 from .migrations import v25 as _migration_v25
@@ -172,6 +160,11 @@ _apply_v26 = _migration_v26.apply
 _apply_v27 = _migration_v27.apply
 _apply_v28 = _migration_v28.apply
 _apply_v29 = _migration_v29.apply
+
+APPLICATION_ID = 0x41494533  # AIE3, distinct from the auth-only database.
+SCHEMA_VERSION = 1  # New files still bootstrap as version 1; upgrades are explicit.
+LATEST_SCHEMA_VERSION = 29
+SUPPORTED_STATE_VERSIONS = frozenset(range(1, LATEST_SCHEMA_VERSION + 1))
 
 
 class StateStorageError(Exception):
@@ -1235,7 +1228,7 @@ _MULTI_STEP_HISTORIES = (
         ("pending_review", "workflow_rejected"): "in_progress",
         ("pending_review", "workflow_approved"): "completed",
     }),
-    (13, "financial_assertions", "financial_assertion", {
+    (13, "financial_assertions", "financial_assertion", {  # type: ignore[misc]
         (None, "financial_assertion_created"): "potential",
         ("potential", "financial_assertion_bound"): "potential",
         ("potential", "financial_assertion_quote_asserted"): "quote_asserted",
@@ -1461,7 +1454,7 @@ def _check_sandbox_payment_integrity(conn: sqlite3.Connection, owner=None, ident
         expected = ["sandbox_payment_created", "sandbox_payment_bound"]
         state = "sandbox_awaiting"
         for index, (event_id, kind, seq, digest) in enumerate(events, 1):
-            state = _SANDBOX_TRANSITIONS.get((state, kind))
+            state = _SANDBOX_TRANSITIONS.get((state, kind))  # type: ignore[assignment]
             if state is None or seq != index:
                 raise StateStorageError("Synthetic payment event history is inconsistent.")
             request = _financial_assertion_request("sandbox_payment_event", [payment_id, event_id, digest.hex()])

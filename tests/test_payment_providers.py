@@ -36,6 +36,7 @@ class ProviderSandboxTests(unittest.TestCase):
         self.directory = Path(self.tmp.name) / "private"
         if os.name == "nt":
             from ai_earn.windows_security import create_private_directory
+
             create_private_directory(self.directory)
         else:
             self.directory.mkdir(mode=0o700)
@@ -51,12 +52,18 @@ class ProviderSandboxTests(unittest.TestCase):
         self.bob_token = self.auth.login("bob", "disposable test password")
         state = StateStorage(self.state_path, create=True, confirmed=True)
         for v in range(2, 22):
-            getattr(state, f"migrate_to_v{v}")(self.directory / f"before-v{v}.sqlite3", confirmed=True)
+            getattr(state, f"migrate_to_v{v}")(
+                self.directory / f"before-v{v}.sqlite3", confirmed=True
+            )
         self.state = StateStorage(self.state_path)
         self.secret_rzp = b"rzp-test-secret-32bytes-long-enough-1234"
         self.secret_stripe = b"stripe-test-secret-32bytes-long-1234xx"
-        self.cfg_rzp = ProviderConfig(provider="razorpay", mode="sandbox", webhook_secret=self.secret_rzp)
-        self.cfg_stripe = ProviderConfig(provider="stripe", mode="sandbox", webhook_secret=self.secret_stripe)
+        self.cfg_rzp = ProviderConfig(
+            provider="razorpay", mode="sandbox", webhook_secret=self.secret_rzp
+        )
+        self.cfg_stripe = ProviderConfig(
+            provider="stripe", mode="sandbox", webhook_secret=self.secret_stripe
+        )
         self.rzp = PaymentProviders(self.auth, self.state, self.cfg_rzp)
         self.stripe = PaymentProviders(self.auth, self.state, self.cfg_stripe)
 
@@ -98,14 +105,21 @@ class ProviderSandboxTests(unittest.TestCase):
     def test_webhook_razorpay_lifecycle(self):
         oid, pp, cfg = self._order(op="k1")
         info = pp.get(self.alice_token, oid)
-        now = info["created_at"] + 10
+        info["created_at"] + 10
         # Need to use actual now from auth clock? But body occurred_at must be within 300 of webhook time.
         # Our webhook handler uses auth.clock() as now, which is current time. We can patch auth.clock.
         # Use info created_at as base; we will trigger webhook shortly after.
         # For this test, occurred_at = now (handler's now) so must be close. Use current time.
         # Get current time via auth.clock()
         cur = int(self.auth.clock())
-        body_dict = {"event_id": "evt_1", "event_type": "authorized", "provider_order_id": info["provider_order_id"], "amount_paise": 50000, "currency": "INR", "occurred_at": cur}
+        body_dict = {
+            "event_id": "evt_1",
+            "event_type": "authorized",
+            "provider_order_id": info["provider_order_id"],
+            "amount_paise": 50000,
+            "currency": "INR",
+            "occurred_at": cur,
+        }
         body = json.dumps(body_dict, separators=(",", ":")).encode()
         sig = _razorpay_signature(self.secret_rzp, body)
         res = pp.handle_webhook(self.alice_token, body, sig, operation_key="wh1")
@@ -113,24 +127,45 @@ class ProviderSandboxTests(unittest.TestCase):
         self.assertEqual(pp.get(self.alice_token, oid)["status"], "authorized")
         # captured
         cur2 = int(self.auth.clock())
-        body_dict2 = {"event_id": "evt_2", "event_type": "captured", "provider_order_id": info["provider_order_id"], "amount_paise": 50000, "currency": "INR", "occurred_at": cur2}
+        body_dict2 = {
+            "event_id": "evt_2",
+            "event_type": "captured",
+            "provider_order_id": info["provider_order_id"],
+            "amount_paise": 50000,
+            "currency": "INR",
+            "occurred_at": cur2,
+        }
         body2 = json.dumps(body_dict2, separators=(",", ":")).encode()
         sig2 = _razorpay_signature(self.secret_rzp, body2)
         res2 = pp.handle_webhook(self.alice_token, body2, sig2, operation_key="wh2")
         self.assertEqual(res2["new_status"], "captured")
         # settled
         cur3 = int(self.auth.clock())
-        body_dict3 = {"event_id": "evt_3", "event_type": "settled", "provider_order_id": info["provider_order_id"], "amount_paise": 50000, "currency": "INR", "occurred_at": cur3}
+        body_dict3 = {
+            "event_id": "evt_3",
+            "event_type": "settled",
+            "provider_order_id": info["provider_order_id"],
+            "amount_paise": 50000,
+            "currency": "INR",
+            "occurred_at": cur3,
+        }
         body3 = json.dumps(body_dict3, separators=(",", ":")).encode()
         sig3 = _razorpay_signature(self.secret_rzp, body3)
-        res3 = pp.handle_webhook(self.alice_token, body3, sig3, operation_key="wh3")
+        pp.handle_webhook(self.alice_token, body3, sig3, operation_key="wh3")
         self.assertEqual(pp.get(self.alice_token, oid)["status"], "settled")
 
     def test_webhook_stripe_lifecycle(self):
         oid, pp, _ = self._order("stripe", 70000, "k1")
         info = pp.get(self.alice_token, oid)
         cur = int(self.auth.clock())
-        body_dict = {"event_id": "evt_s1", "event_type": "authorized", "provider_order_id": info["provider_order_id"], "amount_paise": 70000, "currency": "INR", "occurred_at": cur}
+        body_dict = {
+            "event_id": "evt_s1",
+            "event_type": "authorized",
+            "provider_order_id": info["provider_order_id"],
+            "amount_paise": 70000,
+            "currency": "INR",
+            "occurred_at": cur,
+        }
         body = json.dumps(body_dict, separators=(",", ":")).encode()
         sig = _stripe_signature(self.secret_stripe, body, cur)
         res = pp.handle_webhook(self.alice_token, body, sig, operation_key="whs1")
@@ -141,17 +176,31 @@ class ProviderSandboxTests(unittest.TestCase):
         oid, pp, _ = self._order(op="k1")
         info = pp.get(self.alice_token, oid)
         cur = int(self.auth.clock())
-        body_dict = {"event_id": "evt_bad", "event_type": "authorized", "provider_order_id": info["provider_order_id"], "amount_paise": 50000, "currency": "INR", "occurred_at": cur}
+        body_dict = {
+            "event_id": "evt_bad",
+            "event_type": "authorized",
+            "provider_order_id": info["provider_order_id"],
+            "amount_paise": 50000,
+            "currency": "INR",
+            "occurred_at": cur,
+        }
         body = json.dumps(body_dict, separators=(",", ":")).encode()
-        bad_sig = "0"*64
+        bad_sig = "0" * 64
         with self.assertRaises(ProviderError):
             pp.handle_webhook(self.alice_token, body, bad_sig, operation_key="wh1")
         # stripe bad
         oid2, pp2, _ = self._order("stripe", 50000, "k2")
         info2 = pp2.get(self.alice_token, oid2)
-        body_dict2 = {"event_id": "evt_bad2", "event_type": "authorized", "provider_order_id": info2["provider_order_id"], "amount_paise": 50000, "currency": "INR", "occurred_at": cur}
+        body_dict2 = {
+            "event_id": "evt_bad2",
+            "event_type": "authorized",
+            "provider_order_id": info2["provider_order_id"],
+            "amount_paise": 50000,
+            "currency": "INR",
+            "occurred_at": cur,
+        }
         body2 = json.dumps(body_dict2, separators=(",", ":")).encode()
-        bad_stripe = "t=123,v1=" + "0"*64
+        bad_stripe = "t=123,v1=" + "0" * 64
         with self.assertRaises(ProviderError):
             pp2.handle_webhook(self.alice_token, body2, bad_stripe, operation_key="whs2")
 
@@ -159,7 +208,14 @@ class ProviderSandboxTests(unittest.TestCase):
         oid, pp, _ = self._order(op="k1")
         info = pp.get(self.alice_token, oid)
         cur = int(self.auth.clock())
-        body_dict = {"event_id": "evt_amt", "event_type": "authorized", "provider_order_id": info["provider_order_id"], "amount_paise": 1, "currency": "INR", "occurred_at": cur}
+        body_dict = {
+            "event_id": "evt_amt",
+            "event_type": "authorized",
+            "provider_order_id": info["provider_order_id"],
+            "amount_paise": 1,
+            "currency": "INR",
+            "occurred_at": cur,
+        }
         body = json.dumps(body_dict, separators=(",", ":")).encode()
         sig = _razorpay_signature(self.secret_rzp, body)
         with self.assertRaises(ProviderError):
@@ -170,7 +226,14 @@ class ProviderSandboxTests(unittest.TestCase):
         info = pp.get(self.alice_token, oid)
         cur = int(self.auth.clock())
         # try captured directly without authorized should fail (created -> captured not allowed)
-        body_dict = {"event_id": "evt_invalid", "event_type": "captured", "provider_order_id": info["provider_order_id"], "amount_paise": 50000, "currency": "INR", "occurred_at": cur}
+        body_dict = {
+            "event_id": "evt_invalid",
+            "event_type": "captured",
+            "provider_order_id": info["provider_order_id"],
+            "amount_paise": 50000,
+            "currency": "INR",
+            "occurred_at": cur,
+        }
         body = json.dumps(body_dict, separators=(",", ":")).encode()
         sig = _razorpay_signature(self.secret_rzp, body)
         with self.assertRaises(ProviderError):
@@ -187,14 +250,28 @@ class ProviderSandboxTests(unittest.TestCase):
         # webhook idempotency same key same body
         info = pp.get(self.alice_token, oid)
         cur = int(self.auth.clock())
-        body_dict = {"event_id": "evt_idemp", "event_type": "authorized", "provider_order_id": info["provider_order_id"], "amount_paise": 50000, "currency": "INR", "occurred_at": cur}
+        body_dict = {
+            "event_id": "evt_idemp",
+            "event_type": "authorized",
+            "provider_order_id": info["provider_order_id"],
+            "amount_paise": 50000,
+            "currency": "INR",
+            "occurred_at": cur,
+        }
         body = json.dumps(body_dict, separators=(",", ":")).encode()
         sig = _razorpay_signature(self.secret_rzp, body)
         res1 = pp.handle_webhook(self.alice_token, body, sig, operation_key="wh_idemp")
         res2 = pp.handle_webhook(self.alice_token, body, sig, operation_key="wh_idemp")
         self.assertEqual(res1, res2)
         # same event_id different body should fail
-        body_dict2 = {"event_id": "evt_idemp", "event_type": "captured", "provider_order_id": info["provider_order_id"], "amount_paise": 50000, "currency": "INR", "occurred_at": cur}
+        body_dict2 = {
+            "event_id": "evt_idemp",
+            "event_type": "captured",
+            "provider_order_id": info["provider_order_id"],
+            "amount_paise": 50000,
+            "currency": "INR",
+            "occurred_at": cur,
+        }
         body2 = json.dumps(body_dict2, separators=(",", ":")).encode()
         sig2 = _razorpay_signature(self.secret_rzp, body2)
         with self.assertRaises(ProviderError):
@@ -206,15 +283,19 @@ class ProviderSandboxTests(unittest.TestCase):
     def test_concurrent_same_key(self):
         results = []
         errors = []
+
         def attempt():
             try:
                 oid = self.rzp.create_order(self.alice_token, 0, operation_key="concurrent")
                 results.append(oid)
             except Exception as e:
                 errors.append(e)
+
         threads = [threading.Thread(target=attempt) for _ in range(5)]
-        for t in threads: t.start()
-        for t in threads: t.join()
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
         self.assertEqual(len(results), 5)
         self.assertEqual(len(set(results)), 1)
         self.assertEqual(len(errors), 0)
@@ -227,17 +308,30 @@ class ProviderSandboxTests(unittest.TestCase):
 
     def test_isolation(self):
         oid_alice = self.rzp.create_order(self.alice_token, 0, operation_key="k1")
-        oid_bob = PaymentProviders(self.auth, self.state, self.cfg_rzp).create_order(self.bob_token, 0, operation_key="k1")
+        oid_bob = PaymentProviders(self.auth, self.state, self.cfg_rzp).create_order(
+            self.bob_token, 0, operation_key="k1"
+        )
         self.assertNotEqual(oid_alice, oid_bob)
         self.assertEqual(len(self.rzp.list(self.alice_token)), 1)
-        self.assertEqual(len(PaymentProviders(self.auth, self.state, self.cfg_rzp).list(self.bob_token)), 1)
+        self.assertEqual(
+            len(PaymentProviders(self.auth, self.state, self.cfg_rzp).list(self.bob_token)), 1
+        )
         info = self.rzp.get(self.alice_token, oid_alice)
         cur = int(self.auth.clock())
-        body_dict = {"event_id": "evt_iso", "event_type": "authorized", "provider_order_id": info["provider_order_id"], "amount_paise": 0, "currency": "INR", "occurred_at": cur}
+        body_dict = {
+            "event_id": "evt_iso",
+            "event_type": "authorized",
+            "provider_order_id": info["provider_order_id"],
+            "amount_paise": 0,
+            "currency": "INR",
+            "occurred_at": cur,
+        }
         body = json.dumps(body_dict, separators=(",", ":")).encode()
         sig = _razorpay_signature(self.secret_rzp, body)
         with self.assertRaises(AccessDenied):
-            PaymentProviders(self.auth, self.state, self.cfg_rzp).handle_webhook(self.bob_token, body, sig, operation_key="wh_iso")
+            PaymentProviders(self.auth, self.state, self.cfg_rzp).handle_webhook(
+                self.bob_token, body, sig, operation_key="wh_iso"
+            )
 
     def test_invalid_inputs(self):
         with self.assertRaises(ProviderError):
@@ -259,7 +353,14 @@ class ProviderSandboxTests(unittest.TestCase):
         oid, pp, _ = self._order(op="k1")
         info = pp.get(self.alice_token, oid)
         cur = int(self.auth.clock())
-        body_dict = {"event_id": "evt_tamper", "event_type": "authorized", "provider_order_id": info["provider_order_id"], "amount_paise": 50000, "currency": "INR", "occurred_at": cur}
+        body_dict = {
+            "event_id": "evt_tamper",
+            "event_type": "authorized",
+            "provider_order_id": info["provider_order_id"],
+            "amount_paise": 50000,
+            "currency": "INR",
+            "occurred_at": cur,
+        }
         body = json.dumps(body_dict, separators=(",", ":")).encode()
         sig = _razorpay_signature(self.secret_rzp, body)
         pp.handle_webhook(self.alice_token, body, sig, operation_key="wh1")
@@ -273,7 +374,14 @@ class ProviderSandboxTests(unittest.TestCase):
         oid, pp, _ = self._order(op="k1")
         info = pp.get(self.alice_token, oid)
         cur = int(self.auth.clock())
-        body_dict = {"event_id": "evt_dash", "event_type": "authorized", "provider_order_id": info["provider_order_id"], "amount_paise": 50000, "currency": "INR", "occurred_at": cur}
+        body_dict = {
+            "event_id": "evt_dash",
+            "event_type": "authorized",
+            "provider_order_id": info["provider_order_id"],
+            "amount_paise": 50000,
+            "currency": "INR",
+            "occurred_at": cur,
+        }
         body = json.dumps(body_dict, separators=(",", ":")).encode()
         sig = _razorpay_signature(self.secret_rzp, body)
         pp.handle_webhook(self.alice_token, body, sig, operation_key="wh1")
@@ -292,7 +400,7 @@ class ProviderSandboxTests(unittest.TestCase):
 
     def test_reconcile(self):
         oid, pp, _ = self._order(op="k1")
-        info = pp.get(self.alice_token, oid)
+        pp.get(self.alice_token, oid)
         rec = pp.reconcile(self.alice_token, oid)
         self.assertEqual(rec["order"]["id"], oid)
         self.assertEqual(rec["event_count"], 0)
@@ -303,6 +411,7 @@ class ProviderSandboxTests(unittest.TestCase):
         dir2 = Path(tmp2.name) / "priv"
         if os.name == "nt":
             from ai_earn.windows_security import create_private_directory
+
             create_private_directory(dir2)
         else:
             dir2.mkdir(mode=0o700)
@@ -330,6 +439,7 @@ class ProviderSandboxTests(unittest.TestCase):
         dir2 = Path(tmp2.name) / "priv"
         if os.name == "nt":
             from ai_earn.windows_security import create_private_directory
+
             create_private_directory(dir2)
         else:
             dir2.mkdir(mode=0o700)

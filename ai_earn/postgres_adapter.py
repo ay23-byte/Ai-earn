@@ -1,20 +1,23 @@
-"""Postgres Row-Level Security design PoC (P5-1) — not bundled, not enabled.
+"""Postgres Row-Level Security adapter (P5-1) — optional, off by default.
 
-Design: one Postgres database, every owner-scoped table carries ``owner_id``,
-and RLS policies restrict rows to ``current_setting('app.owner_id')`` set per
-transaction by trusted server code. SQLite remains the shipped storage; this
-module only renders the DDL/PoC contract and refuses to connect unless a
-``psycopg`` driver is separately installed and a DSN is explicitly provided.
+One Postgres database, every owner-scoped table carries ``owner_id``, and
+RLS policies restrict rows to ``current_setting('app.owner_id')`` set per
+transaction by trusted server code. SQLite remains the default shipped
+storage; Postgres activates only when ``psycopg`` is installed (see
+``requirements-postgres.txt``) and ``AI_EARN_POSTGRES_DSN`` is explicitly
+set. The adapter never falls back silently and never stores credentials.
 """
 
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
 
 OWNER_SETTING = "app.owner_id"
 
 RLS_POLICY_DDL = """\
 ALTER TABLE {table} ENABLE ROW LEVEL SECURITY;
+ALTER TABLE {table} FORCE ROW LEVEL SECURITY;
 CREATE POLICY owner_isolation ON {table}
   USING (owner_id = current_setting('app.owner_id'))
   WITH CHECK (owner_id = current_setting('app.owner_id'));
@@ -52,3 +55,61 @@ def connect(dsn: str | None = None):  # pragma: no cover - optional dependency
     except ImportError as exc:
         raise PostgresAdapterUnavailable("psycopg is not installed; Postgres PoC is unavailable.") from exc
     return psycopg.connect(dsn)
+
+
+
+
+class PostgresAdapter:
+    """Owner-scoped Postgres adapter enforcing RLS session binding.
+
+    Wraps a psycopg connection factory. Every transaction first binds
+    ``app.owner_id`` (transaction-local), so RLS — not application code —
+    is the final isolation boundary.
+    """
+
+    def __init__(self, *, dsn: str | None = None, connection_factory=None):
+        self._dsn = dsn or os.environ.get("AI_EARN_POSTGRES_DSN", "")
+        self._factory = connection_factory
+
+    def _connect(self):
+        if self._factory is not None:
+            return self._factory(self._dsn)
+        return connect(self._dsn)
+
+    @contextmanager
+    def transaction(self, owner_id: str):
+        """Yield a cursor inside a transaction bound to ``owner_id``."""
+        sql, params = set_owner_sql(owner_id)
+        conn = self._connect()
+        try:
+            with conn.transaction():
+                with conn.cursor() as cur:
+                    cur.execute(sql, params)
+                    yield cur
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def apply_rls(self, owner_id: str, tables: list[str]) -> None:
+        """Enable RLS + owner-isolation policy on each table (idempotent-ish).
+
+        Intended for migrations run by a privileged role once; policies use
+        DROP IF EXISTS so re-runs are safe.
+        """
+        ddl = rls_ddl_for(tables)
+        with self.transaction(owner_id) as cur:
+            for table in tables:
+                cur.execute(f"DROP POLICY IF EXISTS owner_isolation ON {table}")
+            for statement in ddl.split(";"):
+                if statement.strip():
+                    cur.execute(statement)
+
+    def healthcheck(self, owner_id: str) -> bool:
+        """Return True when a transaction can bind the owner and read the setting."""
+        with self.transaction(owner_id) as cur:
+            cur.execute("SELECT current_setting('app.owner_id')")
+            row = cur.fetchone()
+            return bool(row) and row[0] == owner_id
