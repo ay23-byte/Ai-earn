@@ -8,10 +8,10 @@ in-memory items but still go through the same checks.
 import time
 from typing import Any, Callable
 
-from .base import ConnectorError, PermissionError, _owner_id
+from .base import ConnectorError, _owner_id
 from .throttle import Throttle
 from .retry import RetryPolicy
-from .errors import normalize_error, is_transient
+from .errors import normalize_error
 from .auth import redact_config
 
 class BaseAPIClient:
@@ -44,6 +44,19 @@ class BaseAPIClient:
         if event not in allowed:
             raise ConnectorError("Invalid log event.")
         self._log.append({"event": event, "detail": safe, "at": time.time()})
+
+    def send(self, *, owner_id: str, operation: str, params: dict | None = None, handler: Callable[..., Any] | None = None, approved: bool = False) -> Any:
+        """Consequential side-effect fence (P3-2).
+
+        ``send`` performs an externally-visible action, so it refuses to run
+        without an explicit human approval signal (``approved=True``, normally
+        obtained via ``ai_assistant.ApprovalQueue``). Reads use ``request``.
+        """
+        _owner_id(owner_id)
+        if approved is not True:
+            self._log_event("error", {"operation": operation, "error": "approval required"})
+            raise ConnectorError("Approval required before consequential send.")
+        return self.request(owner_id=owner_id, operation=operation, params=params, handler=handler)
 
     def request(self, *, owner_id: str, operation: str, params: dict | None = None, handler: Callable[..., Any] | None = None) -> Any:
         """Execute handler with throttling, retry, error normalization, permission checks.

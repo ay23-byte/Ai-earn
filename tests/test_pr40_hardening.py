@@ -39,7 +39,7 @@ def _disposable_pair(tmp_root: Path):
         # capture owner_ids via _authorized_transaction
         from ai_earn.state_authorization import _authorized_transaction
         state = StateStorage(state_db, create=True, confirmed=True)
-        for v in range(2, 29):
+        for v in range(2, 30):
             m = getattr(state, f"migrate_to_v{v}", None)
             if m:
                 m(private / f"before-v{v}.sqlite3", confirmed=True)
@@ -165,7 +165,7 @@ class AccountDeletionHardeningTests(unittest.TestCase):
         other_db = other_private / "other.sqlite3"
         from ai_earn.state_storage import StateStorage
         StateStorage(other_db, create=True, confirmed=True)
-        for v in range(2, 29):
+        for v in range(2, 30):
             m = getattr(StateStorage(other_db, create=False), f"migrate_to_v{v}", None)
             if m:
                 m(other_private / f"before-v{v}.sqlite3", confirmed=True)

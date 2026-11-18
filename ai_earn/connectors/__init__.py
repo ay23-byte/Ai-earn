@@ -10,7 +10,7 @@ tokens, manual workflow preserved.
 from .base import Connector, ConnectorError, AuthError, ThrottleError, PermissionError
 from .throttle import Throttle
 from .retry import RetryPolicy
-from .auth import validate_api_key, redact_config
+from .auth import OAuthFlow, validate_api_key, redact_config
 from .normalize import normalize_gmail, normalize_drive, normalize_github
 from .status import ConnectionState, check_connection_status
 from .errors import normalize_error, is_transient
@@ -38,6 +38,7 @@ __all__ = [
     "PermissionError",
     "Throttle",
     "RetryPolicy",
+    "OAuthFlow",
     "validate_api_key",
     "redact_config",
     "normalize_gmail",

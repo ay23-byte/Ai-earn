@@ -143,7 +143,7 @@ def _disposable_state(tmp: Path):
         alice = auth.login("alice", "disposable test password")
         bob = auth.login("bob", "disposable test password")
     state = ss.StateStorage(state_path, create=True, confirmed=True)
-    for v in range(2, 29):
+    for v in range(2, ss.LATEST_SCHEMA_VERSION + 1):
         # migrate_to_v28 exists; range up to 28 inclusive
         method = getattr(state, f"migrate_to_v{v}", None)
         if method is not None:

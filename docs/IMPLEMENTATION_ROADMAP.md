@@ -58,9 +58,9 @@ P0 (Critical) → P1 (Core) → P2 (Business) ─┬─→ P3 (AI) ─┐
 - **Acceptance:** `unittest discover` still 1014/17, `tracker open` manual test unchanged.
 
 ### P1-2 Split `state_storage` migrations
-- **Files:** `ai_earn/state_storage.py` (2752 LOC) → `ai_earn/migrations/v02.py … v28.py` + `state_storage.py` loader
+- **Files:** `ai_earn/state_storage.py` (2752 LOC) → `ai_earn/migrations/v02.py … v29.py` + `state_storage.py` loader
 - **Task:** Each `migrate_to_vN` in own file with `_V*_SCHEMA`; `MIGRATIONS` registry. Keep `APPLICATION_ID`/`LATEST`.
-- **Acceptance:** Fresh `StateStorage(create=True)` → v28 + 27 backups; `migrate_to_v28` still holds lock + backup.
+- **Acceptance:** Fresh `StateStorage(create=True)` → v29 + 27 backups; `migrate_to_v29` still holds lock + backup.
 
 ### P1-3 Unify finance pipeline
 - **Files:** `ai_earn/finance.py` (legacy) vs `ledger.py`/`revenue_analytics.py`
@@ -162,10 +162,19 @@ P0 (Critical) → P1 (Core) → P2 (Business) ─┬─→ P3 (AI) ─┐
 
 - **P0-1 through P0-5:** completed in prior reviewed work on the active PR lineage (central readiness contract, fail-closed recovery/setup, backup/security hardening, stale-backup controls, display-name separation). See merged commits and the audit trail for exact implementation details.
 - **P1-1:** completed. `ai_earn/tracker_cli.py` is a compatibility shim; the 1–82 tracker menu is split among focused modules under `ai_earn/tracker/`.
-- **P1-2:** completed. Schema DDL/indexes and apply operations for upgrades v2–v28 are now in immutable `ai_earn/migrations/vNN.py` modules. The `StateStorage` validation/locking/backup boundary is unchanged; `_apply_vN` aliases remain for controlled fault-injection compatibility. Added `tests/test_migration_modules.py` and `docs/STATE_MIGRATIONS.md`. Full verification: 1,016 tests passed, 17 skipped; compileall, secret scan, and diff whitespace checks passed.
-- **P1-3:** partially completed. Added `ai_earn/financial_math.py` as the shared exact-integer-paise net-cash calculation used by `finance`, `ledger`, `revenue_analytics`, and `dashboard_metrics`; invalid float/bool/negative components are rejected. `finance.py` is **not** deprecated into a `ledger.py` wrapper: it contains distinct v28 tax, billing, payment, expense, refund, fee, and reporting APIs, so redirecting it would break real functionality. The legacy API-wrapper portion and a broader reporting reconciliation remain open. Full verification after this change: 1,020 tests passed, 17 skipped; compileall and `tools.security_check` passed.
+- **P1-2:** completed. Schema DDL/indexes and apply operations for upgrades v2–v29 are now in immutable `ai_earn/migrations/vNN.py` modules. The `StateStorage` validation/locking/backup boundary is unchanged; `_apply_vN` aliases remain for controlled fault-injection compatibility. Added `tests/test_migration_modules.py` and `docs/STATE_MIGRATIONS.md`. Full verification: 1,016 tests passed, 17 skipped; compileall, secret scan, and diff whitespace checks passed.
+- **P1-3:** partially completed. Added `ai_earn/financial_math.py` as the shared exact-integer-paise net-cash calculation used by `finance`, `ledger`, `revenue_analytics`, and `dashboard_metrics`; invalid float/bool/negative components are rejected. `finance.py` is **not** deprecated into a `ledger.py` wrapper: it contains distinct v29 tax, billing, payment, expense, refund, fee, and reporting APIs, so redirecting it would break real functionality. The legacy API-wrapper portion and a broader reporting reconciliation remain open. Full verification after this change: 1,028 tests passed, 17 skipped; compileall and `tools.security_check` passed.
 - **P1-4:** partially completed. Added pinned dev-only Ruff/Mypy tools, config, and CI checks. Current strict scope covers 29 files in the new immutable migration modules and exact financial arithmetic contract, plus Ruff checks on their tests. Expanding strict Mypy and Ruff to the entire pre-existing codebase is still open; a baseline run found hundreds of unrelated lint diagnostics and existing typing gaps, so those were not hidden with broad ignores.
-- **P2–P5:** still open; no claim of overall completion or production readiness is made.
+- **P2-1:** implemented in schema v29 — `SettlementReconciliation` matches settled payments to local bank-statement CSV rows and verifies only on explicit human confirmation; sandbox settlement alone never verifies.
+- **P2-2:** implemented with mocked transport — PKCE OAuth flow, loopback callback listener, opt-in Drive list (≤10k), Gmail metadata-only search, and GitHub issue search behind `AI_EARN_CONNECTOR_LIVE=1`; real provider-account validation and refresh-token renewal remain open.
+- **P2-3:** implemented — `Proposals.accept_for_request` binds a sent proposal to a matching pending customer request (same owner/service/customer), transitioning both atomically and idempotently.
+- **P2-4:** implemented — invoices now render a real deterministic PDF (stdlib only); stored SHA-256 hash matches the rendered bytes.
+- **P3-1:** implemented in schema v29 — provider config persists with API-key SHA-256 hash only; token usage is metered per owner.
+- **P3-2:** implemented — `BaseAPIClient.send` refuses consequential side effects without explicit approval.
+- **P4:** dashboard snapshot polling is opt-in (`AiEarnSnapshot.poll`, 30s default, "Last updated" indicator); accessibility basics (skip link, aria-live status) are in place. A full axe audit remains a manual browser exercise.
+- **P5-1:** design + DDL PoC in `docs/POSTGRES_RLS.md` / `ai_earn/postgres_adapter.py`; Postgres is not bundled or enabled.
+- **P5-2/P5-3:** secrets remain env-only with production validation; the 11-check readiness drill passes offline on disposable data with `live_blocked: true`.
+- **P5-4:** release gates are the 4-leg CI matrix (all green required); no tag or live enablement is claimed. Production certification and external pentest remain open.
 
 ## Effort & Dependencies
 
