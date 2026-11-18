@@ -34,7 +34,12 @@ def _setup(case: unittest.TestCase):
     tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
     case.addCleanup(tmp.cleanup)
     private = Path(tmp.name) / "priv"
-    private.mkdir(mode=0o700)
+    if os.name == "nt":
+        from ai_earn.windows_security import create_private_directory
+
+        create_private_directory(private)
+    else:
+        private.mkdir(mode=0o700)
     auth_db, state_db = private / "auth.sqlite3", private / "state.sqlite3"
     patcher = patch("ai_earn.auth.PASSWORD_ITERATIONS", 1000)
     patcher.start()
