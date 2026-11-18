@@ -298,7 +298,7 @@ python -m unittest discover -v → 1014 tests, 17 skipped, 0 fail, 271s
 
 - **Legacy finance duplication:** `finance.py` (early manual tracker) vs `ledger.py` (hardened 11-concept) vs `revenue_analytics.py` — overlapping `net` calculations, historical but not removed. Risk: confusion.
 - **Tracker CLI monolith:** `tracker_cli.py` 1974 LOC, 45-item menu, mixed presentation + business logic. Needs extraction to `tracker/` subpackage.
-- **State storage growth:** `state_storage.py` 2752 LOC, 28 migration methods, `_MULTI_STEP_HISTORIES` + `_check_*` functions — hard to review; consider `migrations/` split.
+- **State storage growth (audit snapshot):** At audit time `state_storage.py` was 2752 LOC with inline migration DDL; this finding is addressed by the follow-up split into `ai_earn/migrations/v02.py`…`v28.py`. The current module retains the validation/locking/backup coordinator and compatibility `_apply_vN` aliases. Remaining `_check_*` integrity logic stays centralized. See `docs/STATE_MIGRATIONS.md`.
 - **Health vs status semantics:** Two `production_ready` booleans with different meanings — debt from iterative PRs; centralize in `production_readiness`.
 - **Stub proliferation:** `opportunity_drafts`, `task_plans`, `order_drafts`, `invoice_drafts` are thin wrappers around `state_authorization` — could unify.
 - **No type hints strict:** Many `Any`, no `mypy` gate (`.github/workflows` runs `compileall` only). `docs/TESTING.md` notes `ruff`/`mypy` unavailable.

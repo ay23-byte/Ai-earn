@@ -4,6 +4,7 @@ This service deliberately reports assertions, drafts and payment observations
 separately. No local record in the current schema is evidence of received money.
 It is an internal application service, not an HTTP or public API.
 """
+from .financial_math import net_cash_paise
 from .state_authorization import _authorized_transaction
 from .state_storage import StateStorage
 from .auth import AuthService
@@ -292,7 +293,12 @@ class DashboardMetrics:
                 expenses = ledger_map2["expense"]
                 fees = ledger_map2["fee"]
                 ledger_net = conn.execute("SELECT COALESCE(SUM(CASE WHEN kind='income' THEN amount_paise WHEN kind IN ('expense','refund','fee') THEN -amount_paise ELSE 0 END),0) FROM ledger_entries WHERE owner_id=?", (owner,)).fetchone()[0]
-                net_realized = settled["amount_paise"] - refunds["amount_paise"] - fees["amount_paise"] - expenses["amount_paise"]
+                net_realized = net_cash_paise(
+                    income_paise=settled["amount_paise"],
+                    refunds_paise=refunds["amount_paise"],
+                    fees_paise=fees["amount_paise"],
+                    expenses_paise=expenses["amount_paise"],
+                )
                 # v28 verified finance breakdown
                 payment_initiated_verified = {"count": 0, "amount_paise": 0, "verification": "verified", "currency": "INR"}
                 payment_received_verified_v28 = {"count": 0, "amount_paise": 0, "verification": "verified", "currency": "INR"}
@@ -314,7 +320,17 @@ class DashboardMetrics:
                     expenses_verified = {"count": row[0], "amount_paise": row[1], "verification": "verified", "currency": "INR"}
                     row = conn.execute("SELECT COUNT(*), COALESCE(SUM(amount_paise),0) FROM fee_records WHERE owner_id=? AND verified=1", (owner,)).fetchone()
                     fees_verified = {"count": row[0], "amount_paise": row[1], "verification": "verified", "currency": "INR"}
-                    net_realized_verified = {"amount_paise": payment_settled_verified["amount_paise"] - refunds_verified["amount_paise"] - expenses_verified["amount_paise"] - fees_verified["amount_paise"], "verification": "verified", "currency": "INR", "note": "settled_verified - refunds_verified - expenses_verified - fees_verified"}
+                    net_realized_verified = {
+                        "amount_paise": net_cash_paise(
+                            income_paise=payment_settled_verified["amount_paise"],
+                            refunds_paise=refunds_verified["amount_paise"],
+                            fees_paise=fees_verified["amount_paise"],
+                            expenses_paise=expenses_verified["amount_paise"],
+                        ),
+                        "verification": "verified",
+                        "currency": "INR",
+                        "note": "settled_verified - refunds_verified - expenses_verified - fees_verified",
+                    }
                 # payment_received_verified legacy: if v28, show verified else not_implemented
                 _prv = payment_received_verified_v28 if version >= 28 else {"count": 0, "amount_paise": 0, "verification": "not_implemented"}
                 result["ledger_11"] = {

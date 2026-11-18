@@ -84,3 +84,11 @@ All tables have `CHECK (length(owner_id)=32 AND hex)` except `state_*`, plus `CH
 Disposal: all data is disposable, validated via `python -m unittest discover -v` (983/17, incl. v15 opportunity discovery + managed runner + v16 services/portfolio + v17 products/customers + v18 comms/ledger + v19 followups/CSV + v20 invoices/11-concept + v21 provider sandbox HMAC + v22 AI ToolRegistry/ApprovalQueue + v28 finance tax/billing/payments/expenses v23/v24 tasks v25/v26 workspaces v27 CRM, Linux Python 3.11.2). No customer or payment data, no production use.
 
 See `ARCHITECTURE.md`, `SECURITY_REVIEW.md`, `TESTING.md` for limits, and `PHASE_STATUS.md` for phase gates. Real-data recovery and production hardening are future milestones (M2, M15).
+
+## Migration module layout (current)
+
+The database schema remains at v28. Migration DDL and index declarations, plus each version's apply operation, are maintained in `ai_earn/migrations/v02.py` through `v28.py`; `StateStorage` remains responsible for safe opening, validation, write locking, explicit confirmation, verified pre-migration backups, and rollback. See `STATE_MIGRATIONS.md` for the maintenance and test contract. This refactor does not alter any existing database or migration semantics.
+
+## Financial reporting arithmetic
+
+`ai_earn/financial_math.py` provides the shared `net_cash_paise` calculation for finance, ledger, revenue analytics, and dashboard reporting. It accepts only non-negative exact integer-paise aggregates (never floats or booleans); net results may be negative. The helper performs arithmetic only and does not make a manually entered payment or other record verified. `finance.py` remains a distinct business service module and is not an alias for the append-only `ledger.py` API.

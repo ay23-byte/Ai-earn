@@ -15,6 +15,7 @@ import sqlite3
 from typing import Dict, Any
 
 from .auth import AuthService
+from .financial_math import net_cash_paise
 from .state_authorization import _authorized_transaction
 from .state_storage import StateStorage, StateStorageError
 
@@ -219,7 +220,12 @@ def _compute_dashboard_inner(conn, owner: str, now: int, version: int, f: int, t
             refunds = conn.execute("SELECT COALESCE(SUM(amount_paise),0) FROM refund_records WHERE owner_id=? AND verified=1 AND created_at BETWEEN ? AND ?", (owner, f, t)).fetchone()[0]
             fees = conn.execute("SELECT COALESCE(SUM(amount_paise),0) FROM fee_records WHERE owner_id=? AND verified=1 AND created_at BETWEEN ? AND ?", (owner, f, t)).fetchone()[0]
             exps = conn.execute("SELECT COALESCE(SUM(amount_paise),0) FROM expense_records WHERE owner_id=? AND verified=1 AND created_at BETWEEN ? AND ?", (owner, f, t)).fetchone()[0]
-            net_realized_amount = settled - refunds - fees - exps
+            net_realized_amount = net_cash_paise(
+                income_paise=settled,
+                refunds_paise=refunds,
+                fees_paise=fees,
+                expenses_paise=exps,
+            )
             net_realized_verified_breakdown = {"settled_verified": settled, "refunds_verified": refunds, "fees_verified": fees, "expenses_verified": exps}
         except Exception:
             net_realized_amount = 0
