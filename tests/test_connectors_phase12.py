@@ -9,14 +9,13 @@ from pathlib import Path
 from ai_earn.connectors import (
     ConnectorError, AuthError, ThrottleError, PermissionError,
     Throttle, RetryPolicy, validate_api_key, redact_config,
-    normalize_gmail, normalize_drive, normalize_github,
-    BaseAPIClient, ConnectionState, check_connection_status,
+    normalize_gmail, BaseAPIClient, check_connection_status,
     normalize_error, is_transient,
     GmailConnector, DriveConnector, GitHubConnector,
     CalendarConnector, MarketplaceConnector, PaymentConnector,
 )
 from ai_earn.connectors.registry import available_connectors, create_connector, connection_status_all, manual_fallback_message
-from ai_earn.connectors.scopes import LEAST_PRIVILEGE_SCOPES, validate_scopes_for, least_for
+from ai_earn.connectors.scopes import LEAST_PRIVILEGE_SCOPES, validate_scopes_for
 from ai_earn.auth_storage import AuthStorage
 from ai_earn.auth import AuthService
 from ai_earn.state_storage import StateStorage
@@ -62,7 +61,7 @@ class ConnectorCapabilitiesTests(unittest.TestCase):
                 self.assertTrue(len(res) >= 1)
                 # logs redacted
                 logs = client.logs()
-                self.assertTrue(any(l["event"] == "request" for l in logs))
+                self.assertTrue(any(entry["event"] == "request" for entry in logs))
                 self.assertNotIn(self.key, str(logs))
                 # 4 throttling per-owner
                 th = Throttle(limit=1, window_seconds=60)
@@ -138,7 +137,7 @@ class ConnectorCapabilitiesTests(unittest.TestCase):
                 self.assertNotIn(self.key, str(exc))
             # fetch result never contains key
             res = conn.fetch(limit=1)
-            self.assertNotIn(self.key, json_str := str(res))
+            self.assertNotIn(self.key, str(res))
             # logs redacted
             client = BaseAPIClient(connector=conn)
             client.request(owner_id=self.owner, operation="fetch", params={"limit": 1})

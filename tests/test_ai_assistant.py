@@ -1,8 +1,5 @@
 """Tests for v22 AI assistant — ToolRegistry (read/draft/consequential), ApprovalQueue, emergency stop."""
 
-import hashlib
-import hmac
-import json
 import os
 import secrets
 import tempfile
@@ -15,7 +12,7 @@ from unittest.mock import patch
 from ai_earn.auth import AuthService, AccessDenied
 from ai_earn.auth_storage import AuthStorage
 from ai_earn.state_storage import StateStorage, StateStorageError
-from ai_earn.ai_assistant import AIAssistant, ToolRegistry, ApprovalQueue, AssistantError, ApprovalError, ToolError, AIProviderConfig
+from ai_earn.ai_assistant import AIAssistant, AssistantError, ApprovalError, ToolError, AIProviderConfig
 from ai_earn.dashboard_metrics import DashboardMetrics
 from ai_earn.state_recovery_comparison import StateRecoveryComparison
 
@@ -244,7 +241,7 @@ class AIAssistantTests(unittest.TestCase):
         # conflict: same operation_key for different request should raise AssistantError
         fake3 = secrets.token_hex(16)
         key_conflict = self._key()
-        apid3 = self.ai.queue.request(self.alice_token, "publish_service", {"service_id": fake3}, operation_key=key_conflict)
+        self.ai.queue.request(self.alice_token, "publish_service", {"service_id": fake3}, operation_key=key_conflict)
         with self.assertRaises(AssistantError):
             # same key, different service_id -> different digest
             self.ai.queue.request(self.alice_token, "publish_service", {"service_id": secrets.token_hex(16)}, operation_key=key_conflict)

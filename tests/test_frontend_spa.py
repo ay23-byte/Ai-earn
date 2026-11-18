@@ -1,5 +1,4 @@
 """Tests for M14+M15 Frontend SPA (vanilla hash router, 17 sections, real snapshot data, a11y, theme)."""
-import os
 import re
 import unittest
 from pathlib import Path

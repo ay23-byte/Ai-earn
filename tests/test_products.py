@@ -55,7 +55,7 @@ class ProductTests(unittest.TestCase):
 
     def test_list_and_filter(self):
         p1 = self.products.create(self.alice_token, "Alpha", "", "1.0", 100000, operation_key="k1")
-        p2 = self.products.create(self.alice_token, "Beta", "", "2.0", 200000, operation_key="k2")
+        self.products.create(self.alice_token, "Beta", "", "2.0", 200000, operation_key="k2")
         self.products.publish(self.alice_token, p1, operation_key="p1")
         lst = self.products.list(self.alice_token, status="published")
         self.assertEqual(len(lst), 1)
@@ -125,7 +125,7 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(len(errors), 0)
 
     def test_dashboard_and_recovery(self):
-        pid = self.products.create(self.alice_token, "Prod", "Desc", "1.0", 12345, operation_key="k1")
+        self.products.create(self.alice_token, "Prod", "Desc", "1.0", 12345, operation_key="k1")
         metrics = DashboardMetrics(self.auth, self.state).get(self.alice_token)
         self.assertIn("products", metrics)
         self.assertEqual(metrics["products"]["count"], 1)

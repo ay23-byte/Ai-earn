@@ -14,10 +14,8 @@ from ai_earn.state_storage import StateStorage
 from ai_earn.analytics import Analytics, AnalyticsError
 from ai_earn.opportunities import Opportunities
 from ai_earn.customers import Customers
-from ai_earn.invoices import Invoices
 from ai_earn.ledger import Ledger
 from ai_earn.followups import Followups
-from ai_earn.services import Services
 
 
 @unittest.skipUnless(os.name in {"posix", "nt"}, "requires private filesystem")
@@ -78,7 +76,7 @@ class AnalyticsTests(unittest.TestCase):
         now = int(time.time())
         # create 3 opps
         id1 = self.opp.create(self.alice_token, "Opp One", "https://example.com/a", 10000, operation_key="op1")
-        id2 = self.opp.create(self.alice_token, "Opp Two", "https://example.com/b", 20000, operation_key="op2")
+        self.opp.create(self.alice_token, "Opp Two", "https://example.com/b", 20000, operation_key="op2")
         # vetted one
         self.opp.vetted(self.alice_token, id1, operation_key="v1")
         funnel_all = self.analytics.funnel(self.alice_token, from_ts=0, to_ts=4102444800)
@@ -99,7 +97,7 @@ class AnalyticsTests(unittest.TestCase):
         self.opp.vetted(self.alice_token, oid, operation_key="v2")
         # Customers
         cid1 = self.cust.create(self.alice_token, "Alice Co", "alice@example.com", "", operation_key="cu1")
-        cid2 = self.cust.create(self.alice_token, "Bob Co", "bob@example.com", "", operation_key="cu2")
+        self.cust.create(self.alice_token, "Bob Co", "bob@example.com", "", operation_key="cu2")
         self.cust.contacted(self.alice_token, cid1, operation_key="cc1")
         self.cust.converted(self.alice_token, cid1, operation_key="cc2")
         conv = self.analytics.conversion(self.alice_token)

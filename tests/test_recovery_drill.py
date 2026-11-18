@@ -9,8 +9,6 @@ data is touched.
 import os
 from pathlib import Path
 import sqlite3
-import subprocess
-import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -20,7 +18,6 @@ from ai_earn.auth_storage import AuthStorage
 from ai_earn.doctor import diagnose
 from ai_earn.opportunity_drafts import OpportunityDrafts
 from ai_earn.state_storage import StateStorage, StateStorageError, LATEST_SCHEMA_VERSION
-from ai_earn.task_queue import TaskQueue
 
 
 class RecoveryDrillTests(unittest.TestCase):
@@ -48,7 +45,7 @@ class RecoveryDrillTests(unittest.TestCase):
         state = StateStorage(p, create=True, confirmed=True) if not p.exists() else StateStorage(p)
         # ensure we are at LATEST; for fresh file, migrate v2..LATEST
         # For this test we start from fresh, so migrate all
-        if p == self.state_path and not (self.directory / f"before-v2.sqlite3").exists():
+        if p == self.state_path and not (self.directory / "before-v2.sqlite3").exists():
             for v in range(2, LATEST_SCHEMA_VERSION + 1):
                 state.migrate_to_v2 if False else None
         return state
@@ -83,15 +80,13 @@ class RecoveryDrillTests(unittest.TestCase):
         for v in range(2, LATEST_SCHEMA_VERSION + 1):
             getattr(state, f"migrate_to_v{v}")(self.directory / f"before-v{v}.sqlite3", confirmed=True)
         opp = OpportunityDrafts(self.auth, state)
-        opp_id = opp.create(self.token, "Drill opportunity", operation_key="opp-drill")
+        opp.create(self.token, "Drill opportunity", operation_key="opp-drill")
         # Backup after creation
         checked = self.directory / "checked.sqlite3"
         state.backup_to(checked, confirmed=True)
         # Mutate original after backup: add second opportunity
-        opp2 = opp.create(self.token, "Second after backup", operation_key="opp-second")
+        opp.create(self.token, "Second after backup", operation_key="opp-second")
         # Checked copy must NOT see second record; current must see both
-        from ai_earn.auth import AuthService as A
-        from ai_earn.auth_storage import AuthStorage as AS
         # Verify via direct StateStorage reads (owner-scoped)
         def count_opportunities(path):
             s = StateStorage(path)

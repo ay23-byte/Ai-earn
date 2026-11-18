@@ -3,7 +3,6 @@ import hashlib
 import hmac
 import json
 import os
-import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -37,7 +36,6 @@ def _disposable_pair(tmp_root: Path):
         t_alice = auth.login("alice", "StrongPass123!")
         t_bob = auth.login("bob", "StrongPass123!")
         # capture owner_ids via _authorized_transaction
-        from ai_earn.state_authorization import _authorized_transaction
         state = StateStorage(state_db, create=True, confirmed=True)
         for v in range(2, 30):
             m = getattr(state, f"migrate_to_v{v}", None)
@@ -146,7 +144,6 @@ class AccountDeletionHardeningTests(unittest.TestCase):
         tmp = Path(tempfile.mkdtemp())
         auth_db, state_db, private, auth, t_alice, _ = _disposable_pair(tmp)
         from ai_earn.account_deletion import prepare_deletion_backup, confirm_deletion
-        from ai_earn.state_storage import StateStorageError
         backup = private / "corrupt.sqlite3"
         prep = prepare_deletion_backup(t_alice, auth_db=auth_db, state_db=state_db, backup_path=backup)
         phrase = prep["confirmation_phrase"]
@@ -309,7 +306,7 @@ class DataExportHardeningTests(unittest.TestCase):
         # unicode title with spaces and non-ASCII
         opp.create(t_alice, "Café — 世界 🌟", "https://example.com/uni", 12345, operation_key="uni")
         dest = private / "uni export — café.json"
-        res = export_user_data(t_alice, auth_db=auth_db, state_db=state_db, destination=dest)
+        export_user_data(t_alice, auth_db=auth_db, state_db=state_db, destination=dest)
         self.assertTrue(dest.exists())
         txt = dest.read_text(encoding="utf-8")
         self.assertIn("export_version", txt)
@@ -324,7 +321,7 @@ class DataExportHardeningTests(unittest.TestCase):
         auth_db, state_db, private, auth, t_alice, _ = _disposable_pair(tmp)
         from ai_earn.data_export import export_user_data
         dest = private / "perm.json"
-        res = export_user_data(t_alice, auth_db=auth_db, state_db=state_db, destination=dest)
+        export_user_data(t_alice, auth_db=auth_db, state_db=state_db, destination=dest)
         self.assertTrue(dest.exists())
         if os.name == "posix":
             mode = dest.stat().st_mode & 0o777
@@ -349,7 +346,7 @@ class DataExportHardeningTests(unittest.TestCase):
 class FinancialLedgerHardeningTests(unittest.TestCase):
     def test_ledger_invariants(self):
         tmp = Path(tempfile.mkdtemp())
-        auth_db, state_db, private, auth, t_alice, _ = _disposable_pair(tmp)
+        auth_db, state_db, private, auth, t_alice, t_bob = _disposable_pair(tmp)
         from ai_earn.ledger import Ledger
         from ai_earn.state_storage import StateStorage
         ledger = Ledger(auth, StateStorage(state_db, create=False))
@@ -384,7 +381,9 @@ class PaymentWebhookTests(unittest.TestCase):
         auth_db, state_db, private, auth, t_alice, _ = _disposable_pair(tmp)
         from ai_earn.payment_providers import PaymentProviders, ProviderConfig
         from ai_earn.state_storage import StateStorage
-        import json, hashlib, hmac
+        import json
+        import hashlib
+        import hmac
         secret = b"rzp-test-secret-32bytes-long-enough-1234"
         cfg = ProviderConfig(provider="razorpay", mode="sandbox", webhook_secret=secret)
         pp = PaymentProviders(auth, StateStorage(state_db, create=False), cfg)
@@ -421,7 +420,6 @@ class PaymentWebhookTests(unittest.TestCase):
         secret = b"rzp-test-secret-32bytes-long-enough-1234"
         cfg = ProviderConfig(provider="razorpay", mode="sandbox", webhook_secret=secret)
         pp = PaymentProviders(auth, StateStorage(state_db, create=False), cfg)
-        import json
         # malformed JSON with correct sig over raw bytes should still fail as Invalid event, but not before sig
         bad_json = b"{not json"
         sig = hmac.new(secret, bad_json, hashlib.sha256).hexdigest()
@@ -440,7 +438,6 @@ class PaymentWebhookTests(unittest.TestCase):
 class ConnectorReliabilityTests(unittest.TestCase):
     def test_retry_documented_matches_actual(self):
         from ai_earn.connectors.retry import RetryPolicy
-        from ai_earn.connectors.client import BaseAPIClient
         from ai_earn.connectors.base import ConnectorError
         retry = RetryPolicy(max_retries=2, base_delay=0.01, max_delay=0.1)
         # delay_for exponential capped
@@ -475,7 +472,8 @@ class ConnectorReliabilityTests(unittest.TestCase):
 
 class DependencyAuditTests(unittest.TestCase):
     def test_audit_truthful(self):
-        import subprocess, sys
+        import subprocess
+        import sys
         r = subprocess.run([sys.executable, "-m", "tools.security_check", "--audit"], capture_output=True, text=True, timeout=10)
         self.assertEqual(r.returncode, 0)
         self.assertIn("stdlib only", r.stdout.lower())
@@ -498,7 +496,7 @@ class ProductionReadinessTests(unittest.TestCase):
 class DashboardConsistencyTests(unittest.TestCase):
     def test_totals_match_ledger(self):
         tmp = Path(tempfile.mkdtemp())
-        auth_db, state_db, private, auth, t_alice, _ = _disposable_pair(tmp)
+        auth_db, state_db, private, auth, t_alice, t_bob = _disposable_pair(tmp)
         from ai_earn.ledger import Ledger
         from ai_earn.state_storage import StateStorage
         state = StateStorage(state_db, create=False)

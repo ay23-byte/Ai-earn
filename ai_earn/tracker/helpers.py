@@ -4,7 +4,6 @@ No payment is verified, received or processed.
 """
 import re
 import secrets
-from pathlib import Path
 
 from ai_earn.state_storage import LATEST_SCHEMA_VERSION, StateStorage, StateStorageError
 

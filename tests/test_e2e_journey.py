@@ -5,7 +5,6 @@ Covers: unit → integration → API → authentication → authorization → ac
 AI tool permission → approval workflow → frontend snapshot → end-to-end (this file)
 → Windows policy (unit). All with disposable isolated DBs, no network.
 """
-import io
 import json
 import os
 import hashlib
@@ -19,7 +18,7 @@ from unittest.mock import patch
 
 from ai_earn.auth import AuthService, AccessDenied
 from ai_earn.auth_storage import AuthStorage
-from ai_earn.state_storage import StateStorage, StateStorageError, LATEST_SCHEMA_VERSION
+from ai_earn.state_storage import StateStorage, LATEST_SCHEMA_VERSION
 from ai_earn.opportunities import Opportunities
 from ai_earn.services import Services
 from ai_earn.products import Products

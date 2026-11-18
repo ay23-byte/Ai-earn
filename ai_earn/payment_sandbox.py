@@ -81,7 +81,7 @@ class SandboxPaymentEvents:
         self._lock = threading.Lock()
         self._state = "sandbox_awaiting"
         self._sequence = 0
-        self._seen = {}
+        self._seen: dict = {}
 
     @property
     def state(self) -> str:

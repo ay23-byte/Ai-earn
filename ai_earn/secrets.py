@@ -6,7 +6,6 @@ auto-loaded from .env. All helpers redact values in errors and logs.
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import os
 import re
@@ -39,7 +38,7 @@ def validate_secret(name: str, value: str | bytes) -> None:
     # Normalize to bytes length
     if isinstance(value, str):
         # urlsafe base64 or hex; check decoded length roughly
-        raw = value.encode()
+        value.encode()
         # Accept 32..128 bytes when decoded or direct
         # For string secrets, require 32..128 characters and high entropy
         if not (32 <= len(value) <= 256):

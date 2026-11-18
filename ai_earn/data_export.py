@@ -21,7 +21,6 @@ import json
 import sqlite3
 import time
 from pathlib import Path
-from typing import Mapping
 
 from .state_authorization import _authorized_transaction
 from .auth import AuthService
@@ -171,7 +170,7 @@ def export_user_data(token: str, *, auth_db: Path, state_db: Path, destination: 
             destination.write_text(payload, encoding="utf-8")
             # Restrict perms on POSIX
             try:
-                import os, stat
+                import os
 
                 if os.name == "posix":
                     os.chmod(destination, 0o600)

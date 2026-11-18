@@ -8,7 +8,6 @@ serve *.sqlite3 files. Database paths must be owner-only and never under a web r
 from __future__ import annotations
 
 import os
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
@@ -154,7 +153,7 @@ def validate_production(environ: Mapping[str, str]) -> list[ProductionCheck]:
     try:
         from .production_readiness import evaluate as _eval_prod
 
-        _prod_eval = _eval_prod(environ)
+        _prod_eval = _eval_prod(dict(environ))
         _all_automated_pass = bool(_prod_eval.get("production_ready"))
     except Exception:
         _all_automated_pass = False

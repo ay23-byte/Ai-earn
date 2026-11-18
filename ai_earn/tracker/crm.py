@@ -168,9 +168,9 @@ def handle_crm(choice, token, stdin, out, **deps):
             elif sub=="2":
                 cid=_read(stdin, out, "Customer ID: ").strip()
                 lst=crm_projects.list(token, cid)
-                for l in lst:
-                    pt=l.get("project_task") or {}
-                    out.write(f"{l['id']} | task:{l['project_task_id'][:8]} | {pt.get('title','')[:30]} | {pt.get('status','')}\n")
+                for item in lst:
+                    pt=item.get("project_task") or {}
+                    out.write(f"{item['id']} | task:{item['project_task_id'][:8]} | {pt.get('title','')[:30]} | {pt.get('status','')}\n")
                 if not lst:
                     out.write("No projects.\n")
             elif sub=="3":

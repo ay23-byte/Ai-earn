@@ -5,7 +5,6 @@ remains via ai_earn.tracker_cli (shim) for backward compatibility.
 """
 
 import getpass
-import os
 import sqlite3
 from pathlib import Path
 

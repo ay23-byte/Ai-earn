@@ -123,7 +123,7 @@ def _sid_text(advapi, kernel, ctypes, sid) -> str:
     if not advapi.ConvertSidToStringSidW(sid, ctypes.byref(text)):
         raise WindowsSecurityError("Cannot inspect Windows identity.")
     try:
-        return text.value
+        return text.value or ""
     finally:
         kernel.LocalFree(ctypes.cast(text, ctypes.c_void_p))
 
@@ -185,11 +185,11 @@ def inspect_path(path: Path, *, directory: bool) -> SecuritySnapshot:
         revision = wintypes.DWORD()
         if not advapi.GetSecurityDescriptorControl(descriptor, ctypes.byref(control), ctypes.byref(revision)):
             raise WindowsSecurityError("Cannot inspect Windows ACL protection.")
-        class AclSize(ctypes.Structure):
+        class AclSize(ctypes.Structure):  # type: ignore[name-defined]
             _fields_ = [("count", wintypes.DWORD), ("used", wintypes.DWORD), ("free", wintypes.DWORD)]
-        class AceHeader(ctypes.Structure):
+        class AceHeader(ctypes.Structure):  # type: ignore[name-defined]
             _fields_ = [("type", ctypes.c_ubyte), ("flags", ctypes.c_ubyte), ("size", wintypes.WORD)]
-        class AllowedAce(ctypes.Structure):
+        class AllowedAce(ctypes.Structure):  # type: ignore[name-defined]
             _fields_ = [("header", AceHeader), ("mask", wintypes.DWORD), ("sid_start", wintypes.DWORD)]
         size = AclSize()
         if not advapi.GetAclInformation(dacl, ctypes.byref(size), ctypes.sizeof(size), 2):
@@ -247,7 +247,7 @@ def create_private_directory(path: Path) -> None:
     if not advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl, 1, ctypes.byref(descriptor), None):
         raise WindowsSecurityError("Cannot construct a private Windows security descriptor.")
     try:
-        class SecurityAttributes(ctypes.Structure):
+        class SecurityAttributes(ctypes.Structure):  # type: ignore[name-defined]
             _fields_ = [("length", wintypes.DWORD), ("descriptor", ctypes.c_void_p), ("inherit_handle", wintypes.BOOL)]
         attrs = SecurityAttributes(ctypes.sizeof(SecurityAttributes), descriptor, False)
         if not kernel.CreateDirectoryW(str(path), ctypes.byref(attrs)):
@@ -280,7 +280,7 @@ def create_private_file(path: Path) -> None:
     ):
         raise WindowsSecurityError("Cannot construct a private Windows file descriptor.")
 
-    class SecurityAttributes(ctypes.Structure):
+    class SecurityAttributes(ctypes.Structure):  # type: ignore[name-defined]
         _fields_ = [
             ("length", wintypes.DWORD),
             ("descriptor", ctypes.c_void_p),

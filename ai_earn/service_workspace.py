@@ -10,18 +10,16 @@ Portfolio presentation is available via `PortfolioPresentation`.
 """
 from __future__ import annotations
 
-import hashlib
 import hmac
 import json
 import secrets
-import sqlite3
 from typing import Any
 
 from .auth import AccessDenied, AuthService
 from .opportunity_drafts import DraftError, _digest as _base_digest, _key, _record_id, _title
 from .state_authorization import _authorized_transaction
 from .state_storage import StateStorage, StateStorageError
-from .services import _scope, _deliverable, _price, _revisions, _description, _version as _svc_version, _owned_service, _request as _svc_request
+from .services import _scope, _deliverable, _price, _revisions, _description, _version as _svc_version, _owned_service
 
 _RESOURCE_PACKAGE = "service_package"
 _RESOURCE_REQUIREMENT = "service_requirement"
@@ -29,7 +27,7 @@ _RESOURCE_ATTACHMENT = "service_attachment"
 _RESOURCE_PROPOSAL = "proposal"
 _RESOURCE_REQUEST = "customer_request"
 
-_PACKAGE_STATUSES = frozenset()  # packages have no FSM, just CRUD
+_PACKAGE_STATUSES: frozenset = frozenset()  # packages have no FSM, just CRUD
 _PROPOSAL_STATUSES = frozenset({"draft","sent","accepted","rejected","cancelled","archived"})
 _PROPOSAL_TRANSITIONS = {
     (None, "proposal_created"): "draft",

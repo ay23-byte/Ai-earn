@@ -128,7 +128,7 @@ def prepare_deletion_backup(
             except sqlite3.Error:
                 pass
     # Verify backup can be restored to disposable temp (ensures file is not truncated/corrupt)
-    import tempfile, os as _os
+    import os as _os
     try:
         restore_parent = backup_path.parent / f"tmp_restore_{int(time.time()*1000)%1000000}"
         if _os.name == "nt":
@@ -242,7 +242,7 @@ def confirm_deletion(
             if app_id != APPLICATION_ID:
                 raise StateStorageError("Backup is wrong database (application_id mismatch)")
         backup_sha256 = hashlib.sha256(backup_path.read_bytes()).hexdigest()
-        import tempfile as _tmp, os as _os2
+        import os as _os2
         try:
             restore_parent = backup_path.parent / f"tmp_verify_{int(time.time()*1000)%1000000}"
             if _os2.name == "nt":

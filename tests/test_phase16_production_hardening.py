@@ -1,7 +1,6 @@
 """Phase 16 — production hardening and deployment checks."""
 import json
 import os
-import pathlib
 import re
 import tempfile
 import unittest
@@ -97,7 +96,7 @@ class ProductionHardeningTests(unittest.TestCase):
         self.assertIn("never overwrite", rollback.lower())
 
     def test_health_monitoring(self):
-        from ai_earn.health import check, check_with_backups
+        from ai_earn.health import check
         from ai_earn.monitoring import Monitor
         env = {"AI_EARN_ENV": "development", "AI_EARN_AUTH_DB": "", "AI_EARN_STATE_DB": ""}
         payload = check(env)
@@ -144,7 +143,8 @@ class ProductionHardeningTests(unittest.TestCase):
         text = p.read_text(encoding="utf-8")
         self.assertIn("pip-audit", text.lower())
         # Run scan — should pass (split pattern avoids self-trigger)
-        import subprocess, sys
+        import subprocess
+        import sys
         result = subprocess.run([sys.executable, "-m", "tools.security_check"], capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         # audit mode also passes on stdlib

@@ -60,7 +60,7 @@ class FollowupTests(unittest.TestCase):
 
     def test_list_and_filter(self):
         f1 = self.followups.create(self.alice_token, self.cust_alice, 100, "N1", operation_key="k1")
-        f2 = self.followups.create(self.alice_token, self.cust_alice, 200, "N2", operation_key="k2")
+        self.followups.create(self.alice_token, self.cust_alice, 200, "N2", operation_key="k2")
         self.followups.completed(self.alice_token, f1, operation_key="p1")
         lst = self.followups.list(self.alice_token, status="completed")
         self.assertEqual(len(lst), 1)
@@ -241,7 +241,7 @@ class FollowupTests(unittest.TestCase):
         with self.assertRaises(Exception):
             self.customers.import_csv(self.alice_token, rows, operation_key_prefix="big")
         # Too large
-        huge = "name,contact,source\n" + "a," + "b@"*500000 + ",c\n"
+        "name,contact,source\n" + "a," + "b@"*500000 + ",c\n"
         # length check should trigger before row limit; create huge text >1M
         huge_text = "name,contact,source\n" + ("a,b,c\n" * 400000)  # ~2M
         with self.assertRaises(Exception):

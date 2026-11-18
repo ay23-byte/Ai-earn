@@ -11,6 +11,7 @@ OS boundary or public API.
 """
 from __future__ import annotations
 
+import builtins
 import abc
 import hashlib
 import hmac
@@ -314,7 +315,7 @@ class Connector(abc.ABC):
         """Stable identifier for this connector (1-64, alphanum _ -)."""
 
     @abc.abstractmethod
-    def fetch(self, *, limit: int = 20) -> list[dict]:
+    def fetch(self, *, limit: int = 20) -> builtins.list[dict]:
         """Return up to `limit` opportunity dicts for manual review.
 
         Each dict must contain at least: title, source_url, budget_paise,
@@ -341,7 +342,7 @@ class ManualConnector(Connector):
     def connector_id(self) -> str:
         return self._id
 
-    def fetch(self, *, limit: int = 20) -> list[dict]:
+    def fetch(self, *, limit: int = 20) -> builtins.list[dict]:
         if type(limit) is not int or not 1 <= limit <= 100:
             raise OpportunityError("Invalid fetch limit.")
         return []
@@ -368,7 +369,7 @@ class FakeConnector(Connector):
     def revoke(self) -> None:
         self._revoked = True
 
-    def fetch(self, *, limit: int = 20) -> list[dict]:
+    def fetch(self, *, limit: int = 20) -> builtins.list[dict]:
         if self._revoked:
             raise OpportunityError("Connector revoked; manual fallback available.")
         if type(limit) is not int or not 1 <= limit <= 100:
@@ -498,7 +499,7 @@ class Opportunities:
         min_budget: int | None = None,
         max_budget: int | None = None,
         skill_contains: str | None = None,
-    ) -> list[dict]:
+    ) -> builtins.list[dict]:
         cursor = "" if after_id is None else _input(_record_id, after_id)
         if type(limit) is not int or not 1 <= limit <= 100:
             raise OpportunityError("Invalid page size.")
@@ -542,7 +543,7 @@ class Opportunities:
             rows = conn.execute(query, tuple(params)).fetchall()
             return [_view(_owned(conn, owner, r["id"])) for r in rows]
 
-    def ranked(self, token: str, *, limit: int = 20) -> list[dict]:
+    def ranked(self, token: str, *, limit: int = 20) -> builtins.list[dict]:
         """Return opportunities ordered by budget desc, risk asc, deadline asc.
 
         Ranking is a draft heuristic: low-risk and higher budget rank higher.
@@ -562,7 +563,7 @@ class Opportunities:
             rows = sorted(rows, key=lambda r: ( -r["budget_paise"], risk_order.get(r["risk_level"], 99), r["deadline_at"] if r["deadline_at"] != 0 else _MAX_TIME, r["id"]))[:limit]
             return [_view(_owned(conn, owner, r["id"])) for r in rows]
 
-    def explain_ranking(self, token: str, *, limit: int = 20) -> list[dict]:
+    def explain_ranking(self, token: str, *, limit: int = 20) -> builtins.list[dict]:
         """Return ranked opportunities with transparent score breakdown.
 
         Each item is the full `_view` plus a `ranking` dict:
@@ -724,7 +725,7 @@ class Opportunities:
             _remember(conn, owner, key, digest, ident)
             return ident
 
-    def import_from_connector(self, token: str, connector: Connector, *, limit: int = 20, operation_key_prefix: str = "connector_import") -> list[str]:
+    def import_from_connector(self, token: str, connector: Connector, *, limit: int = 20, operation_key_prefix: str = "connector_import") -> builtins.list[str]:
         """Fetch from connector and create opportunities; returns created IDs.
 
         Each imported item gets a distinct operation key derived from the prefix.

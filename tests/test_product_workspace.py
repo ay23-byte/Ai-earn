@@ -1,6 +1,7 @@
 """Phase 7 — digital product workspace (v26)."""
 import os
-import tempfile, unittest
+import tempfile
+import unittest
 from pathlib import Path
 from unittest.mock import patch
 
@@ -62,7 +63,7 @@ class ProductWorkspaceTests(unittest.TestCase):
         self.assertEqual(iid, iid2)
         # validation linked to product
         pid=self.prod.create(self.token, "Prod", "Desc", "v1", 100000, operation_key="prod_val")
-        vid=self.vals.add(self.token, pid, "Criteria: demand", "pass", operation_key="val1", evidence="Survey 10 users")
+        self.vals.add(self.token, pid, "Criteria: demand", "pass", operation_key="val1", evidence="Survey 10 users")
         lst=self.vals.list(self.token, pid)
         self.assertEqual(len(lst), 1)
         self.assertEqual(lst[0]["result"], "pass")
@@ -79,7 +80,7 @@ class ProductWorkspaceTests(unittest.TestCase):
 
     def test_pricing_suggestions_and_ai(self):
         pid=self.prod.create(self.token, "Prod", "Desc", "v1", 200000, operation_key="price_prod")
-        psid=self.pricing.add(self.token, pid, 250000, "Competitor analysis", operation_key="price_sug", evidence="Competitor price 300000")
+        self.pricing.add(self.token, pid, 250000, "Competitor analysis", operation_key="price_sug", evidence="Competitor price 300000")
         self.assertEqual(self.pricing.list(self.token, pid)[0]["price_paise"], 250000)
         # AI suggestion
         ps_ai=self.pricing.generate_ai_suggestion(self.token, pid, operation_key="price_ai")
@@ -90,7 +91,7 @@ class ProductWorkspaceTests(unittest.TestCase):
 
     def test_product_versions(self):
         pid=self.prod.create(self.token, "Prod", "Desc", "v1", 100000, operation_key="ver_prod")
-        vid=self.versions.add(self.token, pid, "v2", "Added feature", operation_key="ver1")
+        self.versions.add(self.token, pid, "v2", "Added feature", operation_key="ver1")
         self.assertEqual(self.versions.list(self.token, pid)[0]["version"], "v2")
         # product version updated
         self.assertEqual(self.prod.get(self.token, pid)["version"], "v2")
@@ -119,7 +120,7 @@ class ProductWorkspaceTests(unittest.TestCase):
     def test_sales_tracking_no_fabrication(self):
         pid=self.prod.create(self.token, "Prod", "Desc", "v1", 100000, operation_key="sale_prod")
         # unverified sale without evidence allowed
-        sid=self.sales.record(self.token, pid, 1, 100000, 1700000000, operation_key="sale_unver", evidence_url="", verification="unverified")
+        self.sales.record(self.token, pid, 1, 100000, 1700000000, operation_key="sale_unver", evidence_url="", verification="unverified")
         self.assertEqual(self.sales.list(self.token, pid)[0]["verification"], "unverified")
         # verified without evidence must fail
         with self.assertRaises(Exception):
@@ -158,7 +159,7 @@ class ProductWorkspaceTests(unittest.TestCase):
     def test_market_research_and_ai_no_fabrication(self):
         pid=self.prod.create(self.token, "Prod", "Desc", "v1", 100000, operation_key="res_prod")
         # research without evidence must be unverified
-        rid=self.research.add(self.token, pid, "Market query", "Findings data", operation_key="res1", evidence_url="", verification="unverified")
+        self.research.add(self.token, pid, "Market query", "Findings data", operation_key="res1", evidence_url="", verification="unverified")
         self.assertEqual(self.research.list(self.token, pid)[0]["verification"], "unverified")
         # verified requires evidence
         with self.assertRaises(Exception):

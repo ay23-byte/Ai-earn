@@ -4,6 +4,7 @@ This service deliberately reports assertions, drafts and payment observations
 separately. No local record in the current schema is evidence of received money.
 It is an internal application service, not an HTTP or public API.
 """
+from typing import cast
 from .financial_math import net_cash_paise
 from .state_authorization import _authorized_transaction
 from .state_storage import StateStorage
@@ -11,7 +12,7 @@ from .auth import AuthService
 try:
     from .revenue_analytics import dashboard_for_conn as _rev_dashboard_for_conn
 except Exception:
-    _rev_dashboard_for_conn = None
+    _rev_dashboard_for_conn = None  # type: ignore[assignment]
 
 
 def _count(conn, table, owner):
@@ -322,10 +323,10 @@ class DashboardMetrics:
                     fees_verified = {"count": row[0], "amount_paise": row[1], "verification": "verified", "currency": "INR"}
                     net_realized_verified = {
                         "amount_paise": net_cash_paise(
-                            income_paise=payment_settled_verified["amount_paise"],
-                            refunds_paise=refunds_verified["amount_paise"],
-                            fees_paise=fees_verified["amount_paise"],
-                            expenses_paise=expenses_verified["amount_paise"],
+                            income_paise=cast(int, payment_settled_verified["amount_paise"]),
+                            refunds_paise=cast(int, refunds_verified["amount_paise"]),
+                            fees_paise=cast(int, fees_verified["amount_paise"]),
+                            expenses_paise=cast(int, expenses_verified["amount_paise"]),
                         ),
                         "verification": "verified",
                         "currency": "INR",
@@ -388,8 +389,8 @@ class DashboardMetrics:
                     (owner,),
                 ).fetchall()
                 # aggregate by status and provider
-                prov_statuses = {}
-                prov_providers = {}
+                prov_statuses: dict = {}
+                prov_providers: dict = {}
                 total_cnt = 0
                 total_amt = 0
                 for prov, status, cnt, amt in prov_rows:
@@ -425,7 +426,7 @@ class DashboardMetrics:
                 approv_statuses = {row[0]: {"count": row[1]} for row in approv_rows}
                 # virtual expired count: pending rows past expires_at
                 import time as _time
-                now_ts = int(_time.time())
+                int(_time.time())
                 # use DB now already captured as `now` in transaction; treat pending expired logically
                 try:
                     pending_expired = conn.execute(
@@ -457,7 +458,6 @@ class DashboardMetrics:
                 }
                 # Analytics read-only summary (no new tables, real ledger/invoice aggregates, time-bounded via created_at)
                 try:
-                    from .analytics import Analytics as _Analytics
                     # Use same owner+now but avoid re-entering transaction; compute directly via current conn
                     # Funnel quick counts (all time) for dashboard glance
                     funnel_total_opp = conn.execute("SELECT COUNT(*) FROM opportunities WHERE owner_id=?", (owner,)).fetchone()[0] if version >=15 else 0
@@ -466,7 +466,7 @@ class DashboardMetrics:
                     # MRR total income all time (unverified)
                     mrr_total = conn.execute("SELECT COALESCE(SUM(amount_paise),0) FROM ledger_entries WHERE owner_id=? AND kind='income'", (owner,)).fetchone()[0] if version >=18 else 0
                     # Monthly buckets for last display (recompute via same logic as Analytics.mrr but simplified)
-                    mrr_buckets = {}
+                    mrr_buckets: dict = {}
                     if version >=18:
                         import datetime as _dt
                         rows = conn.execute("SELECT created_at, amount_paise FROM ledger_entries WHERE owner_id=? AND kind='income' ORDER BY created_at", (owner,)).fetchall()

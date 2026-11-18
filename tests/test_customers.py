@@ -54,7 +54,7 @@ class CustomerTests(unittest.TestCase):
 
     def test_list_and_filter(self):
         c1 = self.customers.create(self.alice_token, "A", "a@a.com", "", operation_key="k1")
-        c2 = self.customers.create(self.alice_token, "B", "b@b.com", "", operation_key="k2")
+        self.customers.create(self.alice_token, "B", "b@b.com", "", operation_key="k2")
         self.customers.contacted(self.alice_token, c1, operation_key="p1")
         lst = self.customers.list(self.alice_token, status="contacted")
         self.assertEqual(len(lst), 1)
@@ -128,7 +128,7 @@ class CustomerTests(unittest.TestCase):
         self.assertEqual(len(errors), 0)
 
     def test_dashboard_and_recovery(self):
-        cid = self.customers.create(self.alice_token, "Cust", "c@c.com", "", operation_key="k1")
+        self.customers.create(self.alice_token, "Cust", "c@c.com", "", operation_key="k1")
         metrics = DashboardMetrics(self.auth, self.state).get(self.alice_token)
         self.assertIn("customers", metrics)
         self.assertEqual(metrics["customers"]["count"], 1)

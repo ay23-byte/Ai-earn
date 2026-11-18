@@ -1,6 +1,7 @@
 """Phase 6 — service workspace (v25)."""
 import os
-import tempfile, unittest
+import tempfile
+import unittest
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,8 +12,7 @@ from ai_earn.services import Services, Portfolio
 from ai_earn.customers import Customers
 from ai_earn.service_workspace import (
     ServicePackages, ServiceRequirements, ServiceAttachments,
-    Proposals, CustomerRequests, ServiceTemplates, PortfolioPresentation, ServiceEditor,
-    SERVICE_TEMPLATES
+    Proposals, CustomerRequests, ServiceTemplates, PortfolioPresentation, ServiceEditor
 )
 from ai_earn.state_storage import _validate_schema, _check_integrity
 
@@ -89,7 +89,7 @@ class ServiceWorkspaceTests(unittest.TestCase):
         self.assertEqual(upd["delivery_days"], 3)
         self.assertEqual(upd["revisions"], 2)
         # list
-        pid2=self.pkgs.create(self.token, sid, "Premium", "Premium desc", 200000, 7, 3, operation_key="pkg_prem")
+        self.pkgs.create(self.token, sid, "Premium", "Premium desc", 200000, 7, 3, operation_key="pkg_prem")
         lst=self.pkgs.list(self.token, sid)
         self.assertEqual(len(lst), 2)
         # delete
@@ -100,7 +100,7 @@ class ServiceWorkspaceTests(unittest.TestCase):
     def test_requirements(self):
         sid=self.svc.create(self.token,"Req Service","Scope","Deliverable", 100000, 1, operation_key="req_svc")
         rid=self.reqs.add(self.token, sid, "Provide source data in Excel", operation_key="req_add1")
-        rid2=self.reqs.add(self.token, sid, "Include formatting rules", operation_key="req_add2")
+        self.reqs.add(self.token, sid, "Include formatting rules", operation_key="req_add2")
         lst=self.reqs.list(self.token, sid)
         self.assertEqual(len(lst), 2)
         self.reqs.remove(self.token, rid, operation_key="req_del")
@@ -113,7 +113,7 @@ class ServiceWorkspaceTests(unittest.TestCase):
         aid=self.atts.add(self.token, operation_key="att_svc", file_name="spec.pdf", file_size=1024, mime_type="application/pdf", service_id=sid, file_hash=b"\x00"*32)
         self.assertEqual(len(self.atts.list(self.token, service_id=sid)), 1)
         # portfolio attachment
-        aid2=self.atts.add(self.token, operation_key="att_port", file_name="screenshot.png", file_size=2048, mime_type="image/png", portfolio_item_id=port_id)
+        self.atts.add(self.token, operation_key="att_port", file_name="screenshot.png", file_size=2048, mime_type="image/png", portfolio_item_id=port_id)
         self.assertEqual(len(self.atts.list(self.token, portfolio_item_id=port_id)), 1)
         # remove
         self.atts.remove(self.token, aid, operation_key="att_del")
@@ -216,8 +216,8 @@ class ServiceWorkspaceTests(unittest.TestCase):
     def test_portfolio_presentation_professional(self):
         # create service with portfolio and attachments
         sid=self.svc.create(self.token,"Pres Service","Analysis scope","Analysis deliverable", 300000, 2, operation_key="pres_svc")
-        pkgs=self.pkgs.create(self.token, sid, "Standard", "Standard package", 300000, 5, 2, operation_key="pres_pkg")
-        reqs=self.reqs.add(self.token, sid, "Dataset required", operation_key="pres_req")
+        self.pkgs.create(self.token, sid, "Standard", "Standard package", 300000, 5, 2, operation_key="pres_pkg")
+        self.reqs.add(self.token, sid, "Dataset required", operation_key="pres_req")
         port_id=self.port.create(self.token, sid, "Case Study: Sales Dashboard", "Built interactive dashboard with filters", operation_key="pres_port")
         self.atts.add(self.token, operation_key="pres_att1", file_name="dashboard.pdf", file_size=5000, mime_type="application/pdf", service_id=sid, file_hash=b"\x01"*32)
         self.atts.add(self.token, operation_key="pres_att2", file_name="preview.png", file_size=3000, mime_type="image/png", portfolio_item_id=port_id)
@@ -243,7 +243,7 @@ class ServiceWorkspaceTests(unittest.TestCase):
         auth2.register("bob","other password safe")
         token2=auth2.login("bob","other password safe")
         svc2=Services(AuthService(AuthStorage(self.auth_path), self.clock), StateStorage(self.state_path))
-        pkgs2=ServicePackages(AuthService(AuthStorage(self.auth_path), self.clock), StateStorage(self.state_path))
+        ServicePackages(AuthService(AuthStorage(self.auth_path), self.clock), StateStorage(self.state_path))
         # bob cannot see alice's service
         with self.assertRaises(Exception):
             svc2.get(token2, sid)

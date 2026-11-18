@@ -3,7 +3,6 @@
 from .base import Connector, ConnectorError, _connector_id
 from .auth import validate_api_key
 from .throttle import Throttle
-from .normalize import normalize_gmail  # reuse similar normalization pattern but map to same opportunity fields
 from .scopes import LEAST_PRIVILEGE_SCOPES
 
 def _normalize_calendar(raw: dict) -> dict:

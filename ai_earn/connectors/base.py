@@ -18,7 +18,6 @@ tokens in responses or logs.
 
 import abc
 import re
-import time
 
 _CONNECTOR_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
 _SCOPE_RE = re.compile(r"[a-z0-9._-]{1,64}\Z")

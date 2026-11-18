@@ -1,9 +1,7 @@
 """Disposable owner-scoped state-copy comparison; no automatic restore."""
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import closing
 import os
 from pathlib import Path
-import sqlite3
 import tempfile
 import threading
 import unittest

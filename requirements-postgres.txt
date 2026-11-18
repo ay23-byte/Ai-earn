@@ -1,0 +1,5 @@
+# Optional Postgres adapter dependency (P5-1). NOT installed by default and
+# NOT part of the stdlib-only runtime. Install explicitly to enable Postgres:
+#   python -m pip install -r requirements-postgres.txt
+# Then run: python -m pip_audit -r requirements-postgres.txt
+psycopg[binary]==3.2.3

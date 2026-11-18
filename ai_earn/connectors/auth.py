@@ -157,6 +157,7 @@ class OAuthFlow:
         self._client_secret = client_secret
         self._opener = opener or _default_opener
         self._pending: tuple[str, str] | None = None
+        self._refresh_token: str | None = None
         self._access_token: str | None = None
         self._token_expires_at: float | None = None
         self._revoked = False
@@ -194,6 +195,8 @@ class OAuthFlow:
             "state": state,
             "code_challenge": challenge,
             "code_challenge_method": "S256",
+            "access_type": "offline",
+            "prompt": "consent",
         })
         return f"{GOOGLE_AUTHORIZATION_ENDPOINT}?{query}"
 
@@ -317,13 +320,67 @@ class OAuthFlow:
             or (granted_scope is not None and (not isinstance(granted_scope, str) or set(granted_scope.split()) != expected_scopes))
         ):
             raise _AuthError("OAuth provider returned invalid credentials or scope.")
+        refresh = response.get("refresh_token")
+        if refresh is not None:
+            if not isinstance(refresh, str) or not 1 <= len(refresh) <= 8192 or any(ord(c) < 33 or ord(c) > 126 for c in refresh):
+                raise _AuthError("OAuth provider returned invalid credentials or scope.")
+            self._refresh_token = refresh
+        self._access_token = token
+        self._token_expires_at = _time.monotonic() + expires_in
+        self._revoked = False
+
+    @property
+    def has_refresh_token(self) -> bool:
+        return self._refresh_token is not None and not self._revoked
+
+    def refresh_access_token(self) -> None:
+        """Exchange the in-memory refresh token for a new access token."""
+        if not self.has_refresh_token:
+            raise _AuthError("No OAuth refresh token is available.")
+        assert self._refresh_token is not None
+        form = {
+            "client_id": self.client_id,
+            "grant_type": "refresh_token",
+            "refresh_token": self._refresh_token,
+        }
+        if self._client_secret is not None:
+            form["client_secret"] = self._client_secret
+        request = _urlrequest.Request(
+            GOOGLE_TOKEN_ENDPOINT,
+            data=_urlparse.urlencode(form).encode("ascii"),
+            headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"},
+            method="POST",
+        )
+        response = _safe_json(_read_response(self._opener, request))
+        token = response.get("access_token")
+        token_type = response.get("token_type")
+        expires_in = response.get("expires_in")
+        granted_scope = response.get("scope")
+        expected_scopes = {GOOGLE_SCOPES[scope] for scope in self.scopes}
+        if (
+            not isinstance(token, str)
+            or not 1 <= len(token) <= 8192
+            or any(ord(c) < 33 or ord(c) > 126 for c in token)
+            or not isinstance(token_type, str)
+            or token_type.lower() != "bearer"
+            or type(expires_in) is not int
+            or not 1 <= expires_in <= 86_400
+            or (granted_scope is not None and (not isinstance(granted_scope, str) or set(granted_scope.split()) != expected_scopes))
+        ):
+            raise _AuthError("OAuth provider returned invalid credentials or scope.")
+        new_refresh = response.get("refresh_token")
+        if isinstance(new_refresh, str) and 1 <= len(new_refresh) <= 8192 and all(33 <= ord(c) <= 126 for c in new_refresh):
+            self._refresh_token = new_refresh
         self._access_token = token
         self._token_expires_at = _time.monotonic() + expires_in
         self._revoked = False
 
     def _bearer_token(self) -> str:
         if not self.connected:
-            raise _AuthError("OAuth connector is not connected.")
+            if self.has_refresh_token:
+                self.refresh_access_token()
+            else:
+                raise _AuthError("OAuth connector is not connected.")
         assert self._access_token is not None
         return self._access_token
 
@@ -346,6 +403,7 @@ class OAuthFlow:
 
     def revoke(self) -> None:
         token, self._access_token = self._access_token, None
+        self._refresh_token = None
         self._token_expires_at = None
         self._pending = None
         self._revoked = True

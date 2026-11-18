@@ -6,7 +6,7 @@ import hmac
 import json
 import secrets
 import sqlite3
-from typing import Any
+from typing import Any, cast
 
 from .auth import AccessDenied, AuthService
 from .financial_math import net_cash_paise
@@ -266,10 +266,10 @@ class Ledger:
                 fees_verified = {"count": row[0], "amount_paise": row[1], "verification": "verified", "currency": "INR", "source": "fee_records verified"}
                 net_realized_verified = {
                     "amount_paise": net_cash_paise(
-                        income_paise=payment_settled_verified["amount_paise"],
-                        refunds_paise=refunds_verified["amount_paise"],
-                        fees_paise=fees_verified["amount_paise"],
-                        expenses_paise=expenses_verified["amount_paise"],
+                        income_paise=cast(int, payment_settled_verified["amount_paise"]),
+                        refunds_paise=cast(int, refunds_verified["amount_paise"]),
+                        fees_paise=cast(int, fees_verified["amount_paise"]),
+                        expenses_paise=cast(int, expenses_verified["amount_paise"]),
                     ),
                     "verification": "verified",
                     "currency": "INR",

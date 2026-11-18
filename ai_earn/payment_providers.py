@@ -19,6 +19,7 @@ by (provider,mode) and live is never enabled without explicit approval.
 
 from __future__ import annotations
 
+import builtins
 import hashlib
 import hmac
 import json
@@ -342,6 +343,7 @@ class _StripeAdapter(_BaseAdapter):
                 if et is None or et not in _EVENT_TYPES:
                     raise ProviderError("Invalid webhook event.")
                 obj = data["data"].get("object") if isinstance(data["data"].get("object"), dict) else {}
+                assert isinstance(obj, dict)
                 amt = obj.get("amount")
                 cur = obj.get("currency")
                 # Stripe amounts are in smallest unit; for INR paise already
@@ -352,7 +354,7 @@ class _StripeAdapter(_BaseAdapter):
                     raise ProviderError("Invalid webhook event.")
                 if not isinstance(cur, str) or cur.upper() != "INR":
                     # Stripe test mode may use 'usd' etc. but we require INR
-                    if cur.lower() != "inr":
+                    if not isinstance(cur, str) or cur.lower() != "inr":
                         raise ProviderError("Invalid webhook event.")
                 poid = obj.get("id") or data.get("id")
                 if not isinstance(poid, str) or _PROVIDER_ORDER_ID_RE.fullmatch(poid) is None:
@@ -503,7 +505,7 @@ class PaymentProviders:
             _version_check(conn)
             return dict(_owned(conn, owner, ident))
 
-    def list(self, token: str, *, after_id: str | None = None, limit: int = 20, provider: str | None = None, status: str | None = None) -> list[dict]:
+    def list(self, token: str, *, after_id: str | None = None, limit: int = 20, provider: str | None = None, status: str | None = None) -> builtins.list[dict]:
         cursor = "" if after_id is None else _input(_record_id, after_id)
         if type(limit) is not int or not 1 <= limit <= 100:
             raise ProviderError("Invalid page size.")
@@ -526,7 +528,7 @@ class PaymentProviders:
             rows = conn.execute(query, tuple(params)).fetchall()
             return [dict(_owned(conn, owner, r["id"])) for r in rows]
 
-    def list_events(self, token: str, order_id: str) -> list[dict]:
+    def list_events(self, token: str, order_id: str) -> builtins.list[dict]:
         """Event log for an order — owner-isolated, ordered by received_at."""
         ident = _input(_record_id, order_id)
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, _now):

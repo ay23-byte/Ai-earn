@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import json
 import os
 import secrets
 import time
@@ -94,10 +93,9 @@ def create_auth_backup(
 
     start = time.monotonic()
     # Validate source is private and intact
-    src = AuthStorage(auth_db, create=False)
+    AuthStorage(auth_db, create=False)
     # Use sqlite backup directly to new private file
     # Create destination as private file first
-    from pathlib import Path as P
 
     # Reuse StateStorage's private file creation via _PrivateFiles
     from .state_storage import _PrivateFiles
@@ -122,7 +120,7 @@ def list_backups(private_dir: Path) -> list[Path]:
 def verify_backup(candidate: Path) -> dict:
     """Verify a backup candidate without opening as primary. Returns health-like dict."""
     try:
-        s = StateStorage(candidate, create=False)
+        StateStorage(candidate, create=False)
         # If constructor succeeds, schema is valid
         return {"path": str(candidate), "status": "ok", "bytes": candidate.stat().st_size}
     except Exception as exc:

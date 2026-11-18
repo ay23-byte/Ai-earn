@@ -1,8 +1,9 @@
 """Phase 5 completion — task management and safe execution (v23/v24)."""
-import os, tempfile, unittest
+import os
+import tempfile
+import unittest
 from pathlib import Path
 from unittest.mock import patch
-import sqlite3
 
 from ai_earn.auth_storage import AuthStorage
 from ai_earn.auth import AuthService
@@ -209,7 +210,7 @@ class Phase5Tests(unittest.TestCase):
     def test_cancel_safely_including_leased(self):
         tid = self.pt.create(self.token, "Cancel me", operation_key="cancel_task1")
         self.pt.schedule(self.token, tid, 0, operation_key="cancel_sched")
-        claimed = self.runner.claim_next(self.token, operation_key="cancel_claim", lease_seconds=60)
+        self.runner.claim_next(self.token, operation_key="cancel_claim", lease_seconds=60)
         # Cancel while in_progress (leased) should succeed and clear lease
         self.runner.cancel(self.token, tid, operation_key="cancel_op1")
         view = self.pt.get(self.token, tid)

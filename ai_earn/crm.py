@@ -27,6 +27,7 @@ owner has explicitly configured a safe limited workflow
 Never send unsolicited messages automatically — no background auto-send;
 every send() checks approval or safe workflow.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -62,8 +63,10 @@ _ORDER_TRANSITIONS = {
 # Approval FSM (similar to ai_approvals but CRM-specific)
 _APPROVAL_STATUSES = frozenset({"pending", "approved", "rejected", "expired"})
 
+
 class CRMError(Exception):
     pass
+
 
 def _input(validator, value):
     try:
@@ -73,12 +76,14 @@ def _input(validator, value):
     except Exception as exc:
         raise CRMError("Invalid CRM input.") from exc
 
+
 def _note(value: str) -> str:
     if not isinstance(value, str) or not 1 <= len(value) <= 2000 or len(value.strip()) == 0:
         raise CRMError("Invalid note.")
     if any(ord(c) < 32 or ord(c) == 127 for c in value if c not in "\n\t"):
         raise CRMError("Invalid note.")
     return value
+
 
 def _requirement(value: str) -> str:
     if not isinstance(value, str) or not 1 <= len(value) <= 500 or len(value.strip()) == 0:
@@ -87,12 +92,14 @@ def _requirement(value: str) -> str:
         raise CRMError("Invalid requirement.")
     return value
 
+
 def _title(value: str) -> str:
     if not isinstance(value, str) or not 1 <= len(value) <= 200 or len(value.strip()) == 0:
         raise CRMError("Invalid title.")
     if any(ord(c) < 32 or ord(c) == 127 for c in value):
         raise CRMError("Invalid title.")
     return value
+
 
 def _description(value: str) -> str:
     if not isinstance(value, str) or len(value) > 2000:
@@ -101,10 +108,12 @@ def _description(value: str) -> str:
         raise CRMError("Invalid description.")
     return value
 
+
 def _amount(value: int) -> int:
     if type(value) is not int or not 0 <= value <= 1_000_000_000_000:
         raise CRMError("Invalid amount.")
     return value
+
 
 def _channel(value: str) -> str:
     if not isinstance(value, str) or not 1 <= len(value) <= 30:
@@ -113,12 +122,14 @@ def _channel(value: str) -> str:
         raise CRMError("Invalid channel.")
     return value
 
+
 def _body(value: str) -> str:
     if not isinstance(value, str) or not 1 <= len(value) <= 2000:
         raise CRMError("Invalid body.")
     if any(ord(c) < 32 or ord(c) == 127 for c in value if c not in "\n\t"):
         raise CRMError("Invalid body.")
     return value
+
 
 def _allowed_channels(value: str) -> str:
     if not isinstance(value, str) or len(value) > 500:
@@ -138,15 +149,18 @@ def _allowed_channels(value: str) -> str:
             raise CRMError("Invalid allowed_channels entry.")
     return value
 
+
 def _daily_limit(value: int) -> int:
     if type(value) is not int or not 1 <= value <= 100:
         raise CRMError("Invalid daily_limit.")
     return value
 
+
 def _ttl(value: int) -> int:
     if type(value) is not int or not 60 <= value <= 86400:
         raise CRMError("Invalid ttl.")
     return value
+
 
 def _due_at(value: int | None) -> int | None:
     if value is None:
@@ -154,6 +168,7 @@ def _due_at(value: int | None) -> int | None:
     if type(value) is not int or not 0 <= value <= 4102444800:
         raise CRMError("Invalid due_at.")
     return value
+
 
 def _billing_name(value: str | None) -> str | None:
     if value is None:
@@ -164,6 +179,7 @@ def _billing_name(value: str | None) -> str | None:
         raise CRMError("Invalid billing_name.")
     return value
 
+
 def _billing_address(value: str | None) -> str | None:
     if value is None:
         return None
@@ -173,12 +189,14 @@ def _billing_address(value: str | None) -> str | None:
         raise CRMError("Invalid billing_address.")
     return value
 
+
 def _tax_rate_bps(value: int | None) -> int | None:
     if value is None:
         return None
     if type(value) is not int or not 0 <= value <= 10000:
         raise CRMError("Invalid tax_rate_bps.")
     return value
+
 
 def _tax_amount_paise(value: int | None) -> int | None:
     if value is None:
@@ -187,14 +205,20 @@ def _tax_amount_paise(value: int | None) -> int | None:
         raise CRMError("Invalid tax_amount_paise.")
     return value
 
+
 def _version_check(conn: sqlite3.Connection, min_version: int = 27) -> None:
     ver = conn.execute("PRAGMA user_version").fetchone()[0]
     from .state_storage import SUPPORTED_STATE_VERSIONS
+
     if ver not in SUPPORTED_STATE_VERSIONS or ver < min_version:
         raise StateStorageError(f"State schema version {min_version} is required for CRM.")
 
+
 def _retry(conn, owner, key, digest, resource, table, id_col="id"):
-    row = conn.execute("SELECT request_hash, resource_type, resource_id FROM state_operations WHERE owner_id=? AND operation_key=?", (owner, key)).fetchone()
+    row = conn.execute(
+        "SELECT request_hash, resource_type, resource_id FROM state_operations WHERE owner_id=? AND operation_key=?",
+        (owner, key),
+    ).fetchone()
     if row is None:
         return None
     if row["resource_type"] != resource or not hmac.compare_digest(row["request_hash"], digest):
@@ -202,21 +226,39 @@ def _retry(conn, owner, key, digest, resource, table, id_col="id"):
     # For outbound config, resource_id is owner_id itself
     check_id = row["resource_id"]
     if table == "crm_outbound_configs":
-        if conn.execute("SELECT 1 FROM crm_outbound_configs WHERE owner_id=?", (owner,)).fetchone() is None:
+        if (
+            conn.execute("SELECT 1 FROM crm_outbound_configs WHERE owner_id=?", (owner,)).fetchone()
+            is None
+        ):
             raise StateStorageError("Stored operation result is unavailable.")
     else:
-        if conn.execute(f"SELECT 1 FROM {table} WHERE {id_col}=? AND owner_id=?", (check_id, owner)).fetchone() is None:
+        if (
+            conn.execute(
+                f"SELECT 1 FROM {table} WHERE {id_col}=? AND owner_id=?", (check_id, owner)
+            ).fetchone()
+            is None
+        ):
             raise StateStorageError("Stored operation result is unavailable.")
     return check_id
 
+
 def _audit(conn, now, owner, event, resource, rid):
-    conn.execute("INSERT INTO state_audit(occurred_at, actor_id, event, resource_type, resource_id) VALUES(?,?,?,?,?)", (now, owner, event, resource, rid))
+    conn.execute(
+        "INSERT INTO state_audit(occurred_at, actor_id, event, resource_type, resource_id) VALUES(?,?,?,?,?)",
+        (now, owner, event, resource, rid),
+    )
+
 
 def _remember(conn, owner, key, digest, resource, rid):
-    conn.execute("INSERT INTO state_operations(owner_id, operation_key, request_hash, resource_type, resource_id) VALUES(?,?,?,?,?)", (owner, key, digest, resource, rid))
+    conn.execute(
+        "INSERT INTO state_operations(owner_id, operation_key, request_hash, resource_type, resource_id) VALUES(?,?,?,?,?)",
+        (owner, key, digest, resource, rid),
+    )
+
 
 def _request(action: str, values: list) -> bytes:
     return _base_digest(action, json.dumps(values, ensure_ascii=True, separators=(",", ":")))
+
 
 def _owned_customer(conn, owner, cid):
     row = conn.execute("SELECT * FROM customers WHERE id=? AND owner_id=?", (cid, owner)).fetchone()
@@ -224,22 +266,30 @@ def _owned_customer(conn, owner, cid):
         raise CRMError("Customer not found.")
     return row
 
+
 def _owned_communication(conn, owner, comm_id):
-    row = conn.execute("SELECT * FROM communications WHERE id=? AND owner_id=?", (comm_id, owner)).fetchone()
+    row = conn.execute(
+        "SELECT * FROM communications WHERE id=? AND owner_id=?", (comm_id, owner)
+    ).fetchone()
     if row is None:
         raise CRMError("Communication not found.")
     return row
 
+
 def _owned_project_task(conn, owner, task_id):
-    row = conn.execute("SELECT * FROM project_tasks WHERE id=? AND owner_id=?", (task_id, owner)).fetchone()
+    row = conn.execute(
+        "SELECT * FROM project_tasks WHERE id=? AND owner_id=?", (task_id, owner)
+    ).fetchone()
     if row is None:
         raise CRMError("Project task not found.")
     return row
 
+
 # ---------- Customer Notes ----------
 class CustomerNotes:
     def __init__(self, auth: AuthService, state: StateStorage):
-        self._auth = auth; self._state = state
+        self._auth = auth
+        self._state = state
 
     def add(self, token: str, customer_id: str, note: str, *, operation_key: str) -> str:
         cid = _input(_record_id, customer_id)
@@ -253,7 +303,10 @@ class CustomerNotes:
                 return existing
             _owned_customer(conn, owner, cid)
             ident = secrets.token_hex(16)
-            conn.execute("INSERT INTO customer_notes(id, owner_id, customer_id, note, created_at) VALUES(?,?,?,?,?)", (ident, owner, cid, note_v, now))
+            conn.execute(
+                "INSERT INTO customer_notes(id, owner_id, customer_id, note, created_at) VALUES(?,?,?,?,?)",
+                (ident, owner, cid, note_v, now),
+            )
             _audit(conn, now, owner, "customer_note_created", _RESOURCE_NOTE, ident)
             _remember(conn, owner, key, digest, _RESOURCE_NOTE, ident)
             return ident
@@ -263,22 +316,29 @@ class CustomerNotes:
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, _now):
             _version_check(conn)
             _owned_customer(conn, owner, cid)
-            rows = conn.execute("SELECT * FROM customer_notes WHERE owner_id=? AND customer_id=? ORDER BY created_at, id", (owner, cid)).fetchall()
+            rows = conn.execute(
+                "SELECT * FROM customer_notes WHERE owner_id=? AND customer_id=? ORDER BY created_at, id",
+                (owner, cid),
+            ).fetchall()
             return [dict(r) for r in rows]
 
     def get(self, token: str, note_id: str) -> dict:
         nid = _input(_record_id, note_id)
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, _now):
             _version_check(conn)
-            row = conn.execute("SELECT * FROM customer_notes WHERE id=? AND owner_id=?", (nid, owner)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM customer_notes WHERE id=? AND owner_id=?", (nid, owner)
+            ).fetchone()
             if row is None:
                 raise AccessDenied("Access denied.")
             return dict(row)
 
+
 # ---------- Customer Requirements ----------
 class CustomerRequirements:
     def __init__(self, auth: AuthService, state: StateStorage):
-        self._auth = auth; self._state = state
+        self._auth = auth
+        self._state = state
 
     def add(self, token: str, customer_id: str, requirement: str, *, operation_key: str) -> str:
         cid = _input(_record_id, customer_id)
@@ -287,12 +347,17 @@ class CustomerRequirements:
         digest = _request("customer_requirement_create", [cid, req_v])
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
             _version_check(conn)
-            existing = _retry(conn, owner, key, digest, _RESOURCE_REQUIREMENT, "customer_requirements")
+            existing = _retry(
+                conn, owner, key, digest, _RESOURCE_REQUIREMENT, "customer_requirements"
+            )
             if existing:
                 return existing
             _owned_customer(conn, owner, cid)
             ident = secrets.token_hex(16)
-            conn.execute("INSERT INTO customer_requirements(id, owner_id, customer_id, requirement, created_at) VALUES(?,?,?,?,?)", (ident, owner, cid, req_v, now))
+            conn.execute(
+                "INSERT INTO customer_requirements(id, owner_id, customer_id, requirement, created_at) VALUES(?,?,?,?,?)",
+                (ident, owner, cid, req_v, now),
+            )
             _audit(conn, now, owner, "customer_requirement_created", _RESOURCE_REQUIREMENT, ident)
             _remember(conn, owner, key, digest, _RESOURCE_REQUIREMENT, ident)
             return ident
@@ -302,7 +367,10 @@ class CustomerRequirements:
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, _now):
             _version_check(conn)
             _owned_customer(conn, owner, cid)
-            rows = conn.execute("SELECT * FROM customer_requirements WHERE owner_id=? AND customer_id=? ORDER BY created_at, id", (owner, cid)).fetchall()
+            rows = conn.execute(
+                "SELECT * FROM customer_requirements WHERE owner_id=? AND customer_id=? ORDER BY created_at, id",
+                (owner, cid),
+            ).fetchall()
             return [dict(r) for r in rows]
 
     def remove(self, token: str, requirement_id: str, *, operation_key: str) -> str:
@@ -311,46 +379,90 @@ class CustomerRequirements:
         digest = _request("customer_requirement_remove", [rid])
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
             _version_check(conn)
-            row = conn.execute("SELECT request_hash, resource_type FROM state_operations WHERE owner_id=? AND operation_key=?", (owner, key)).fetchone()
+            row = conn.execute(
+                "SELECT request_hash, resource_type FROM state_operations WHERE owner_id=? AND operation_key=?",
+                (owner, key),
+            ).fetchone()
             if row is not None:
-                if row["resource_type"] != _RESOURCE_REQUIREMENT or not hmac.compare_digest(conn.execute("SELECT request_hash FROM state_operations WHERE owner_id=? AND operation_key=?", (owner, key)).fetchone()[0], digest):
+                if row["resource_type"] != _RESOURCE_REQUIREMENT or not hmac.compare_digest(
+                    conn.execute(
+                        "SELECT request_hash FROM state_operations WHERE owner_id=? AND operation_key=?",
+                        (owner, key),
+                    ).fetchone()[0],
+                    digest,
+                ):
                     raise CRMError("Operation key was already used for a different request.")
                 return rid
-            if conn.execute("SELECT 1 FROM customer_requirements WHERE id=? AND owner_id=?", (rid, owner)).fetchone() is None:
+            if (
+                conn.execute(
+                    "SELECT 1 FROM customer_requirements WHERE id=? AND owner_id=?", (rid, owner)
+                ).fetchone()
+                is None
+            ):
                 raise AccessDenied("Access denied.")
-            conn.execute("DELETE FROM customer_requirements WHERE id=? AND owner_id=?", (rid, owner))
+            conn.execute(
+                "DELETE FROM customer_requirements WHERE id=? AND owner_id=?", (rid, owner)
+            )
             _audit(conn, now, owner, "customer_requirement_deleted", _RESOURCE_REQUIREMENT, rid)
             _remember(conn, owner, key, digest, _RESOURCE_REQUIREMENT, rid)
             return rid
 
+
 # ---------- Customer Orders ----------
 class CustomerOrders:
     def __init__(self, auth: AuthService, state: StateStorage):
-        self._auth = auth; self._state = state
+        self._auth = auth
+        self._state = state
 
     def _owned(self, conn, owner, oid):
-        row = conn.execute("SELECT * FROM customer_orders WHERE id=? AND owner_id=?", (oid, owner)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM customer_orders WHERE id=? AND owner_id=?", (oid, owner)
+        ).fetchone()
         if row is None:
             raise AccessDenied("Access denied.")
         # replay audit for consistency
-        events = conn.execute("SELECT event FROM state_audit WHERE actor_id=? AND resource_type=? AND resource_id=? ORDER BY id", (owner, _RESOURCE_ORDER, oid)).fetchall()
+        events = conn.execute(
+            "SELECT event FROM state_audit WHERE actor_id=? AND resource_type=? AND resource_id=? ORDER BY id",
+            (owner, _RESOURCE_ORDER, oid),
+        ).fetchall()
         if not events:
             raise StateStorageError("Customer order history inconsistent.")
         replayed = None
         for (ev,) in events:
-            if ev in ("customer_order_due_updated", "customer_order_billing_updated", "customer_order_tax_updated"):
+            if ev in (
+                "customer_order_due_updated",
+                "customer_order_billing_updated",
+                "customer_order_tax_updated",
+            ):
                 continue
             if (replayed, ev) not in _ORDER_TRANSITIONS:
                 raise StateStorageError("Customer order history inconsistent.")
             replayed = _ORDER_TRANSITIONS[(replayed, ev)]
         if replayed != row["status"]:
             raise StateStorageError("Customer order history inconsistent.")
-        cnt = conn.execute("SELECT count(*) FROM state_operations WHERE owner_id=? AND resource_type=? AND resource_id=?", (owner, _RESOURCE_ORDER, oid)).fetchone()[0]
+        cnt = conn.execute(
+            "SELECT count(*) FROM state_operations WHERE owner_id=? AND resource_type=? AND resource_id=?",
+            (owner, _RESOURCE_ORDER, oid),
+        ).fetchone()[0]
         if cnt != len(events):
             raise StateStorageError("Customer order history inconsistent.")
         return row
 
-    def create(self, token: str, customer_id: str, title: str, description: str = "", amount_paise: int = 0, *, operation_key: str, due_at: int | None = None, billing_name: str | None = None, billing_address: str | None = None, tax_rate_bps: int | None = None, tax_amount_paise: int | None = None) -> str:
+    def create(
+        self,
+        token: str,
+        customer_id: str,
+        title: str,
+        description: str = "",
+        amount_paise: int = 0,
+        *,
+        operation_key: str,
+        due_at: int | None = None,
+        billing_name: str | None = None,
+        billing_address: str | None = None,
+        tax_rate_bps: int | None = None,
+        tax_amount_paise: int | None = None,
+    ) -> str:
         cid = _input(_record_id, customer_id)
         title_v = _input(_title, title)
         desc_v = _input(_description, description)
@@ -361,7 +473,10 @@ class CustomerOrders:
         tr = _input(_tax_rate_bps, tax_rate_bps) if tax_rate_bps is not None else None
         ta = _input(_tax_amount_paise, tax_amount_paise) if tax_amount_paise is not None else None
         key = _input(_key, operation_key)
-        digest = _request("customer_order_create", [cid, title_v, desc_v, amount_v, str(due), bn or "", ba or "", str(tr), str(ta)])
+        digest = _request(
+            "customer_order_create",
+            [cid, title_v, desc_v, amount_v, str(due), bn or "", ba or "", str(tr), str(ta)],
+        )
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
             _version_check(conn)
             existing = _retry(conn, owner, key, digest, _RESOURCE_ORDER, "customer_orders")
@@ -371,9 +486,31 @@ class CustomerOrders:
             ident = secrets.token_hex(16)
             version = conn.execute("PRAGMA user_version").fetchone()[0]
             if version >= 28:
-                conn.execute("INSERT INTO customer_orders(id, owner_id, customer_id, title, description, amount_paise, currency, status, created_at, updated_at, due_at, billing_name, billing_address, tax_rate_bps, tax_amount_paise) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (ident, owner, cid, title_v, desc_v, amount_v, "INR", "draft", now, now, due, bn, ba, tr, ta))
+                conn.execute(
+                    "INSERT INTO customer_orders(id, owner_id, customer_id, title, description, amount_paise, currency, status, created_at, updated_at, due_at, billing_name, billing_address, tax_rate_bps, tax_amount_paise) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        ident,
+                        owner,
+                        cid,
+                        title_v,
+                        desc_v,
+                        amount_v,
+                        "INR",
+                        "draft",
+                        now,
+                        now,
+                        due,
+                        bn,
+                        ba,
+                        tr,
+                        ta,
+                    ),
+                )
             else:
-                conn.execute("INSERT INTO customer_orders(id, owner_id, customer_id, title, description, amount_paise, currency, status, created_at, updated_at) VALUES(?,?,?,?,?,?, 'INR', 'draft', ?, ?)", (ident, owner, cid, title_v, desc_v, amount_v, now, now))
+                conn.execute(
+                    "INSERT INTO customer_orders(id, owner_id, customer_id, title, description, amount_paise, currency, status, created_at, updated_at) VALUES(?,?,?,?,?,?, 'INR', 'draft', ?, ?)",
+                    (ident, owner, cid, title_v, desc_v, amount_v, now, now),
+                )
             _audit(conn, now, owner, "customer_order_created", _RESOURCE_ORDER, ident)
             _remember(conn, owner, key, digest, _RESOURCE_ORDER, ident)
             return ident
@@ -384,7 +521,15 @@ class CustomerOrders:
             _version_check(conn)
             return dict(self._owned(conn, owner, oid))
 
-    def list(self, token: str, customer_id: str | None = None, *, status: str | None = None, after_id: str | None = None, limit: int = 20) -> list[dict]:
+    def list(
+        self,
+        token: str,
+        customer_id: str | None = None,
+        *,
+        status: str | None = None,
+        after_id: str | None = None,
+        limit: int = 20,
+    ) -> list[dict]:
         if customer_id is not None:
             cid = _input(_record_id, customer_id)
         else:
@@ -429,16 +574,23 @@ class CustomerOrders:
             cur = row["status"]
             if _ORDER_TRANSITIONS.get((cur, event)) != target:
                 raise CRMError("Transition not allowed.")
-            conn.execute("UPDATE customer_orders SET status=?, updated_at=? WHERE id=? AND owner_id=?", (target, now, oid, owner))
+            conn.execute(
+                "UPDATE customer_orders SET status=?, updated_at=? WHERE id=? AND owner_id=?",
+                (target, now, oid, owner),
+            )
             _audit(conn, now, owner, event, _RESOURCE_ORDER, oid)
             _remember(conn, owner, key, digest, _RESOURCE_ORDER, oid)
             return oid
 
     def confirm(self, token: str, order_id: str, *, operation_key: str) -> str:
-        return self._transition(token, order_id, "confirmed", "customer_order_confirmed", operation_key)
+        return self._transition(
+            token, order_id, "confirmed", "customer_order_confirmed", operation_key
+        )
 
     def fulfill(self, token: str, order_id: str, *, operation_key: str) -> str:
-        return self._transition(token, order_id, "fulfilled", "customer_order_fulfilled", operation_key)
+        return self._transition(
+            token, order_id, "fulfilled", "customer_order_fulfilled", operation_key
+        )
 
     def cancel(self, token: str, order_id: str, *, operation_key: str) -> str:
         oid = _input(_record_id, order_id)
@@ -453,7 +605,10 @@ class CustomerOrders:
             cur = row["status"]
             if _ORDER_TRANSITIONS.get((cur, "customer_order_cancelled")) != "cancelled":
                 raise CRMError("Transition not allowed.")
-            conn.execute("UPDATE customer_orders SET status='cancelled', updated_at=? WHERE id=? AND owner_id=?", (now, oid, owner))
+            conn.execute(
+                "UPDATE customer_orders SET status='cancelled', updated_at=? WHERE id=? AND owner_id=?",
+                (now, oid, owner),
+            )
             _audit(conn, now, owner, "customer_order_cancelled", _RESOURCE_ORDER, oid)
             _remember(conn, owner, key, digest, _RESOURCE_ORDER, oid)
             return oid
@@ -475,12 +630,23 @@ class CustomerOrders:
                 return oid
             if row["status"] != "draft":
                 raise CRMError("Due date can only be set on draft orders.")
-            conn.execute("UPDATE customer_orders SET due_at=?, updated_at=? WHERE id=? AND owner_id=?", (due, now, oid, owner))
+            conn.execute(
+                "UPDATE customer_orders SET due_at=?, updated_at=? WHERE id=? AND owner_id=?",
+                (due, now, oid, owner),
+            )
             _audit(conn, now, owner, "customer_order_due_updated", _RESOURCE_ORDER, oid)
             _remember(conn, owner, key, digest, _RESOURCE_ORDER, oid)
             return oid
 
-    def set_billing(self, token: str, order_id: str, *, billing_name: str | None = None, billing_address: str | None = None, operation_key: str) -> str:
+    def set_billing(
+        self,
+        token: str,
+        order_id: str,
+        *,
+        billing_name: str | None = None,
+        billing_address: str | None = None,
+        operation_key: str,
+    ) -> str:
         oid = _input(_record_id, order_id)
         key = _input(_key, operation_key)
         bn = _input(_billing_name, billing_name) if billing_name is not None else None
@@ -505,12 +671,22 @@ class CustomerOrders:
                 updates["billing_address"] = ba
             set_clause = ", ".join(f"{k}=?" for k in updates) + ", updated_at=?"
             params = list(updates.values()) + [now, oid, owner]
-            conn.execute(f"UPDATE customer_orders SET {set_clause} WHERE id=? AND owner_id=?", tuple(params))
+            conn.execute(
+                f"UPDATE customer_orders SET {set_clause} WHERE id=? AND owner_id=?", tuple(params)
+            )
             _audit(conn, now, owner, "customer_order_billing_updated", _RESOURCE_ORDER, oid)
             _remember(conn, owner, key, digest, _RESOURCE_ORDER, oid)
             return oid
 
-    def set_tax(self, token: str, order_id: str, *, tax_rate_bps: int | None = None, tax_amount_paise: int | None = None, operation_key: str) -> str:
+    def set_tax(
+        self,
+        token: str,
+        order_id: str,
+        *,
+        tax_rate_bps: int | None = None,
+        tax_amount_paise: int | None = None,
+        operation_key: str,
+    ) -> str:
         oid = _input(_record_id, order_id)
         key = _input(_key, operation_key)
         tr = _input(_tax_rate_bps, tax_rate_bps) if tax_rate_bps is not None else None
@@ -535,17 +711,23 @@ class CustomerOrders:
                 updates["tax_amount_paise"] = ta
             set_clause = ", ".join(f"{k}=?" for k in updates) + ", updated_at=?"
             params = list(updates.values()) + [now, oid, owner]
-            conn.execute(f"UPDATE customer_orders SET {set_clause} WHERE id=? AND owner_id=?", tuple(params))
+            conn.execute(
+                f"UPDATE customer_orders SET {set_clause} WHERE id=? AND owner_id=?", tuple(params)
+            )
             _audit(conn, now, owner, "customer_order_tax_updated", _RESOURCE_ORDER, oid)
             _remember(conn, owner, key, digest, _RESOURCE_ORDER, oid)
             return oid
 
+
 # ---------- Customer Projects (history) ----------
 class CustomerProjects:
     def __init__(self, auth: AuthService, state: StateStorage):
-        self._auth = auth; self._state = state
+        self._auth = auth
+        self._state = state
 
-    def link(self, token: str, customer_id: str, project_task_id: str, *, operation_key: str) -> str:
+    def link(
+        self, token: str, customer_id: str, project_task_id: str, *, operation_key: str
+    ) -> str:
         cid = _input(_record_id, customer_id)
         pid = _input(_record_id, project_task_id)
         key = _input(_key, operation_key)
@@ -558,7 +740,10 @@ class CustomerProjects:
             _owned_customer(conn, owner, cid)
             _owned_project_task(conn, owner, pid)
             ident = secrets.token_hex(16)
-            conn.execute("INSERT INTO customer_projects(id, owner_id, customer_id, project_task_id, created_at) VALUES(?,?,?,?,?)", (ident, owner, cid, pid, now))
+            conn.execute(
+                "INSERT INTO customer_projects(id, owner_id, customer_id, project_task_id, created_at) VALUES(?,?,?,?,?)",
+                (ident, owner, cid, pid, now),
+            )
             _audit(conn, now, owner, "customer_project_linked", _RESOURCE_PROJECT_LINK, ident)
             _remember(conn, owner, key, digest, _RESOURCE_PROJECT_LINK, ident)
             return ident
@@ -568,11 +753,17 @@ class CustomerProjects:
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, _now):
             _version_check(conn)
             _owned_customer(conn, owner, cid)
-            rows = conn.execute("SELECT * FROM customer_projects WHERE owner_id=? AND customer_id=? ORDER BY created_at, id", (owner, cid)).fetchall()
+            rows = conn.execute(
+                "SELECT * FROM customer_projects WHERE owner_id=? AND customer_id=? ORDER BY created_at, id",
+                (owner, cid),
+            ).fetchall()
             out = []
             for r in rows:
                 # enrich with project_task details
-                task = conn.execute("SELECT * FROM project_tasks WHERE id=? AND owner_id=?", (r["project_task_id"], owner)).fetchone()
+                task = conn.execute(
+                    "SELECT * FROM project_tasks WHERE id=? AND owner_id=?",
+                    (r["project_task_id"], owner),
+                ).fetchone()
                 d = dict(r)
                 d["project_task"] = dict(task) if task else None
                 out.append(d)
@@ -584,22 +775,38 @@ class CustomerProjects:
         digest = _request("customer_project_unlink", [lid])
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
             _version_check(conn)
-            row = conn.execute("SELECT request_hash, resource_type FROM state_operations WHERE owner_id=? AND operation_key=?", (owner, key)).fetchone()
+            row = conn.execute(
+                "SELECT request_hash, resource_type FROM state_operations WHERE owner_id=? AND operation_key=?",
+                (owner, key),
+            ).fetchone()
             if row is not None:
-                if row["resource_type"] != _RESOURCE_PROJECT_LINK or not hmac.compare_digest(conn.execute("SELECT request_hash FROM state_operations WHERE owner_id=? AND operation_key=?", (owner, key)).fetchone()[0], digest):
+                if row["resource_type"] != _RESOURCE_PROJECT_LINK or not hmac.compare_digest(
+                    conn.execute(
+                        "SELECT request_hash FROM state_operations WHERE owner_id=? AND operation_key=?",
+                        (owner, key),
+                    ).fetchone()[0],
+                    digest,
+                ):
                     raise CRMError("Operation key was already used for a different request.")
                 return lid
-            if conn.execute("SELECT 1 FROM customer_projects WHERE id=? AND owner_id=?", (lid, owner)).fetchone() is None:
+            if (
+                conn.execute(
+                    "SELECT 1 FROM customer_projects WHERE id=? AND owner_id=?", (lid, owner)
+                ).fetchone()
+                is None
+            ):
                 raise AccessDenied("Access denied.")
             conn.execute("DELETE FROM customer_projects WHERE id=? AND owner_id=?", (lid, owner))
             _audit(conn, now, owner, "customer_project_unlinked", _RESOURCE_PROJECT_LINK, lid)
             _remember(conn, owner, key, digest, _RESOURCE_PROJECT_LINK, lid)
             return lid
 
+
 # ---------- Communication Approvals ----------
 class CommunicationApprovals:
     def __init__(self, auth: AuthService, state: StateStorage):
-        self._auth = auth; self._state = state
+        self._auth = auth
+        self._state = state
 
     def _effective_status(self, row, now):
         # row is sqlite Row or dict-like with status, created_at, expires_at
@@ -608,26 +815,42 @@ class CommunicationApprovals:
             return "expired"
         return status
 
-    def request(self, token: str, communication_id: str, *, operation_key: str, ttl: int = 900) -> str:
+    def request(
+        self, token: str, communication_id: str, *, operation_key: str, ttl: int = 900
+    ) -> str:
         cid = _input(_record_id, communication_id)
         ttl_v = _input(_ttl, ttl)
         key = _input(_key, operation_key)
         digest = _request("crm_comm_approval_request", [cid, ttl_v])
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
             _version_check(conn)
-            existing = _retry(conn, owner, key, digest, _RESOURCE_COMM_APPROVAL, "crm_communication_approvals")
+            existing = _retry(
+                conn, owner, key, digest, _RESOURCE_COMM_APPROVAL, "crm_communication_approvals"
+            )
             if existing:
                 return existing
             _owned_communication(conn, owner, cid)
             # ensure communication is draft?
             # optional: check status draft
-            comm = conn.execute("SELECT status FROM communications WHERE id=? AND owner_id=?", (cid, owner)).fetchone()
+            comm = conn.execute(
+                "SELECT status FROM communications WHERE id=? AND owner_id=?", (cid, owner)
+            ).fetchone()
             if comm and comm["status"] not in ("draft", "sent", "archived"):
                 raise CRMError("Invalid communication status for approval.")
             ident = secrets.token_hex(16)
             expires = now + ttl_v
-            conn.execute("INSERT INTO crm_communication_approvals(id, owner_id, communication_id, status, created_at, expires_at, decided_at) VALUES(?,?,?,?,?,?, NULL)", (ident, owner, cid, "pending", now, expires))
-            _audit(conn, now, owner, "crm_communication_approval_created", _RESOURCE_COMM_APPROVAL, ident)
+            conn.execute(
+                "INSERT INTO crm_communication_approvals(id, owner_id, communication_id, status, created_at, expires_at, decided_at) VALUES(?,?,?,?,?,?, NULL)",
+                (ident, owner, cid, "pending", now, expires),
+            )
+            _audit(
+                conn,
+                now,
+                owner,
+                "crm_communication_approval_created",
+                _RESOURCE_COMM_APPROVAL,
+                ident,
+            )
             _remember(conn, owner, key, digest, _RESOURCE_COMM_APPROVAL, ident)
             return ident
 
@@ -639,45 +862,67 @@ class CommunicationApprovals:
         digest = _request("crm_comm_approval_decide", [aid, target])
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
             _version_check(conn)
-            row = conn.execute("SELECT * FROM crm_communication_approvals WHERE id=? AND owner_id=?", (aid, owner)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM crm_communication_approvals WHERE id=? AND owner_id=?", (aid, owner)
+            ).fetchone()
             if row is None:
                 raise AccessDenied("Access denied.")
-            existing = _retry(conn, owner, key, digest, _RESOURCE_COMM_APPROVAL, "crm_communication_approvals")
+            existing = _retry(
+                conn, owner, key, digest, _RESOURCE_COMM_APPROVAL, "crm_communication_approvals"
+            )
             if existing:
                 return aid
             eff = self._effective_status(row, now)
             if eff != "pending":
                 raise CRMError(f"Approval is {eff}, cannot decide.")
-            conn.execute("UPDATE crm_communication_approvals SET status=?, decided_at=? WHERE id=? AND owner_id=?", (target, now, aid, owner))
+            conn.execute(
+                "UPDATE crm_communication_approvals SET status=?, decided_at=? WHERE id=? AND owner_id=?",
+                (target, now, aid, owner),
+            )
             _audit(conn, now, owner, event, _RESOURCE_COMM_APPROVAL, aid)
             _remember(conn, owner, key, digest, _RESOURCE_COMM_APPROVAL, aid)
             return aid
 
     def approve(self, token: str, approval_id: str, *, operation_key: str) -> str:
-        return self._transition(token, approval_id, "approved", "crm_communication_approval_approved", operation_key)
+        return self._transition(
+            token, approval_id, "approved", "crm_communication_approval_approved", operation_key
+        )
 
     def reject(self, token: str, approval_id: str, *, operation_key: str) -> str:
-        return self._transition(token, approval_id, "rejected", "crm_communication_approval_rejected", operation_key)
+        return self._transition(
+            token, approval_id, "rejected", "crm_communication_approval_rejected", operation_key
+        )
 
     def get(self, token: str, approval_id: str) -> dict:
         aid = _input(_record_id, approval_id)
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
             _version_check(conn)
-            row = conn.execute("SELECT * FROM crm_communication_approvals WHERE id=? AND owner_id=?", (aid, owner)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM crm_communication_approvals WHERE id=? AND owner_id=?", (aid, owner)
+            ).fetchone()
             if row is None:
                 raise AccessDenied("Access denied.")
             d = dict(row)
             d["effective_status"] = self._effective_status(row, now)
             return d
 
-    def list(self, token: str, *, communication_id: str | None = None, after_id: str | None = None, limit: int = 20) -> list[dict]:
+    def list(
+        self,
+        token: str,
+        *,
+        communication_id: str | None = None,
+        after_id: str | None = None,
+        limit: int = 20,
+    ) -> list[dict]:
         cid = _input(_record_id, communication_id) if communication_id else None
         cursor = "" if after_id is None else _input(_record_id, after_id)
         if type(limit) is not int or not 1 <= limit <= 100:
             raise CRMError("Invalid limit.")
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
             _version_check(conn)
-            query = "SELECT * FROM crm_communication_approvals WHERE owner_id=? AND id>? COLLATE BINARY"
+            query = (
+                "SELECT * FROM crm_communication_approvals WHERE owner_id=? AND id>? COLLATE BINARY"
+            )
             params: list[Any] = [owner, cursor]
             if cid:
                 query += " AND communication_id=?"
@@ -692,12 +937,22 @@ class CommunicationApprovals:
                 out.append(d)
             return out
 
+
 # ---------- Outbound Workflow Config (safe limited workflow) ----------
 class OutboundWorkflowConfig:
     def __init__(self, auth: AuthService, state: StateStorage):
-        self._auth = auth; self._state = state
+        self._auth = auth
+        self._state = state
 
-    def set(self, token: str, *, operation_key: str, enabled: bool, allowed_channels: str = "", daily_limit: int = 5) -> str:
+    def set(
+        self,
+        token: str,
+        *,
+        operation_key: str,
+        enabled: bool,
+        allowed_channels: str = "",
+        daily_limit: int = 5,
+    ) -> str:
         if type(enabled) is not bool:
             raise CRMError("enabled bool required.")
         allowed_v = _input(_allowed_channels, allowed_channels)
@@ -707,17 +962,34 @@ class OutboundWorkflowConfig:
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
             _version_check(conn)
             # check if existing operation key with same digest
-            row = conn.execute("SELECT request_hash, resource_type FROM state_operations WHERE owner_id=? AND operation_key=?", (owner, key)).fetchone()
+            row = conn.execute(
+                "SELECT request_hash, resource_type FROM state_operations WHERE owner_id=? AND operation_key=?",
+                (owner, key),
+            ).fetchone()
             if row is not None:
-                if row["resource_type"] != _RESOURCE_OUTBOUND_CONFIG or not hmac.compare_digest(conn.execute("SELECT request_hash FROM state_operations WHERE owner_id=? AND operation_key=?", (owner, key)).fetchone()[0], digest):
+                if row["resource_type"] != _RESOURCE_OUTBOUND_CONFIG or not hmac.compare_digest(
+                    conn.execute(
+                        "SELECT request_hash FROM state_operations WHERE owner_id=? AND operation_key=?",
+                        (owner, key),
+                    ).fetchone()[0],
+                    digest,
+                ):
                     raise CRMError("Operation key was already used for a different request.")
                 return owner
             # need to check previous config hash? We just upsert
-            exists = conn.execute("SELECT 1 FROM crm_outbound_configs WHERE owner_id=?", (owner,)).fetchone()
+            exists = conn.execute(
+                "SELECT 1 FROM crm_outbound_configs WHERE owner_id=?", (owner,)
+            ).fetchone()
             if exists:
-                conn.execute("UPDATE crm_outbound_configs SET enabled=?, allowed_channels=?, daily_limit=?, updated_at=? WHERE owner_id=?", (1 if enabled else 0, allowed_v, limit_v, now, owner))
+                conn.execute(
+                    "UPDATE crm_outbound_configs SET enabled=?, allowed_channels=?, daily_limit=?, updated_at=? WHERE owner_id=?",
+                    (1 if enabled else 0, allowed_v, limit_v, now, owner),
+                )
             else:
-                conn.execute("INSERT INTO crm_outbound_configs(owner_id, enabled, allowed_channels, daily_limit, updated_at) VALUES(?,?,?,?,?)", (owner, 1 if enabled else 0, allowed_v, limit_v, now))
+                conn.execute(
+                    "INSERT INTO crm_outbound_configs(owner_id, enabled, allowed_channels, daily_limit, updated_at) VALUES(?,?,?,?,?)",
+                    (owner, 1 if enabled else 0, allowed_v, limit_v, now),
+                )
             _audit(conn, now, owner, "crm_outbound_config_set", _RESOURCE_OUTBOUND_CONFIG, owner)
             _remember(conn, owner, key, digest, _RESOURCE_OUTBOUND_CONFIG, owner)
             return owner
@@ -725,7 +997,9 @@ class OutboundWorkflowConfig:
     def get(self, token: str) -> dict | None:
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, _now):
             _version_check(conn)
-            row = conn.execute("SELECT * FROM crm_outbound_configs WHERE owner_id=?", (owner,)).fetchone()
+            row = conn.execute(
+                "SELECT * FROM crm_outbound_configs WHERE owner_id=?", (owner,)
+            ).fetchone()
             if row is None:
                 return None
             return dict(row)
@@ -735,19 +1009,32 @@ class OutboundWorkflowConfig:
         digest = _request("crm_outbound_config_clear", [])
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
             _version_check(conn)
-            row = conn.execute("SELECT request_hash, resource_type FROM state_operations WHERE owner_id=? AND operation_key=?", (owner, key)).fetchone()
+            row = conn.execute(
+                "SELECT request_hash, resource_type FROM state_operations WHERE owner_id=? AND operation_key=?",
+                (owner, key),
+            ).fetchone()
             if row is not None:
-                if row["resource_type"] != _RESOURCE_OUTBOUND_CONFIG or not hmac.compare_digest(conn.execute("SELECT request_hash FROM state_operations WHERE owner_id=? AND operation_key=?", (owner, key)).fetchone()[0], digest):
+                if row["resource_type"] != _RESOURCE_OUTBOUND_CONFIG or not hmac.compare_digest(
+                    conn.execute(
+                        "SELECT request_hash FROM state_operations WHERE owner_id=? AND operation_key=?",
+                        (owner, key),
+                    ).fetchone()[0],
+                    digest,
+                ):
                     raise CRMError("Operation key was already used for a different request.")
                 return owner
             conn.execute("DELETE FROM crm_outbound_configs WHERE owner_id=?", (owner,))
-            _audit(conn, now, owner, "crm_outbound_config_cleared", _RESOURCE_OUTBOUND_CONFIG, owner)
+            _audit(
+                conn, now, owner, "crm_outbound_config_cleared", _RESOURCE_OUTBOUND_CONFIG, owner
+            )
             _remember(conn, owner, key, digest, _RESOURCE_OUTBOUND_CONFIG, owner)
             return owner
 
     def is_safe_workflow(self, conn, owner, channel: str) -> bool:
         # call inside transaction where outbound config already fetched
-        row = conn.execute("SELECT * FROM crm_outbound_configs WHERE owner_id=?", (owner,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM crm_outbound_configs WHERE owner_id=?", (owner,)
+        ).fetchone()
         if row is None or row["enabled"] != 1:
             return False
         allowed = row["allowed_channels"]
@@ -764,25 +1051,37 @@ class OutboundWorkflowConfig:
         # Let's require caller to pass now.
         return True  # channel check only; daily count checked separately
 
+
 # ---------- CRM Communications Gate ----------
 class CRMCommunications:
     """Wraps Communications with approval gate and safe workflow."""
+
     def __init__(self, auth: AuthService, state: StateStorage):
-        self._auth = auth; self._state = state
+        self._auth = auth
+        self._state = state
         self._approvals = CommunicationApprovals(auth, state)
         self._outbound = OutboundWorkflowConfig(auth, state)
 
-    def create_draft(self, token: str, customer_id: str, channel: str, body: str, *, operation_key: str) -> str:
+    def create_draft(
+        self, token: str, customer_id: str, channel: str, body: str, *, operation_key: str
+    ) -> str:
         # delegate to Communications.create
         from .communications import Communications
+
         comm = Communications(self._auth, self._state)
         return comm.create(token, customer_id, channel, body, operation_key=operation_key)
 
-    def request_approval(self, token: str, communication_id: str, *, operation_key: str, ttl: int = 900) -> str:
-        return self._approvals.request(token, communication_id, operation_key=operation_key, ttl=ttl)
+    def request_approval(
+        self, token: str, communication_id: str, *, operation_key: str, ttl: int = 900
+    ) -> str:
+        return self._approvals.request(
+            token, communication_id, operation_key=operation_key, ttl=ttl
+        )
 
     def _check_safe_workflow(self, conn, owner, channel, now) -> bool:
-        row = conn.execute("SELECT * FROM crm_outbound_configs WHERE owner_id=?", (owner,)).fetchone()
+        row = conn.execute(
+            "SELECT * FROM crm_outbound_configs WHERE owner_id=?", (owner,)
+        ).fetchone()
         if row is None or row["enabled"] != 1:
             return False
         allowed = row["allowed_channels"]
@@ -794,7 +1093,10 @@ class CRMCommunications:
         # daily limit: count communications sent today (UTC day) for this owner/channel
         # Determine day start
         day_start = (now // 86400) * 86400
-        cnt = conn.execute("SELECT count(*) FROM communications WHERE owner_id=? AND channel=? AND status='sent' AND updated_at >= ?", (owner, channel, day_start)).fetchone()[0]
+        cnt = conn.execute(
+            "SELECT count(*) FROM communications WHERE owner_id=? AND channel=? AND status='sent' AND updated_at >= ?",
+            (owner, channel, day_start),
+        ).fetchone()[0]
         if cnt >= row["daily_limit"]:
             return False
         return True
@@ -811,7 +1113,14 @@ class CRMCommunications:
         # too long, hash to 32 hex
         return hashlib.sha256(key.encode("utf-8")).hexdigest()[:32]
 
-    def send(self, token: str, communication_id: str, *, operation_key: str, approval_id: str | None = None) -> str:
+    def send(
+        self,
+        token: str,
+        communication_id: str,
+        *,
+        operation_key: str,
+        approval_id: str | None = None,
+    ) -> str:
         cid = _input(_record_id, communication_id)
         key = _input(_key, operation_key)
         if approval_id is not None:
@@ -820,9 +1129,18 @@ class CRMCommunications:
         digest = _request("crm_comm_send", digest_vals)
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
             _version_check(conn)
-            row = conn.execute("SELECT request_hash, resource_type FROM state_operations WHERE owner_id=? AND operation_key=?", (owner, key)).fetchone()
+            row = conn.execute(
+                "SELECT request_hash, resource_type FROM state_operations WHERE owner_id=? AND operation_key=?",
+                (owner, key),
+            ).fetchone()
             if row is not None:
-                if row["resource_type"] != "crm_communication_send" or not hmac.compare_digest(conn.execute("SELECT request_hash FROM state_operations WHERE owner_id=? AND operation_key=?", (owner, key)).fetchone()[0], digest):
+                if row["resource_type"] != "crm_communication_send" or not hmac.compare_digest(
+                    conn.execute(
+                        "SELECT request_hash FROM state_operations WHERE owner_id=? AND operation_key=?",
+                        (owner, key),
+                    ).fetchone()[0],
+                    digest,
+                ):
                     raise CRMError("Operation key was already used for a different request.")
                 return cid
             comm = _owned_communication(conn, owner, cid)
@@ -831,8 +1149,13 @@ class CRMCommunications:
             safe = self._check_safe_workflow(conn, owner, comm["channel"], now)
             if not safe:
                 if approval_id is None:
-                    raise CRMError("Outbound communication requires user approval (or explicitly configured safe limited workflow).")
-                appr = conn.execute("SELECT * FROM crm_communication_approvals WHERE id=? AND owner_id=?", (approval_id, owner)).fetchone()
+                    raise CRMError(
+                        "Outbound communication requires user approval (or explicitly configured safe limited workflow)."
+                    )
+                appr = conn.execute(
+                    "SELECT * FROM crm_communication_approvals WHERE id=? AND owner_id=?",
+                    (approval_id, owner),
+                ).fetchone()
                 if appr is None:
                     raise CRMError("Approval not found.")
                 if appr["communication_id"] != cid:
@@ -843,7 +1166,11 @@ class CRMCommunications:
                 if eff != "approved":
                     raise CRMError(f"Approval is {eff}, cannot send.")
             from .communications import _TRANSITIONS as COMM_TRANSITIONS
-            events = conn.execute("SELECT event FROM state_audit WHERE actor_id=? AND resource_type='communication' AND resource_id=? ORDER BY id", (owner, cid)).fetchall()
+
+            events = conn.execute(
+                "SELECT event FROM state_audit WHERE actor_id=? AND resource_type='communication' AND resource_id=? ORDER BY id",
+                (owner, cid),
+            ).fetchall()
             replayed = None
             for (ev,) in events:
                 if (replayed, ev) not in COMM_TRANSITIONS:
@@ -855,31 +1182,56 @@ class CRMCommunications:
             if expected != "sent":
                 raise CRMError("Transition not allowed.")
             # Update communications status
-            conn.execute("UPDATE communications SET status='sent', updated_at=? WHERE id=? AND owner_id=?", (now, cid, owner))
+            conn.execute(
+                "UPDATE communications SET status='sent', updated_at=? WHERE id=? AND owner_id=?",
+                (now, cid, owner),
+            )
             _audit(conn, now, owner, "communication_sent", "communication", cid)
             # Also need to record the communication's state_operations for the transition
             # Derive a comm operation key and remember it so that _owned count matches events
             derived_key = self._derived_comm_key(key)
             # Avoid collision if derived already exists (idempotency)
-            existing_comm_op = conn.execute("SELECT 1 FROM state_operations WHERE owner_id=? AND operation_key=?", (owner, derived_key)).fetchone()
+            existing_comm_op = conn.execute(
+                "SELECT 1 FROM state_operations WHERE owner_id=? AND operation_key=?",
+                (owner, derived_key),
+            ).fetchone()
             if existing_comm_op is None:
                 # compute digest for communication transition as Communications does
-                comm_digest = _base_digest("communication_transition", json.dumps([cid, "sent"], ensure_ascii=True, separators=(",", ":")))
+                comm_digest = _base_digest(
+                    "communication_transition",
+                    json.dumps([cid, "sent"], ensure_ascii=True, separators=(",", ":")),
+                )
                 # Check if derived key was used for different request? Not needed as fresh
-                conn.execute("INSERT INTO state_operations(owner_id, operation_key, request_hash, resource_type, resource_id) VALUES(?,?,?,?,?)", (owner, derived_key, comm_digest, "communication", cid))
+                conn.execute(
+                    "INSERT INTO state_operations(owner_id, operation_key, request_hash, resource_type, resource_id) VALUES(?,?,?,?,?)",
+                    (owner, derived_key, comm_digest, "communication", cid),
+                )
             # Remember CRM operation
             _remember(conn, owner, key, digest, "crm_communication_send", cid)
             return cid
 
-    def list_history(self, token: str, customer_id: str, *, status: str | None = None, after_id: str | None = None, limit: int = 20) -> list[dict]:
+    def list_history(
+        self,
+        token: str,
+        customer_id: str,
+        *,
+        status: str | None = None,
+        after_id: str | None = None,
+        limit: int = 20,
+    ) -> list[dict]:
         from .communications import Communications
+
         comm = Communications(self._auth, self._state)
-        return comm.list(token, after_id=after_id, limit=limit, customer_id=customer_id, status=status)
+        return comm.list(
+            token, after_id=after_id, limit=limit, customer_id=customer_id, status=status
+        )
+
 
 # ---------- Activity Timeline ----------
 class ActivityTimeline:
     def __init__(self, auth: AuthService, state: StateStorage):
-        self._auth = auth; self._state = state
+        self._auth = auth
+        self._state = state
 
     def get(self, token: str, customer_id: str, *, limit: int = 100) -> list[dict]:
         cid = _input(_record_id, customer_id)
@@ -890,47 +1242,158 @@ class ActivityTimeline:
             _owned_customer(conn, owner, cid)
             events: list[dict] = []
             # customer creation/status via state_audit for resource_type customer
-            rows = conn.execute("SELECT event, occurred_at, resource_id FROM state_audit WHERE actor_id=? AND resource_type='customer' AND resource_id=? ORDER BY occurred_at", (owner, cid)).fetchall()
+            rows = conn.execute(
+                "SELECT event, occurred_at, resource_id FROM state_audit WHERE actor_id=? AND resource_type='customer' AND resource_id=? ORDER BY occurred_at",
+                (owner, cid),
+            ).fetchall()
             for r in rows:
-                events.append({"type": "customer", "event": r["event"], "at": r["occurred_at"], "id": r["resource_id"], "summary": r["event"]})
+                events.append(
+                    {
+                        "type": "customer",
+                        "event": r["event"],
+                        "at": r["occurred_at"],
+                        "id": r["resource_id"],
+                        "summary": r["event"],
+                    }
+                )
             # notes
-            for r in conn.execute("SELECT id, note, created_at FROM customer_notes WHERE owner_id=? AND customer_id=?", (owner, cid)).fetchall():
-                events.append({"type": "note", "event": "customer_note_created", "at": r["created_at"], "id": r["id"], "summary": r["note"][:60]})
+            for r in conn.execute(
+                "SELECT id, note, created_at FROM customer_notes WHERE owner_id=? AND customer_id=?",
+                (owner, cid),
+            ).fetchall():
+                events.append(
+                    {
+                        "type": "note",
+                        "event": "customer_note_created",
+                        "at": r["created_at"],
+                        "id": r["id"],
+                        "summary": r["note"][:60],
+                    }
+                )
             # requirements
-            for r in conn.execute("SELECT id, requirement, created_at FROM customer_requirements WHERE owner_id=? AND customer_id=?", (owner, cid)).fetchall():
-                events.append({"type": "requirement", "event": "customer_requirement_created", "at": r["created_at"], "id": r["id"], "summary": r["requirement"][:60]})
+            for r in conn.execute(
+                "SELECT id, requirement, created_at FROM customer_requirements WHERE owner_id=? AND customer_id=?",
+                (owner, cid),
+            ).fetchall():
+                events.append(
+                    {
+                        "type": "requirement",
+                        "event": "customer_requirement_created",
+                        "at": r["created_at"],
+                        "id": r["id"],
+                        "summary": r["requirement"][:60],
+                    }
+                )
             # communications
-            for r in conn.execute("SELECT id, channel, body, status, created_at, updated_at FROM communications WHERE owner_id=? AND customer_id=?", (owner, cid)).fetchall():
+            for r in conn.execute(
+                "SELECT id, channel, body, status, created_at, updated_at FROM communications WHERE owner_id=? AND customer_id=?",
+                (owner, cid),
+            ).fetchall():
                 # creation
-                events.append({"type": "communication", "event": f"communication_{r['status']}", "at": r["created_at"], "id": r["id"], "summary": f"{r['channel']}: {r['body'][:40]}"})
+                events.append(
+                    {
+                        "type": "communication",
+                        "event": f"communication_{r['status']}",
+                        "at": r["created_at"],
+                        "id": r["id"],
+                        "summary": f"{r['channel']}: {r['body'][:40]}",
+                    }
+                )
                 if r["status"] == "sent":
-                    events.append({"type": "communication", "event": "communication_sent", "at": r["updated_at"], "id": r["id"], "summary": f"sent {r['channel']}"})
+                    events.append(
+                        {
+                            "type": "communication",
+                            "event": "communication_sent",
+                            "at": r["updated_at"],
+                            "id": r["id"],
+                            "summary": f"sent {r['channel']}",
+                        }
+                    )
             # followups
-            for r in conn.execute("SELECT id, due_at, note, status, created_at FROM followups WHERE owner_id=? AND customer_id=?", (owner, cid)).fetchall():
-                events.append({"type": "followup", "event": f"followup_{r['status']}", "at": r["created_at"], "id": r["id"], "summary": r["note"][:40]})
+            for r in conn.execute(
+                "SELECT id, due_at, note, status, created_at FROM followups WHERE owner_id=? AND customer_id=?",
+                (owner, cid),
+            ).fetchall():
+                events.append(
+                    {
+                        "type": "followup",
+                        "event": f"followup_{r['status']}",
+                        "at": r["created_at"],
+                        "id": r["id"],
+                        "summary": r["note"][:40],
+                    }
+                )
                 # status via audit? also add updated maybe
             # proposals filtered by customer_id
-            for r in conn.execute("SELECT id, title, status, created_at, updated_at FROM proposals WHERE owner_id=? AND customer_id=?", (owner, cid)).fetchall():
-                events.append({"type": "proposal", "event": f"proposal_{r['status']}", "at": r["created_at"], "id": r["id"], "summary": r["title"][:40]})
+            for r in conn.execute(
+                "SELECT id, title, status, created_at, updated_at FROM proposals WHERE owner_id=? AND customer_id=?",
+                (owner, cid),
+            ).fetchall():
+                events.append(
+                    {
+                        "type": "proposal",
+                        "event": f"proposal_{r['status']}",
+                        "at": r["created_at"],
+                        "id": r["id"],
+                        "summary": r["title"][:40],
+                    }
+                )
             # customer orders
-            for r in conn.execute("SELECT id, title, status, created_at FROM customer_orders WHERE owner_id=? AND customer_id=?", (owner, cid)).fetchall():
-                events.append({"type": "order", "event": f"order_{r['status']}", "at": r["created_at"], "id": r["id"], "summary": r["title"][:40]})
+            for r in conn.execute(
+                "SELECT id, title, status, created_at FROM customer_orders WHERE owner_id=? AND customer_id=?",
+                (owner, cid),
+            ).fetchall():
+                events.append(
+                    {
+                        "type": "order",
+                        "event": f"order_{r['status']}",
+                        "at": r["created_at"],
+                        "id": r["id"],
+                        "summary": r["title"][:40],
+                    }
+                )
             # customer projects
-            for r in conn.execute("SELECT id, project_task_id, created_at FROM customer_projects WHERE owner_id=? AND customer_id=?", (owner, cid)).fetchall():
-                task = conn.execute("SELECT title, status FROM project_tasks WHERE id=? AND owner_id=?", (r["project_task_id"], owner)).fetchone()
+            for r in conn.execute(
+                "SELECT id, project_task_id, created_at FROM customer_projects WHERE owner_id=? AND customer_id=?",
+                (owner, cid),
+            ).fetchall():
+                task = conn.execute(
+                    "SELECT title, status FROM project_tasks WHERE id=? AND owner_id=?",
+                    (r["project_task_id"], owner),
+                ).fetchone()
                 title = task["title"][:40] if task else r["project_task_id"][:8]
-                events.append({"type": "project", "event": "project_linked", "at": r["created_at"], "id": r["id"], "summary": title})
+                events.append(
+                    {
+                        "type": "project",
+                        "event": "project_linked",
+                        "at": r["created_at"],
+                        "id": r["id"],
+                        "summary": title,
+                    }
+                )
                 if task:
-                    events.append({"type": "project", "event": f"project_{task['status']}", "at": task["updated_at"] if "updated_at" in task.keys() else r["created_at"], "id": r["project_task_id"], "summary": title})
+                    events.append(
+                        {
+                            "type": "project",
+                            "event": f"project_{task['status']}",
+                            "at": task["updated_at"]
+                            if "updated_at" in task.keys()
+                            else r["created_at"],
+                            "id": r["project_task_id"],
+                            "summary": title,
+                        }
+                    )
             # Sort by at ascending, then limit
             events.sort(key=lambda x: x["at"])
             # dedup maybe sort
             return events[:limit]
 
+
 # ---------- Customer Profile (aggregated view) ----------
 class CustomerProfile:
     def __init__(self, auth: AuthService, state: StateStorage):
-        self._auth = auth; self._state = state
+        self._auth = auth
+        self._state = state
         self._notes = CustomerNotes(auth, state)
         self._reqs = CustomerRequirements(auth, state)
         self._orders = CustomerOrders(auth, state)
@@ -943,13 +1406,32 @@ class CustomerProfile:
             _version_check(conn)
             cust = dict(_owned_customer(conn, owner, cid))
             # enrich counts
-            cust["_note_count"] = conn.execute("SELECT count(*) FROM customer_notes WHERE owner_id=? AND customer_id=?", (owner, cid)).fetchone()[0]
-            cust["_requirement_count"] = conn.execute("SELECT count(*) FROM customer_requirements WHERE owner_id=? AND customer_id=?", (owner, cid)).fetchone()[0]
-            cust["_communication_count"] = conn.execute("SELECT count(*) FROM communications WHERE owner_id=? AND customer_id=?", (owner, cid)).fetchone()[0]
-            cust["_followup_count"] = conn.execute("SELECT count(*) FROM followups WHERE owner_id=? AND customer_id=?", (owner, cid)).fetchone()[0]
-            cust["_order_count"] = conn.execute("SELECT count(*) FROM customer_orders WHERE owner_id=? AND customer_id=?", (owner, cid)).fetchone()[0]
-            cust["_project_count"] = conn.execute("SELECT count(*) FROM customer_projects WHERE owner_id=? AND customer_id=?", (owner, cid)).fetchone()[0]
-            cust["_proposal_count"] = conn.execute("SELECT count(*) FROM proposals WHERE owner_id=? AND customer_id=?", (owner, cid)).fetchone()[0]
+            cust["_note_count"] = conn.execute(
+                "SELECT count(*) FROM customer_notes WHERE owner_id=? AND customer_id=?",
+                (owner, cid),
+            ).fetchone()[0]
+            cust["_requirement_count"] = conn.execute(
+                "SELECT count(*) FROM customer_requirements WHERE owner_id=? AND customer_id=?",
+                (owner, cid),
+            ).fetchone()[0]
+            cust["_communication_count"] = conn.execute(
+                "SELECT count(*) FROM communications WHERE owner_id=? AND customer_id=?",
+                (owner, cid),
+            ).fetchone()[0]
+            cust["_followup_count"] = conn.execute(
+                "SELECT count(*) FROM followups WHERE owner_id=? AND customer_id=?", (owner, cid)
+            ).fetchone()[0]
+            cust["_order_count"] = conn.execute(
+                "SELECT count(*) FROM customer_orders WHERE owner_id=? AND customer_id=?",
+                (owner, cid),
+            ).fetchone()[0]
+            cust["_project_count"] = conn.execute(
+                "SELECT count(*) FROM customer_projects WHERE owner_id=? AND customer_id=?",
+                (owner, cid),
+            ).fetchone()[0]
+            cust["_proposal_count"] = conn.execute(
+                "SELECT count(*) FROM proposals WHERE owner_id=? AND customer_id=?", (owner, cid)
+            ).fetchone()[0]
             return cust
 
     def full(self, token: str, customer_id: str) -> dict:
@@ -959,12 +1441,18 @@ class CustomerProfile:
         reqs = self._reqs.list(token, customer_id)
         from .communications import Communications
         from .followups import Followups
-        comms = Communications(self._auth, self._state).list(token, customer_id=customer_id, limit=100)
+
+        comms = Communications(self._auth, self._state).list(
+            token, customer_id=customer_id, limit=100
+        )
         folls = Followups(self._auth, self._state).list(token, customer_id=customer_id, limit=100)
         orders = self._orders.list(token, customer_id=customer_id, limit=100)
         projects = self._projects.list(token, customer_id)
         from .service_workspace import Proposals
-        proposals = Proposals(self._auth, self._state).list(token, customer_id=customer_id, limit=100)
+
+        proposals = Proposals(self._auth, self._state).list(
+            token, customer_id=customer_id, limit=100
+        )
         timeline = self._timeline.get(token, customer_id, limit=100)
         return {
             "profile": profile,
@@ -978,16 +1466,21 @@ class CustomerProfile:
             "timeline": timeline,
         }
 
+
 # ---------- CSV helpers (wrappers) ----------
 class CustomerCSV:
     def __init__(self, auth: AuthService, state: StateStorage):
-        self._auth = auth; self._state = state
+        self._auth = auth
+        self._state = state
 
     def export(self, token: str) -> str:
         from .customers import Customers
+
         return Customers(self._auth, self._state).export_csv(token)
 
     def import_csv(self, token: str, csv_text: str, *, operation_key_prefix: str) -> dict:
         from .customers import Customers
-        return Customers(self._auth, self._state).import_csv(token, csv_text, operation_key_prefix=operation_key_prefix)
 
+        return Customers(self._auth, self._state).import_csv(
+            token, csv_text, operation_key_prefix=operation_key_prefix
+        )
