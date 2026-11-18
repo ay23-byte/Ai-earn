@@ -48,7 +48,11 @@ def scan_secrets() -> list[str]:
 
 def _declares_third_party_dependencies() -> bool:
     """Return whether project or requirements files declare third-party packages."""
-    for requirements in ROOT.glob("requirements*.txt"):
+    # Runtime dependencies only: requirements-dev.txt pins CI-only quality
+    # tools (ruff/mypy/pip-audit) and is not part of the shipped runtime, so
+    # it must not turn the stdlib-only runtime audit into an audit of the
+    # CI runner's installed environment.
+    for requirements in (ROOT / "requirements.txt",):
         try:
             for line in requirements.read_text(encoding="utf-8", errors="ignore").splitlines():
                 stripped = line.strip()
@@ -85,7 +89,8 @@ def _declares_third_party_dependencies() -> bool:
 def audit_dependencies() -> int:
     """Audit the active environment; fail truthfully on missing tooling or audit errors."""
     if not _declares_third_party_dependencies():
-        print("Dependency audit: no third-party dependencies declared — clean.")
+        print("Dependency audit: stdlib only — no third-party runtime dependencies to audit (clean).")
+        print("Policy: stdlib only is clean; if runtime deps are added, CI must run pip-audit and fail on known vulns (see docs/SECURITY.md).")
         return 0
 
     try:
