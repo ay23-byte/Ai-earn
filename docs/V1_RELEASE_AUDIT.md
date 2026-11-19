@@ -26,7 +26,7 @@ code inspection + full local gate suite on the release branch, not doc claims.
 | Finance engine (integer paise, idempotency, audit events) | COMPLETE AND VERIFIED |
 | Invoice & payment workflows (sandbox/drafts; no fake confirmations) | COMPLETE AND VERIFIED |
 | Settlement & reconciliation (operator CSV evidence + human confirm) | COMPLETE AND VERIFIED |
-| OAuth connectors (PKCE, refresh, revoke) | COMPLETE AND VERIFIED — Drive + Gmail live-validated by operator 2026-11-19; GitHub live run optional/open |
+| OAuth connectors (PKCE, refresh, revoke) | COMPLETE AND VERIFIED — Drive, Gmail, and GitHub all live-validated by operator 2026-11-19 |
 | AI assistant (approval queue for consequential actions) | COMPLETE AND VERIFIED |
 | Approval workflows | COMPLETE AND VERIFIED |
 | Backup & recovery (drill-tested, disposable data) | COMPLETE AND VERIFIED |

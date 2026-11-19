@@ -4,7 +4,8 @@
 operator ran the full lifecycle below against a disposable Google test
 project: Drive returned 0 items (expected under the `drive.file` scope on a
 fresh account) and Gmail returned 10 metadata items; both runs revoked
-credentials locally. GitHub live validation remains open (optional token).
+credentials locally. GitHub was also live-validated by the operator the
+same day (10 public-issue results, read-only token, deleted after use).
 Never put credentials in the repo or chat — environment only.
 
 ## Verified without a live account (in CI)
