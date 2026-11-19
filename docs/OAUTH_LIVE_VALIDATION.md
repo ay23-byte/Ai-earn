@@ -1,8 +1,11 @@
 # OAuth Live Validation Procedure (disposable accounts only)
 
-**Status: BLOCKED BY EXTERNAL ACTION.** Implementation + mocked-transport
-tests are complete; the live run requires the operator's disposable provider
-account. Never put credentials in the repo or chat — environment only.
+**Status: DRIVE + GMAIL LIVE-VALIDATED (operator run, 2026-11-19).** The
+operator ran the full lifecycle below against a disposable Google test
+project: Drive returned 0 items (expected under the `drive.file` scope on a
+fresh account) and Gmail returned 10 metadata items; both runs revoked
+credentials locally. GitHub live validation remains open (optional token).
+Never put credentials in the repo or chat — environment only.
 
 ## Verified without a live account (in CI)
 
