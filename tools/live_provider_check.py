@@ -42,24 +42,36 @@ def configuration_status(environ: Mapping[str, str]) -> dict[str, bool]:
 
 
 def _validate_google_connector(connector: Any, *, owner_id: str, timeout: int, open_browser: bool) -> dict[str, int | str]:
-    authorization_url = connector.begin_authorization(owner_id=owner_id)
-    print("Open this disposable-account authorization URL:")
-    print(authorization_url)
-    if open_browser:
-        webbrowser.open(authorization_url)
-    code, state = connector.wait_for_authorization_callback(timeout=timeout)
+    # Stage-labelled progress: connector errors are categorical messages by
+    # design (no codes, tokens, or provider payloads), so naming the stage
+    # and message is safe and turns a silent failure into a diagnosis.
+    stage = "authorization start"
     try:
-        connector.exchange_authorization_code(code=code, state=state, owner_id=owner_id)
-        if isinstance(connector, GmailConnector):
-            rows = connector.search(query="", limit=10, owner_id=owner_id)
-        else:
-            rows = connector.list(limit=10, owner_id=owner_id)
-        return {"service": connector.connector_id, "items_returned": len(rows), "status": "validated"}
-    finally:
+        authorization_url = connector.begin_authorization(owner_id=owner_id)
+        print("Open this disposable-account authorization URL:")
+        print(authorization_url)
+        if open_browser:
+            webbrowser.open(authorization_url)
+        stage = "browser consent / callback (did you finish signing in and click Allow?)"
+        code, state = connector.wait_for_authorization_callback(timeout=timeout)
+        print("Callback received; exchanging the authorization code...")
         try:
-            connector.revoke(owner_id=owner_id)
-        except ConnectorError:
-            print("Local OAuth credentials were erased; remote revocation could not be confirmed.")
+            stage = "token exchange (check client ID/secret and that the consent account is a listed test user)"
+            connector.exchange_authorization_code(code=code, state=state, owner_id=owner_id)
+            stage = "read-only API call (is the Drive/Gmail API enabled in the same project?)"
+            if isinstance(connector, GmailConnector):
+                rows = connector.search(query="", limit=10, owner_id=owner_id)
+            else:
+                rows = connector.list(limit=10, owner_id=owner_id)
+            return {"service": connector.connector_id, "items_returned": len(rows), "status": "validated"}
+        finally:
+            try:
+                connector.revoke(owner_id=owner_id)
+            except ConnectorError:
+                print("Local OAuth credentials were erased; remote revocation could not be confirmed.")
+    except ConnectorError as exc:
+        print(f"FAILED at stage: {stage}. Reason: {exc}", file=sys.stderr)
+        raise
 
 
 def run_live_validation(
@@ -120,7 +132,7 @@ def main(argv: list[str] | None = None, *, connector_factory: Callable[[str], An
             connector=connector,
         )
     except ConnectorError:
-        print("Live validation failed without exposing provider details.", file=sys.stderr)
+        print("Live validation failed (see FAILED stage above; no credentials were exposed).", file=sys.stderr)
         return 3
     print(f"Validated {result['service']}: {result['items_returned']} item(s) returned; credentials revoked locally.")
     return 0
