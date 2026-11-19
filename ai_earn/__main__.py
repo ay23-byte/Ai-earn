@@ -30,6 +30,10 @@ def main(args: Sequence[str], environ: Mapping[str, str], out: TextIO, err: Text
         from .auth_cli import run
         return run(args[1], environ, sys.stdin, out, err)
 
+    if list(args) == ["onboarding"]:
+        from .onboarding_cli import run as onboarding_run
+        return onboarding_run(environ, sys.stdin, out, err)
+
     if len(args) == 2 and args[0] == "dashboard":
         from .dashboard_cli import run
         return run(args[1], environ, sys.stdin, out, err)
@@ -49,7 +53,7 @@ def main(args: Sequence[str], environ: Mapping[str, str], out: TextIO, err: Text
         write_event(Event.INVALID_REQUEST, err)
         result = failure(
             "invalid_command",
-            "Usage: python -m ai_earn status | auth {register|login|recover} | tracker {init|open} | dashboard snapshot | doctor [--plan-init|--json|--check-stale] | health [--json] [--with-backups] [--check-stale] | data {export|delete} | production",
+            "Usage: python -m ai_earn status | auth {register|login|recover} | tracker {init|open} | dashboard snapshot | doctor [--plan-init|--json|--check-stale] | health [--json] [--with-backups] [--check-stale] | data {export|delete} | onboarding | production",
         )
         out.write(json.dumps(result) + "\n")
         return 2
