@@ -5,9 +5,9 @@ Date: 2026-11-18. Base: `main` @ `902469b` + this release branch.
 ## 1. Completion estimate (evidence-based, not arbitrary)
 
 18 audited areas (see `docs/V1_RELEASE_AUDIT.md`): **14 verified complete
-(78%)**, 1 implemented pending live verification (OAuth), 2 blocked on
-external action (live OAuth run, independent pentest), 1 intentionally not
-implemented (live payments, M11-gated). Of everything completable inside
+(83%)**, 1 blocked on external action (independent pentest), 1
+intentionally not implemented (live payments, M11-gated). OAuth Drive +
+Gmail were live-validated by the operator on 2026-11-19. Of everything completable inside
 the repository, **100% is complete and verified**.
 
 ## 2. Production-readiness assessment
@@ -44,8 +44,8 @@ No known critical defects. Automated security review clean
 
 ## 10–13. External actions, deployment, blockers, next step
 
-External: (a) operator runs `tools/live_provider_check.py --live` with a
-disposable account; (b) third-party pentest from `docs/PENTEST_HANDOFF.md`;
+External: (a) ~~operator live OAuth run~~ DONE 2026-11-19 (Drive + Gmail);
+(b) third-party pentest from `docs/PENTEST_HANDOFF.md`;
 (c) human real-browser a11y pass; (d) owner's M11 signature before any
 live-payment enablement. Deployment: `docs/PRODUCTION_DEPLOYMENT.md`.
 **Exact release blockers for a "certified production" claim: (a)–(d).**

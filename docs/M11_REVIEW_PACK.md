@@ -24,8 +24,8 @@ error_recovery, configuration_separation — with `live_blocked: true`,
   `docs/DATABASE_RELEASE_VALIDATION.md`, `docs/SECURITY_RELEASE_REVIEW.md`,
   `docs/ACCESSIBILITY_RELEASE_VALIDATION.md`,
   `docs/BACKUP_RECOVERY_RELEASE_VALIDATION.md`, `docs/CI_RELEASE_VALIDATION.md`.
-- OAuth live validation: BLOCKED (operator disposable account) — see
-  `docs/OAUTH_LIVE_VALIDATION.md`. Pentest: PENDING (third party).
+- OAuth live validation: Drive + Gmail COMPLETED by operator 2026-11-19
+  (see `docs/OAUTH_LIVE_VALIDATION.md`). Pentest: PENDING (third party).
 
 ## Human checklist (each requires a named reviewer + date)
 
