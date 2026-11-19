@@ -76,3 +76,12 @@ Statuses: `not_configured` (set env), `relative_path`, `invalid_path`, `permissi
 - No verified CRM, no invoicing PDF beyond stub, no verified ledger settlement, no Razorpay/Stripe live, no autonomous AI. `followups` pending→completed/cancelled and CSV (v19) are local drafts only, not verified external tasks; `invoices` v20 are local stubs with deterministic PDF `STUB|11-CONCEPT` and SHA-256 hash, not issued demands. Do not enter real customer/financial data.
 
 See `docs/ARCHITECTURE.md`, `DATABASE.md`, `PAYMENTS.md`, `SECURITY_REVIEW.md` for limits.
+
+
+## First-run onboarding
+
+Run `python -m ai_earn onboarding` (with `AI_EARN_AUTH_DB` and
+`AI_EARN_STATE_DB` set) to see a checklist computed from your actual
+records — service created/published, first customer, opportunity,
+proposal, planned work, invoice, recorded income, optional AI provider —
+plus the single next action. It creates nothing and shows no demo data.
