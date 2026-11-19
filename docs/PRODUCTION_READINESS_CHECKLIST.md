@@ -9,7 +9,7 @@
 - [x] AI consequential actions gated by ApprovalQueue
 - [x] Backup/restore drill validated on disposable data
 - [x] axe-core: 0 violations (jsdom); manual browser items documented
-- [x] Live OAuth validation run — Drive + Gmail validated by operator 2026-11-19 (GitHub optional/open)
+- [x] Live OAuth validation run — Drive, Gmail, and GitHub validated by operator 2026-11-19
 - [ ] Independent pentest — PENDING: third party (handoff ready)
 - [ ] Manual a11y browser pass — PENDING: human
 - [ ] M11 sign-off — PENDING: accountable human; live payments stay BLOCKED
