@@ -141,7 +141,7 @@ function renderChart(containerId, buckets, opts){
 }
 
 // Main render
-function render(snapshot){
+function render(snapshot, source){
   if (!snapshot || snapshot.format !== "ai-earn-dashboard-snapshot" || snapshot.version !== 1 || !snapshot.metrics || snapshot.metrics.read_only !== true) throw Error("Unsupported snapshot. Expected format ai-earn-dashboard-snapshot version 1 with read_only metrics.");
   const m = snapshot.metrics;
   const w = m.work||{}, c=m.commercial||{}, p=m.asserted_pipeline||{}, o=m.payment_observations||{}, inc=m.income||{}, opp=m.opportunities||{}, svc=m.services||{}, pf=m.portfolio||{}, prod=m.products||{}, cust=m.customers||{}, comm=m.communications||{}, led=m.ledger||{}, foll=m.followups||{}, inv=m.invoices||{}, leg11=m.ledger_11||{}, prov=m.provider_orders||{}, provevt=m.provider_events||{}, aia=m.ai_approvals||{}, eme=m.ai_emergency||{}, ana=m.analytics||{}, rev=m.revenue_analytics||m.business_intelligence||null;
@@ -404,11 +404,13 @@ function render(snapshot){
   }
 
   // Status + toast
-  $("snapshotStatus").textContent = "Snapshot loaded — "+count(m.schema_version)+" schema, read-only.";
+  const live = source === "live";
+  $("snapshotStatus").textContent = live ? "Connected to local backend — live account data." : "Snapshot loaded — "+count(m.schema_version)+" schema, read-only.";
   $("snapshotStatus").className = "status success";
-  document.querySelector(".status").textContent = "READ-ONLY SNAPSHOT";
-  const foot = $("dashboardFootnote"); if(foot) foot.textContent = "Snapshot data only; no live connection. Loaded at "+(snapshot.exported_at||"unknown")+".";
-  showToast("Snapshot loaded — "+count(m.schema_version)+" schema", "success");
+  document.querySelector(".status").textContent = live ? "LIVE LOCAL BACKEND" : "READ-ONLY SNAPSHOT";
+  const foot = $("dashboardFootnote"); if(foot) foot.textContent = live ? "Live metrics from your local account database. Refreshes automatically while this page is open." : "Snapshot data only; no live connection. Loaded at "+(snapshot.exported_at||"unknown")+".";
+  const mode = $("overviewMode"); if(mode) mode.textContent = live ? "Live local backend · account-scoped" : "Read-only snapshot";
+  showToast(live ? "Connected to local backend" : "Snapshot loaded — "+count(m.schema_version)+" schema", "success");
 }
 
 function renderEmpty(){
@@ -568,6 +570,72 @@ function initRevenueHandlers(){
     showToast("JSON downloaded", "success");
   });
 }
+const apiState = { csrf: "", account: null, timer: null, live: false };
+async function apiJson(path, options){
+  const response = await fetch(path, Object.assign({ credentials:"same-origin", cache:"no-store" }, options||{}));
+  let body;
+  try { body = await response.json(); } catch(_) { throw new Error("The local backend returned an invalid response."); }
+  if(!response.ok || !body.ok) {
+    const error=new Error(body.error && body.error.message ? body.error.message : "Local backend request failed.");
+    error.status=response.status;
+    throw error;
+  }
+  return body.data;
+}
+async function initLocalApi(){
+  const form=$("loginForm"), logout=$("logoutButton"), user=$("signedInAs");
+  try{
+    const csrf=await apiJson("/api/v1/csrf"); apiState.csrf=csrf.csrf_token;
+    const me=await apiJson("/api/v1/me"); apiState.account=me.account;
+    if(form) form.hidden=true; if(logout) logout.hidden=false;
+    if(user) user.textContent="Signed in: "+(me.account.display_name||me.account.username);
+    await refreshLiveDashboard();
+    apiState.timer=window.setInterval(()=>{ if(document.visibilityState==="visible" && apiState.account) refreshLiveDashboard(false); },30000);
+  }catch(_){
+    if(form) form.hidden=false; if(logout) logout.hidden=true; if(user) user.textContent="";
+    const status=$("snapshotStatus");
+    if(status && !currentSnapshot){ status.textContent="Local backend available when started — sign in, or load an offline snapshot."; status.className="status"; }
+  }
+  if(form) form.addEventListener("submit", async e=>{
+    e.preventDefault();
+    const username=$("loginUsername"), password=$("loginPassword"), message=$("loginMessage");
+    if(!apiState.csrf){ try{ const c=await apiJson("/api/v1/csrf"); apiState.csrf=c.csrf_token; }catch(_){ if(message) message.textContent="Cannot reach local backend. Start Earn OS with python -m ai_earn serve."; return; } }
+    try{
+      const data=await apiJson("/api/v1/auth/login",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":apiState.csrf},body:JSON.stringify({username:username.value.trim(),password:password.value})});
+      apiState.account=data.account; password.value=""; form.hidden=true; if(logout) logout.hidden=false;
+      if(user) user.textContent="Signed in: "+(data.account.display_name||data.account.username);
+      await refreshLiveDashboard();
+      if(apiState.timer) clearInterval(apiState.timer);
+      apiState.timer=window.setInterval(()=>{ if(document.visibilityState==="visible" && apiState.account) refreshLiveDashboard(false); },30000);
+    }catch(err){ if(message) message.textContent=err.message; }
+  });
+  if(logout) logout.addEventListener("click",async()=>{
+    try{ await apiJson("/api/v1/auth/logout",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":apiState.csrf},body:"{}"}); }
+    catch(_){ showToast("Could not confirm sign out. The local session may still be active.","error"); return; }
+    apiState.account=null; apiState.live=false; if(apiState.timer) clearInterval(apiState.timer);
+    if(form) form.hidden=false; logout.hidden=true; if(user) user.textContent=""; renderEmpty();
+    const status=$("snapshotStatus"); if(status) status.textContent="Signed out. Load an offline snapshot or sign in again.";
+  });
+}
+async function refreshLiveDashboard(showErrors){
+  try{
+    const data=await apiJson("/api/v1/dashboard/metrics");
+    render(data,"live"); currentSnapshot=data; apiState.live=true;
+    const updated=$("lastUpdated"); if(updated) updated.textContent="Last refreshed: "+new Date().toLocaleTimeString();
+  }catch(err){
+    apiState.live=false;
+    if(err.status===401){
+      apiState.account=null;
+      if(apiState.timer) clearInterval(apiState.timer);
+      const form=$("loginForm"), logout=$("logoutButton"), user=$("signedInAs");
+      if(form) form.hidden=false; if(logout) logout.hidden=true; if(user) user.textContent="";
+      const status=$("snapshotStatus"); if(status){ status.textContent="Your local session expired. Sign in again to refresh live data."; status.className="status error"; }
+    }else{
+      if(showErrors !== false) showToast(err.message,"error");
+      const status=$("snapshotStatus"); if(status){ status.textContent="Live backend disconnected. Existing offline snapshot remains available."; status.className="status error"; }
+    }
+  }
+}
 function initSettingsForm(){
   const form=$("settingsForm");
   if(!form) return;
@@ -628,4 +696,5 @@ document.addEventListener("DOMContentLoaded", ()=>{
   initRevenueHandlers();
   initSettingsForm();
   renderEmpty();
+  initLocalApi();
 });

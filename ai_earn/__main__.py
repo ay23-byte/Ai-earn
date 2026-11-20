@@ -1,4 +1,4 @@
-"""CLI entrypoint. No network service is created."""
+"""CLI entrypoint for offline tools and the loopback-only local web application."""
 
 import json
 import os
@@ -12,6 +12,17 @@ from .status import current_status
 
 
 def main(args: Sequence[str], environ: Mapping[str, str], out: TextIO, err: TextIO) -> int:
+    if list(args) == ["serve"]:
+        from .local_server import run as server_run
+        try:
+            server_run(environ)
+            return 0
+        except (ConfigurationError, OSError, ValueError) as exc:
+            err.write(str(exc) + "\n")
+            return 2
+        except KeyboardInterrupt:
+            return 0
+
     if len(args) >= 1 and args[0] == "doctor":
         from .doctor_cli import run as doctor_run
         # `python -m ai_earn doctor` or `python -m ai_earn doctor --plan-init`
@@ -53,7 +64,7 @@ def main(args: Sequence[str], environ: Mapping[str, str], out: TextIO, err: Text
         write_event(Event.INVALID_REQUEST, err)
         result = failure(
             "invalid_command",
-            "Usage: python -m ai_earn status | auth {register|login|recover} | tracker {init|open} | dashboard snapshot | doctor [--plan-init|--json|--check-stale] | health [--json] [--with-backups] [--check-stale] | data {export|delete} | onboarding | production",
+            "Usage: python -m ai_earn status | auth {register|login|recover} | tracker {init|open} | dashboard snapshot | doctor [--plan-init|--json|--check-stale] | health [--json] [--with-backups] [--check-stale] | data {export|delete} | onboarding | production | serve",
         )
         out.write(json.dumps(result) + "\n")
         return 2
