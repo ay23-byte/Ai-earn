@@ -105,6 +105,32 @@ class LocalServerTests(unittest.TestCase):
         status, _, _ = self.request("POST", "/api/v1/auth/login", body, {"Host": self.host, "Origin": "https://attacker.example", "Cookie": "ai_earn_csrf=x", "X-CSRF-Token": "x", "Content-Type": "application/json"})
         self.assertEqual(status, 403)
 
+
+    def test_ai_routes_require_authenticated_session(self):
+        status, _, body = self.request(
+            "GET", "/api/v1/ai/status", headers={"Host": self.host}
+        )
+        self.assertEqual(status, 401)
+        self.assertEqual(body["error"]["code"], "authentication_required")
+
+        status, headers, _ = self.request(
+            "GET", "/api/v1/csrf", headers={"Host": self.host}
+        )
+        self.assertEqual(status, 200)
+        csrf = self.cookie(headers, "ai_earn_csrf")
+        request_headers = {
+            "Host": self.host,
+            "Origin": "http://" + self.host,
+            "Cookie": "ai_earn_csrf=" + csrf,
+            "X-CSRF-Token": csrf,
+            "Content-Type": "application/json",
+        }
+        status, _, body = self.request(
+            "POST", "/api/v1/ai/chat", json.dumps({"prompt": "hello"}), request_headers
+        )
+        self.assertEqual(status, 401)
+        self.assertEqual(body["error"]["code"], "authentication_required")
+
     def test_static_shell_and_unknown_api_route(self):
         status, _, _ = self.request("GET", "/", headers={"Host": self.host})
         self.assertEqual(status, 200)

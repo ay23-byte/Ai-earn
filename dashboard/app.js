@@ -685,7 +685,78 @@ function initWorkspaceCrud(){
   });
 }
 
-async function initLocalApi(){
+async 
+async function aiPost(path,payload){
+  return apiJson(path,{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":apiState.csrf,"Idempotency-Key":liveIdempotencyKey()},body:JSON.stringify(payload||{})});
+}
+function aiPrint(id,value){const el=$(id);if(el)el.textContent=typeof value==="string"?value:JSON.stringify(value,null,2);}
+async function refreshAiWorkspace(showErrors){
+  if(!apiState.account)return;
+  try{
+    const [status,queue]=await Promise.all([apiJson("/api/v1/ai/status"),apiJson("/api/v1/ai/approvals?limit=50")]);
+    const p=status.provider||{};
+    setText("aiProviderInfo",(p.provider||"unknown")+" · "+(p.mode||"")+" · "+(p.model||""));
+    setText("aiProviderStatus",status.provider_available?"Available":"Unavailable");
+    const pending=(queue.items||[]).filter(x=>x.effective_status==="pending").length;
+    setText("aiCount",pending+" pending / "+(queue.count||0)+" total");
+    const stopped=!!status.emergency_stopped;
+    setText("emergencyState",stopped?"STOPPED":"Clear");
+    setText("emergencyStatus",stopped?"Consequential actions blocked":"No emergency stop active");
+    const select=$("aiToolName");
+    if(select){const old=select.value;select.innerHTML='<option value="">Choose a tool</option>'+(status.tools||[]).map(t=>'<option value="'+escapeHtml(t.name)+'">'+escapeHtml(t.name)+' · '+escapeHtml(t.scope)+'</option>').join("");if(old)select.value=old;}
+    const list=$("aiApprovalList");
+    if(list){const items=queue.items||[];list.innerHTML=items.length?items.map(item=>{
+      let args={};try{args=JSON.parse(item.args_json||"{}");}catch(_){}
+      const state=item.effective_status||item.status||"unknown";
+      const buttons=state==="pending"?'<button class="button ghost" type="button" data-ai-decision="approved" data-ai-id="'+escapeHtml(item.id)+'">Approve</button><button class="button ghost" type="button" data-ai-decision="rejected" data-ai-id="'+escapeHtml(item.id)+'">Reject</button>':(state==="approved"?'<button class="button ghost" type="button" data-ai-revoke="1" data-ai-id="'+escapeHtml(item.id)+'">Revoke approval</button>':"");
+      return '<article class="live-record"><div class="live-record-main"><strong>'+escapeHtml(item.tool_name||"Approval")+'</strong><small>'+escapeHtml(state)+' · expires '+escapeHtml(String(item.expires_at||""))+'</small><div class="live-record-details"><span>'+escapeHtml(JSON.stringify(args))+'</span></div></div><div class="live-record-actions">'+buttons+'</div></article>';
+    }).join(""):'<div class="empty">No approval records yet.</div>';}
+  }catch(err){if(showErrors!==false)showToast(err.message,"error");}
+}
+function clearAiWorkspace(){
+  setText("aiProviderInfo","Sign in to inspect local provider");
+  setText("aiProviderStatus","—");setText("aiCount","—");
+  setText("emergencyState","—");setText("emergencyStatus","Safety control");
+  const list=$("aiApprovalList");if(list)list.innerHTML='<div class="empty">Sign in to load your approvals.</div>';
+  const tools=$("aiToolName");if(tools)tools.innerHTML='<option value="">Load tools after sign-in</option>';
+  aiPrint("aiChatOutput","No AI response yet.");aiPrint("aiProposalOutput","No proposal prepared.");
+}
+function initAiWorkspace(){
+  const chat=$("aiChatForm"),proposal=$("aiProposalForm"),list=$("aiApprovalList");
+  if(chat)chat.addEventListener("submit",async e=>{
+    e.preventDefault();if(!apiState.account){showToast("Sign in to use the AI assistant.","error");return;}
+    aiPrint("aiChatOutput","Generating draft…");
+    try{const payload={prompt:$("aiPrompt").value.trim()};if($("aiExternalContent").value.trim())payload.external_content=$("aiExternalContent").value;
+      const result=await aiPost("/api/v1/ai/chat",payload);aiPrint("aiChatOutput",result.response);
+    }catch(err){aiPrint("aiChatOutput",err.message);showToast(err.message,"error");}
+  });
+  if(proposal)proposal.addEventListener("submit",async e=>{
+    e.preventDefault();if(!apiState.account){showToast("Sign in to prepare a tool preview.","error");return;}
+    let args;try{args=JSON.parse($("aiToolArgs").value);}catch(_){showToast("Arguments must be valid JSON.","error");return;}
+    if(!args||typeof args!=="object"||Array.isArray(args)){showToast("Arguments must be a JSON object.","error");return;}
+    try{const result=await aiPost("/api/v1/ai/proposals",{tool_name:$("aiToolName").value,args});aiPrint("aiProposalOutput",result.proposal);await refreshAiWorkspace(false);}
+    catch(err){aiPrint("aiProposalOutput",err.message);showToast(err.message,"error");}
+  });
+  if(list)list.addEventListener("click",async e=>{
+    const decision=e.target.closest("[data-ai-decision]"),revoke=e.target.closest("[data-ai-revoke]");if(!decision&&!revoke)return;
+    const id=(decision||revoke).dataset.aiId;
+    if(decision){const action=decision.dataset.aiDecision;if(!window.confirm((action==="approved"?"Approve":"Reject")+" this consequential request? This records your decision but does not execute the action."))return;
+      try{await aiPost("/api/v1/ai/approvals/"+encodeURIComponent(id)+"/decision",{decision:action,confirmed:true});showToast("Approval decision recorded.","success");}catch(err){showToast(err.message,"error");}
+    }else{if(!window.confirm("Revoke this approval?"))return;try{await aiPost("/api/v1/ai/approvals/"+encodeURIComponent(id)+"/revoke",{});showToast("Approval revoked.","success");}catch(err){showToast(err.message,"error");}}
+    await refreshAiWorkspace(false);
+  });
+  const refresh=$("aiRefreshButton");if(refresh)refresh.addEventListener("click",()=>refreshAiWorkspace(true));
+  const stop=$("aiEmergencyStop");if(stop)stop.addEventListener("click",async()=>{
+    if(!apiState.account){showToast("Sign in first.","error");return;}if(!window.confirm("Activate emergency stop?"))return;
+    try{await aiPost("/api/v1/ai/emergency/stop",{confirmed:true,reason:"Activated from Earn OS dashboard"});showToast("Emergency stop activated.","success");await refreshAiWorkspace(false);}catch(err){showToast(err.message,"error");}
+  });
+  const clear=$("aiEmergencyClear");if(clear)clear.addEventListener("click",async()=>{
+    if(!apiState.account){showToast("Sign in first.","error");return;}if(!window.confirm("Clear emergency stop?"))return;
+    try{await aiPost("/api/v1/ai/emergency/clear",{confirmed:true});showToast("Emergency stop cleared.","success");await refreshAiWorkspace(false);}catch(err){showToast(err.message,"error");}
+  });
+}
+
+function initLocalApi(){
   const form=$("loginForm"), logout=$("logoutButton"), user=$("signedInAs");
   try{
     const csrf=await apiJson("/api/v1/csrf"); apiState.csrf=csrf.csrf_token;
@@ -694,7 +765,8 @@ async function initLocalApi(){
     if(user) user.textContent="Signed in: "+(me.account.display_name||me.account.username);
     await refreshLiveDashboard();
     await refreshLiveResources();
-    apiState.timer=window.setInterval(()=>{ if(document.visibilityState==="visible" && apiState.account) refreshLiveDashboard(false); },30000);
+    await refreshAiWorkspace(false);
+    apiState.timer=window.setInterval(()=>{ if(document.visibilityState==="visible" && apiState.account){ refreshLiveDashboard(false); refreshAiWorkspace(false); } },30000);
   }catch(_){
     if(form) form.hidden=false; if(logout) logout.hidden=true; if(user) user.textContent="";
     const status=$("snapshotStatus");
@@ -710,14 +782,15 @@ async function initLocalApi(){
       if(user) user.textContent="Signed in: "+(data.account.display_name||data.account.username);
       await refreshLiveDashboard();
       await refreshLiveResources();
+      await refreshAiWorkspace(false);
       if(apiState.timer) clearInterval(apiState.timer);
-      apiState.timer=window.setInterval(()=>{ if(document.visibilityState==="visible" && apiState.account) refreshLiveDashboard(false); },30000);
+      apiState.timer=window.setInterval(()=>{ if(document.visibilityState==="visible" && apiState.account){ refreshLiveDashboard(false); refreshAiWorkspace(false); } },30000);
     }catch(err){ if(message) message.textContent=err.message; }
   });
   if(logout) logout.addEventListener("click",async()=>{
     try{ await apiJson("/api/v1/auth/logout",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":apiState.csrf},body:"{}"}); }
     catch(_){ showToast("Could not confirm sign out. The local session may still be active.","error"); return; }
-    apiState.account=null; apiState.live=false; if(apiState.timer) clearInterval(apiState.timer); apiState.timer=null; clearLiveResources();
+    apiState.account=null; apiState.live=false; if(apiState.timer) clearInterval(apiState.timer); apiState.timer=null; clearLiveResources(); clearAiWorkspace();
     if(form) form.hidden=false; logout.hidden=true; if(user) user.textContent=""; renderEmpty();
     const status=$("snapshotStatus"); if(status) status.textContent="Signed out. Load an offline snapshot or sign in again.";
   });
@@ -731,7 +804,7 @@ async function refreshLiveDashboard(showErrors){
     apiState.live=false;
     if(err.status===401){
       apiState.account=null;
-      if(apiState.timer) clearInterval(apiState.timer); apiState.timer=null; clearLiveResources();
+      if(apiState.timer) clearInterval(apiState.timer); apiState.timer=null; clearLiveResources(); clearAiWorkspace();
       const form=$("loginForm"), logout=$("logoutButton"), user=$("signedInAs");
       if(form) form.hidden=false; if(logout) logout.hidden=true; if(user) user.textContent="";
       const status=$("snapshotStatus"); if(status){ status.textContent="Your local session expired. Sign in again to refresh live data."; status.className="status error"; }
@@ -801,6 +874,7 @@ document.addEventListener("DOMContentLoaded", ()=>{
   initRevenueHandlers();
   initSettingsForm();
   initWorkspaceCrud();
+  initAiWorkspace();
   renderEmpty();
   initLocalApi();
 });

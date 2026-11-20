@@ -214,12 +214,32 @@
       <div class="panel">
         <h2 id="h-ai-assistant">AI Assistant — controlled autonomy</h2>
         <div class="rows">
-          <div class="row"><div><b>Approvals</b><small id="aiStatus">No snapshot loaded</small></div><strong id="aiCount">—</strong></div>
-          <div class="row"><div><b>Emergency</b><small id="emergencyStatus">No snapshot loaded</small></div><strong id="emergencyState">—</strong></div>
+          <div class="row"><div><b>Provider</b><small id="aiProviderInfo">Sign in to inspect local provider</small></div><strong id="aiProviderStatus">—</strong></div>
+          <div class="row"><div><b>Pending approvals</b><small id="aiStatus">Owner-scoped approval queue</small></div><strong id="aiCount">—</strong></div>
+          <div class="row"><div><b>Emergency stop</b><small id="emergencyStatus">Safety control</small></div><strong id="emergencyState">—</strong></div>
         </div>
-        <h3>By approval status</h3>
-        <div class="rows" id="aiByStatus"><div class="empty">No snapshot — approvals via tracker 34–41.</div></div>
-        <dl class="kv"><dt>Tool scopes</dt><dd>read = direct, draft = draft_unverified, consequential = approval_required</dd><dt>Provider</dt><dd>stub sandbox only; live OpenAI/Ollama blocked</dd><dt>Injection</dt><dd>external content treated as data, never as instruction</dd></dl>
+        <div class="ai-safety-note">AI output is draft-only and unverified. Consequential actions require a separate approval decision. Approving an item records consent; it does not send, publish, purchase, refund, delete, or modify external systems.</div>
+      </div>
+      <div class="panel ai-panel"><h3>Ask the assistant</h3>
+        <form id="aiChatForm" class="ai-form">
+          <label class="live-field">Your request<textarea id="aiPrompt" rows="3" maxlength="4000" required placeholder="e.g. Help outline a proposal for a website client"></textarea></label>
+          <label class="live-field">Optional reference content<textarea id="aiExternalContent" rows="2" maxlength="12000" placeholder="Reference text is treated as data, not instructions."></textarea></label>
+          <button class="button" type="submit">Generate draft</button>
+        </form><pre class="ai-output" id="aiChatOutput" aria-live="polite">No AI response yet.</pre>
+      </div>
+      <div class="panel ai-panel"><h3>Prepare a tool preview / approval request</h3>
+        <form id="aiProposalForm" class="ai-form">
+          <label class="live-field">Tool<select id="aiToolName" required><option value="">Load tools after sign-in</option></select></label>
+          <label class="live-field">Arguments (JSON)<textarea id="aiToolArgs" rows="4" required spellcheck="false">{}</textarea></label>
+          <button class="button" type="submit">Prepare preview</button>
+        </form><pre class="ai-output" id="aiProposalOutput" aria-live="polite">No proposal prepared.</pre>
+      </div>
+      <div class="panel ai-panel"><div class="panel-head"><h3>Approval queue</h3><button class="button ghost" type="button" id="aiRefreshButton">Refresh</button></div>
+        <div id="aiApprovalList"><div class="empty">Sign in to load your approvals.</div></div>
+      </div>
+      <div class="panel ai-panel ai-emergency"><h3>Emergency control</h3>
+        <p class="muted">The stop blocks new approval requests and consequential execution through the existing approval engine. Clearing it requires explicit confirmation.</p>
+        <div class="live-record-actions"><button class="button danger" type="button" id="aiEmergencyStop">Activate emergency stop</button><button class="button ghost" type="button" id="aiEmergencyClear">Clear emergency stop</button></div>
       </div>
     </section>
 

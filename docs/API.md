@@ -28,7 +28,7 @@ All POST requests require a same-origin Origin header and matching CSRF cookie/h
 - AuthService retains password hashing, login throttling, expiry and revocation.
 - Existing owner-scoped metrics and financial verification semantics are unchanged.
 - The server is intentionally local-machine oriented and must not be exposed through a reverse proxy, LAN bind, tunnel, or public internet. It is plain HTTP on loopback; do not use it for remote access.
-- This initial API exposes read-only dashboard metrics plus login/logout/profile. Domain write endpoints and record-level CRUD screens are not yet exposed. The existing JSON snapshot loader/export remains available as an offline fallback.
+- The dashboard metrics endpoint remains read-only and snapshot-compatible. Authenticated workspace and AI endpoints are documented below. The existing JSON snapshot loader/export remains available as an offline fallback.
 
 ## Authenticated local workspace API (v1)
 
