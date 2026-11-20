@@ -24,6 +24,7 @@ from .config import ConfigurationError, load_settings
 from .dashboard_metrics import DashboardMetrics
 from .state_storage import StateStorage, StateStorageError
 from .workspace_api import WorkspaceAPI
+from .ai_api import AIWorkspaceAPI
 
 SESSION_COOKIE = "ai_earn_session"
 CSRF_COOKIE = "ai_earn_csrf"
@@ -59,6 +60,7 @@ class EarnOSHTTPServer(ThreadingHTTPServer):
         self.state_storage = state
         self.dashboard_metrics = metrics
         self.workspace_api = WorkspaceAPI(auth, state)
+        self.ai_api = AIWorkspaceAPI(auth, state)
         self.dashboard_root = dashboard_root.resolve()
         super().__init__(address, handler)
 
@@ -163,6 +165,16 @@ class EarnOSHandler(BaseHTTPRequestHandler):
                 except Exception:
                     self._error(503, "metrics_unavailable", "Dashboard metrics are temporarily unavailable.")
                 return
+            if path.startswith("/api/v1/ai/"):
+                token = self._session()
+                try:
+                    self.server.auth_service.profile(token)
+                except (AccessDenied, AuthError):
+                    self._error(401, "authentication_required", "Sign in to continue.")
+                    return
+                status, result = self.server.ai_api.dispatch("GET", path, token, query=urlsplit(self.path).query)
+                self._send_json(status, result)
+                return
             if path.startswith("/api/v1/workspace/"):
                 token = self._session()
                 try:
@@ -227,6 +239,17 @@ class EarnOSHandler(BaseHTTPRequestHandler):
             self._send_json(200, {"ok": True, "data": {"signed_out": True}, "error": None}, [
                 ("Set-Cookie", f"{SESSION_COOKIE}=; HttpOnly; Path=/; SameSite=Strict; Max-Age=0")
             ])
+            return
+        if path.startswith("/api/v1/ai/"):
+            token = self._session()
+            try:
+                self.server.auth_service.profile(token)
+            except (AccessDenied, AuthError):
+                self._error(401, "authentication_required", "Sign in to continue.")
+                return
+            status, result = self.server.ai_api.dispatch("POST", path, token, payload,
+                operation_key=self.headers.get("Idempotency-Key"))
+            self._send_json(status, result)
             return
         if path.startswith("/api/v1/workspace/"):
             token = self._session()

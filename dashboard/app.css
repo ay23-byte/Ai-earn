@@ -116,3 +116,12 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
 .live-record-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px}
 .live-record-actions .button{padding:6px 9px;font-size:11px}
 @media(max-width:700px){.live-form-grid{grid-template-columns:1fr}.live-record{flex-direction:column}.live-record-actions{justify-content:flex-start}}
+
+
+/* AI assistant and approval workspace */
+.ai-panel{margin-top:14px}
+.ai-form{display:grid;gap:12px;margin:12px 0}
+.ai-form .live-field textarea,.ai-form .live-field select{width:100%;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--text);padding:10px;font:inherit;font-size:14px}
+.ai-output{white-space:pre-wrap;overflow-wrap:anywhere;max-height:360px;overflow:auto;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--text);font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace}
+.ai-safety-note{padding:12px;border:1px solid var(--line);border-radius:10px;color:var(--muted);font-size:13px;line-height:1.5;margin-top:12px}
+.ai-emergency{border-color:var(--danger,var(--line))}
