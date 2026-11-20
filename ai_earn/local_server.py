@@ -16,6 +16,7 @@ import mimetypes
 import os
 import secrets
 import sys
+from typing import cast
 
 from .auth import AccessDenied, AuthError, AuthService
 from .auth_storage import AuthStorage, StorageError
@@ -221,9 +222,10 @@ class EarnOSHandler(BaseHTTPRequestHandler):
             return
         decoded = unquote(request_path)
         relative = "index.html" if decoded in {"", "/"} else decoded.lstrip("/")
-        candidate = (self.server.dashboard_root / relative).resolve()
+        server = cast(EarnOSHTTPServer, self.server)
+        candidate = (server.dashboard_root / relative).resolve()
         try:
-            candidate.relative_to(self.server.dashboard_root)
+            candidate.relative_to(server.dashboard_root)
         except ValueError:
             self._error(404, "not_found", "File not found.")
             return
