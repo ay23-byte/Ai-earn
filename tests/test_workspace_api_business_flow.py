@@ -130,7 +130,15 @@ class WorkspaceAPIBusinessFlowTests(unittest.TestCase):
         )
         project_id = project["task_id"]
         projects = self.request("GET", "/api/v1/workspace/projects")["items"]
-        self.assertTrue(any(item["id"] == project_id for item in projects))
+        self.assertTrue(
+            any(
+                item["task_id"] == project_id
+                and item["customer_id"] == customer_id
+                and item["id"] == project["link_id"]
+                for item in projects
+            ),
+            "The project list should expose the linked task and customer relationship.",
+        )
 
         proposal_id = self.request(
             "POST",
