@@ -92,6 +92,26 @@ class WorkspaceAPITests(unittest.TestCase):
             {"requirement":"Responsive website"}, operation_key="req-key-123")
         self.assertEqual(status, 201)
         self.assertEqual(self.domain.calls[-1][0], "add")
+
+    def test_project_action_uses_project_task_state_machine(self):
+        status, body = self.api.dispatch("POST",
+            "/api/v1/workspace/projects/task-1/actions/submit_for_review", "session", {},
+            operation_key="project-action-123")
+        self.assertEqual(status, 200)
+        self.assertEqual(body["data"]["action"], "submit_for_review")
+        name, args, kwargs = self.domain.calls[-1]
+        self.assertEqual((name, args), ("submit_for_review", ("session", "task-1")))
+        self.assertEqual(kwargs["operation_key"], "project-action-123")
+
+    def test_project_action_rejects_unknown_transition(self):
+        before = len(self.domain.calls)
+        status, body = self.api.dispatch("POST",
+            "/api/v1/workspace/projects/task-1/actions/delete", "session", {},
+            operation_key="project-action-456")
+        self.assertEqual(status, 400)
+        self.assertEqual(body["error"]["code"], "invalid_request")
+        self.assertEqual(len(self.domain.calls), before)
+
     def test_unimplemented_resources_are_not_exposed(self):
         status, body = self.api.dispatch("POST", "/api/v1/workspace/security", "session", {})
         self.assertEqual(status, 400)
