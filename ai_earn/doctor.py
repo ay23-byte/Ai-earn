@@ -15,6 +15,13 @@ from typing import Mapping
 from .config import load_settings
 from .state_storage import APPLICATION_ID, SUPPORTED_STATE_VERSIONS
 
+def _current_euid() -> int | None:
+    """Effective UID on POSIX; None where the concept does not exist (Windows)."""
+    geteuid = getattr(os, "geteuid", None)
+    return geteuid() if callable(geteuid) else None
+
+
+
 MISSING = "missing"
 NOT_CONFIGURED = "not_configured"
 RELATIVE_PATH = "relative_path"
@@ -128,7 +135,7 @@ def _verify_parent_is_private(candidate: Path) -> bool:
         if not stat.S_ISDIR(info.st_mode):
             return False
         # Must be owned by current user and have no group/other access.
-        if info.st_uid != os.geteuid() or bool(stat.S_IMODE(info.st_mode) & 0o077):
+        if info.st_uid != _current_euid() or bool(stat.S_IMODE(info.st_mode) & 0o077):
             return False
         return True
     except OSError:
@@ -166,7 +173,7 @@ def _classify(variable: str, value: str) -> StoreReport:
     # Enforce file ownership/mode on POSIX even if SQLite can still open it.
     if os.name != "nt":
         try:
-            if info.st_uid != os.geteuid() or bool(stat.S_IMODE(info.st_mode) & 0o077):
+            if info.st_uid != _current_euid() or bool(stat.S_IMODE(info.st_mode) & 0o077):
                 return StoreReport(variable, PERMISSION_ERROR,
                                    "The database file must be owned by the current user with 0600 permissions.")
         except OSError:

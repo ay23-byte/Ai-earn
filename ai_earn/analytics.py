@@ -86,7 +86,7 @@ def _sum_income_per_month(conn, owner: str, from_ts: int, to_ts: int):
         ts = r["created_at"]
         # Use UTC year-month
         import datetime
-        dt = datetime.datetime.utcfromtimestamp(ts)
+        dt = datetime.datetime.fromtimestamp(ts, datetime.timezone.utc)
         key = f"{dt.year:04d}-{dt.month:02d}"
         buckets[key] = buckets.get(key, 0) + r["amount_paise"]
     return buckets, sum(buckets.values()) if buckets else 0

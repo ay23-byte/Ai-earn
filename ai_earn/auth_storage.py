@@ -33,6 +33,12 @@ _SCHEMA = (
 )
 
 
+def _current_euid() -> int | None:
+    """Effective UID on POSIX; None where the concept does not exist (Windows)."""
+    geteuid = getattr(os, "geteuid", None)
+    return geteuid() if callable(geteuid) else None
+
+
 class StorageError(Exception):
     """Database is missing, inaccessible, unsafe, or incompatible."""
 
@@ -87,7 +93,7 @@ class AuthStorage:
             return
         try:
             info = self.path.parent.lstat()
-            if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid()
+            if (not stat.S_ISDIR(info.st_mode) or info.st_uid != _current_euid()
                     or stat.S_IMODE(info.st_mode) & 0o077):
                 raise StorageError("Authentication database parent must be an owner-only directory.")
         except OSError as exc:
@@ -124,7 +130,7 @@ class AuthStorage:
                     verify_private_path(self.path, directory=False)
                 except WindowsSecurityError as exc:
                     raise StorageError("Authentication database Windows ACL is unsafe.") from exc
-            elif info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) & 0o077:
+            elif info.st_uid != _current_euid() or stat.S_IMODE(info.st_mode) & 0o077:
                 raise StorageError("Authentication database must be owned by and accessible only to the current user.")
         except OSError as exc:
             raise StorageError("Authentication database is missing or could not be opened securely.") from exc
