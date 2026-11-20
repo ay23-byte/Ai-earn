@@ -43,4 +43,4 @@ All workspace routes are served only by the local loopback server started with t
 
 Initial resource adapters: opportunities, services, proposals, customers, products, tasks, order drafts (create/get only), invoices, payments, expenses and ledger entries. Supported transitions are intentionally allowlisted in the adapter and enforced again by each domain service. Financial amounts are integer paise. Verified status is never inferred from payment status.
 
-The current domain model does not expose generic deletion for these resources, so the HTTP API does not invent delete endpoints. Project/customer-project CRUD, AI approvals/chat, integration management, settings persistence, file uploads, and other resources without a supported service adapter remain outside this initial API surface.
+The current domain model does not expose generic deletion for these resources, so the HTTP API does not invent delete endpoints. Project/customer-project CRUD, integration management, settings persistence, file uploads, and other resources without a supported service adapter remain outside this initial API surface.
