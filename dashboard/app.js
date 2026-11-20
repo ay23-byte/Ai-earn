@@ -628,6 +628,13 @@ async function loadLiveResource(resource){
     root.querySelector(".live-record-list").innerHTML='<div class="empty">Live records unavailable. '+escapeHtml(err.message)+'</div>';
   }
 }
+function clearLiveResources(){
+  document.querySelectorAll("[data-live-resource]").forEach(root=>{
+    const status=root.querySelector(".live-resource-status"), list=root.querySelector(".live-record-list");
+    if(status) status.textContent="Sign in to load live records.";
+    if(list) list.innerHTML='<div class="empty">Sign in to load records from your local database.</div>';
+  });
+}
 async function refreshLiveResources(){
   if(!apiState.account) return;
   await Promise.all(Object.keys(LIVE_RESOURCES).map(loadLiveResource));
@@ -710,7 +717,7 @@ async function initLocalApi(){
   if(logout) logout.addEventListener("click",async()=>{
     try{ await apiJson("/api/v1/auth/logout",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":apiState.csrf},body:"{}"}); }
     catch(_){ showToast("Could not confirm sign out. The local session may still be active.","error"); return; }
-    apiState.account=null; apiState.live=false; if(apiState.timer) clearInterval(apiState.timer);
+    apiState.account=null; apiState.live=false; if(apiState.timer) clearInterval(apiState.timer); apiState.timer=null; clearLiveResources();
     if(form) form.hidden=false; logout.hidden=true; if(user) user.textContent=""; renderEmpty();
     const status=$("snapshotStatus"); if(status) status.textContent="Signed out. Load an offline snapshot or sign in again.";
   });
@@ -724,7 +731,7 @@ async function refreshLiveDashboard(showErrors){
     apiState.live=false;
     if(err.status===401){
       apiState.account=null;
-      if(apiState.timer) clearInterval(apiState.timer);
+      if(apiState.timer) clearInterval(apiState.timer); apiState.timer=null; clearLiveResources();
       const form=$("loginForm"), logout=$("logoutButton"), user=$("signedInAs");
       if(form) form.hidden=false; if(logout) logout.hidden=true; if(user) user.textContent="";
       const status=$("snapshotStatus"); if(status){ status.textContent="Your local session expired. Sign in again to refresh live data."; status.className="status error"; }
