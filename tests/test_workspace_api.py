@@ -6,8 +6,10 @@ class StubDomain:
     def __getattr__(self, name):
         def call(*args, **kwargs):
             self.calls.append((name, args, kwargs))
-            if name == "list": return [{"id": "record-1", "title": "Example"}]
-            if name == "get": return {"id": args[1], "title": "Example"}
+            if name == "list":
+                return [{"id": "record-1", "title": "Example"}]
+            if name == "get":
+                return {"id": args[1], "title": "Example"}
             return "record-1"
         return call
 
@@ -65,4 +67,5 @@ class WorkspaceAPITests(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertEqual(body["error"]["code"], "invalid_request")
 
-if __name__ == "__main__": unittest.main()
+if __name__ == "__main__":
+    unittest.main()
