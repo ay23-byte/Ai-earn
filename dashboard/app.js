@@ -575,7 +575,11 @@ async function apiJson(path, options){
   const response = await fetch(path, Object.assign({ credentials:"same-origin", cache:"no-store" }, options||{}));
   let body;
   try { body = await response.json(); } catch(_) { throw new Error("The local backend returned an invalid response."); }
-  if(!response.ok || !body.ok) throw new Error(body.error && body.error.message ? body.error.message : "Local backend request failed.");
+  if(!response.ok || !body.ok) {
+    const error=new Error(body.error && body.error.message ? body.error.message : "Local backend request failed.");
+    error.status=response.status;
+    throw error;
+  }
   return body.data;
 }
 async function initLocalApi(){
@@ -606,7 +610,8 @@ async function initLocalApi(){
     }catch(err){ if(message) message.textContent=err.message; }
   });
   if(logout) logout.addEventListener("click",async()=>{
-    try{ await apiJson("/api/v1/auth/logout",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":apiState.csrf},body:"{}"}); }catch(_){}
+    try{ await apiJson("/api/v1/auth/logout",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":apiState.csrf},body:"{}"}); }
+    catch(_){ showToast("Could not confirm sign out. The local session may still be active.","error"); return; }
     apiState.account=null; apiState.live=false; if(apiState.timer) clearInterval(apiState.timer);
     if(form) form.hidden=false; logout.hidden=true; if(user) user.textContent=""; renderEmpty();
     const status=$("snapshotStatus"); if(status) status.textContent="Signed out. Load an offline snapshot or sign in again.";
@@ -619,8 +624,16 @@ async function refreshLiveDashboard(showErrors){
     const updated=$("lastUpdated"); if(updated) updated.textContent="Last refreshed: "+new Date().toLocaleTimeString();
   }catch(err){
     apiState.live=false;
-    if(showErrors !== false) showToast(err.message,"error");
-    const status=$("snapshotStatus"); if(status){ status.textContent="Live backend disconnected. Existing offline snapshot remains available."; status.className="status error"; }
+    if(err.status===401){
+      apiState.account=null;
+      if(apiState.timer) clearInterval(apiState.timer);
+      const form=$("loginForm"), logout=$("logoutButton"), user=$("signedInAs");
+      if(form) form.hidden=false; if(logout) logout.hidden=true; if(user) user.textContent="";
+      const status=$("snapshotStatus"); if(status){ status.textContent="Your local session expired. Sign in again to refresh live data."; status.className="status error"; }
+    }else{
+      if(showErrors !== false) showToast(err.message,"error");
+      const status=$("snapshotStatus"); if(status){ status.textContent="Live backend disconnected. Existing offline snapshot remains available."; status.className="status error"; }
+    }
   }
 }
 function initSettingsForm(){
