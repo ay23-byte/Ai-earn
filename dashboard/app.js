@@ -584,6 +584,8 @@ async function apiJson(path, options){
 }
 
 const LIVE_RESOURCES = {
+  projects:{title:"Client projects",fields:[["customer_id","Customer ID","text",true],["title","Project title","text",true],["description","Project scope / description","textarea",false],["priority","Priority (0–9)","number",false],["deadline_at","Deadline (Unix seconds; optional)","number",false]],actions:{draft:["submit_for_review"],pending_review:["approve","reject"],approved:["start","cancel"],scheduled:["start","cancel"],in_progress:["complete","cancel"]}},
+
   opportunities:{title:"Opportunity records",fields:[["title","Title","text",true],["source_url","Source URL","url",true],["budget_paise","Budget (paise)","number",true],["deadline_at","Deadline (Unix seconds; optional)","number",false],["risk_level","Risk: low / medium / high / unknown","text",false],["skill_tags","Skills / tags","text",false]],actions:{discovered:["vetted"],vetted:["pursuing"]}},
   services:{title:"Service catalog",fields:[["title","Service title","text",true],["scope","Scope","textarea",true],["deliverable","Deliverable","text",true],["price_paise","Price (paise)","number",true],["revisions","Revisions","number",true]],actions:{draft:["publish","archive"],published:["archive"]}},
   proposals:{title:"Proposals",fields:[["service_id","Service ID","text",true],["customer_id","Customer ID (optional)","text",false],["title","Proposal title","text",true],["description","Description","textarea",true],["price_paise","Price (paise)","number",true],["delivery_days","Delivery days","number",true]],actions:{draft:["send"],sent:["accept","reject","cancel"],rejected:["archive"],accepted:["archive"]}},
@@ -612,7 +614,7 @@ function liveItemSummary(item){
 function liveActionButtons(resource,item){
   const actions=LIVE_RESOURCES[resource].actions||{};
   const names=actions[item.status]||[];
-  return names.map(action=>'<button type="button" class="button ghost" data-live-action="'+escapeHtml(action)+'" data-live-id="'+escapeHtml(item.id)+'" data-live-resource="'+resource+'">'+escapeHtml(action.replaceAll("_"," "))+'</button>').join("");
+  return names.map(action=>'<button type="button" class="button ghost" data-live-action="'+escapeHtml(action)+'" data-live-id="'+escapeHtml(item.task_id||item.id)+'" data-live-resource="'+resource+'">'+escapeHtml(action.replaceAll("_"," "))+'</button>').join("");
 }
 async function loadLiveResource(resource){
   const root=document.querySelector('[data-live-resource="'+resource+'"]');

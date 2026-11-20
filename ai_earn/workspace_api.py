@@ -4,6 +4,7 @@ import secrets
 from typing import Any
 from urllib.parse import parse_qs
 from .customers import Customers
+from .crm import CustomerNotes, CustomerProjects, CustomerRequirements
 from .finance import ExpenseRecords, PaymentRecords
 from .invoices import Invoices
 from .ledger import Ledger
@@ -24,6 +25,9 @@ class WorkspaceAPI:
         self.service_editor = ServiceEditor(auth, state)
         self.proposals = Proposals(auth, state)
         self.customers = Customers(auth, state)
+        self.customer_projects = CustomerProjects(auth, state)
+        self.customer_notes = CustomerNotes(auth, state)
+        self.customer_requirements = CustomerRequirements(auth, state)
         self.products = Products(auth, state)
         self.tasks = ProjectTasks(auth, state)
         self.orders = OrderDrafts(auth, state)
@@ -71,6 +75,46 @@ class WorkspaceAPI:
         ident = parts[4] if len(parts) >= 5 else None
         try:
             key = self._key(payload, operation_key) if method in {"POST", "PATCH", "DELETE"} else ""
+
+            if resource == "customers" and len(parts) == 6 and parts[5] in {"notes", "requirements"}:
+                customer_id = parts[4]
+                field = "note" if parts[5] == "notes" else "requirement"
+                service = self.customer_notes if field == "note" else self.customer_requirements
+                if method == "GET":
+                    rows = service.list(token, customer_id)
+                    return 200, self._ok({"items": rows, "count": len(rows)})
+                if method == "POST":
+                    values = self._only(payload, {field})
+                    if set(values) != {field}:
+                        raise WorkspaceAPIError(field + " is required.")
+                    return 201, self._ok({"id": service.add(token, customer_id, values[field], operation_key=key)})
+                return 405, self._error("method_not_allowed", "Client detail method is not supported.")
+            if resource == "projects":
+                if method == "GET" and len(parts) == 4:
+                    page = self._page(params)
+                    rows = self.customer_projects.list_all(token, **page)
+                    return 200, self._ok({"items": rows, "count": len(rows),
+                        "next_cursor": rows[-1]["id"] if len(rows) == page.get("limit", 20) else None})
+                if method == "POST" and len(parts) == 4:
+                    values = self._only(payload, {"customer_id", "title", "description", "priority", "deadline_at", "estimated_duration_seconds"})
+                    if not isinstance(values.get("customer_id"), str) or not values["customer_id"]:
+                        raise WorkspaceAPIError("customer_id is required.")
+                    if not isinstance(values.get("title"), str) or not values["title"].strip():
+                        raise WorkspaceAPIError("title is required.")
+                    self.customers.get(token, values["customer_id"])
+                    import hashlib
+                    suffix = hashlib.sha256(key.encode("utf-8")).hexdigest()[:32]
+                    task_id = self.tasks.create(token, values["title"],
+                        description=values.get("description", ""), priority=values.get("priority", 5),
+                        deadline_at=values.get("deadline_at", 0),
+                        estimated_duration_seconds=values.get("estimated_duration_seconds", 0),
+                        operation_key="p3-task-" + suffix)
+                    link_id = self.customer_projects.link(token, values["customer_id"], task_id,
+                        operation_key="p3-link-" + suffix)
+                    return 201, self._ok({"id": task_id, "task_id": task_id, "link_id": link_id})
+                if method == "POST" and len(parts) == 7 and parts[5] == "actions":
+                    return 200, self._ok({"id": self._project_action(parts[6], token, ident or "", payload, key), "action": parts[6]})
+                return 405, self._error("method_not_allowed", "Project route is not supported.")
             if method == "GET":
                 if resource == "ledger" and len(parts) == 5 and parts[4] == "summary":
                     return 200, self._ok({"summary": self.ledger.net(token)})
@@ -96,11 +140,23 @@ class WorkspaceAPI:
         except WorkspaceAPIError as exc:
             return 400, self._error("invalid_request", str(exc))
         except Exception as exc:
-            if type(exc).__name__ in {"OpportunityError", "ServiceError", "ServiceWorkspaceError", "CustomerError", "ProductError", "ProjectTaskError", "OrderError", "InvoiceError", "FinanceError", "LedgerError", "DraftError"}:
+            if type(exc).__name__ in {"OpportunityError", "ServiceError", "ServiceWorkspaceError", "CustomerError", "CRMError", "ProductError", "ProjectTaskError", "OrderError", "InvoiceError", "FinanceError", "LedgerError", "DraftError"}:
                 return 400, self._error("domain_validation", str(exc))
             if type(exc).__name__ == "AccessDenied":
                 return 404, self._error("not_found", "Record not found.")
             return 503, self._error("workspace_unavailable", "Workspace operation is temporarily unavailable.")
+
+
+    def _project_action(self, action: str, token: str, task_id: str, payload: dict, key: str) -> str:
+        actions = {"submit_for_review": self.tasks.submit_for_review, "approve": self.tasks.approve,
+                   "reject": self.tasks.reject, "start": self.tasks.start,
+                   "complete": self.tasks.complete, "cancel": self.tasks.cancel}
+        fn = actions.get(action)
+        if fn is None:
+            raise WorkspaceAPIError("This project action is not supported.")
+        if payload and set(payload) - {"operation_key"}:
+            raise WorkspaceAPIError("This project action does not accept extra fields.")
+        return fn(token, task_id, operation_key=key)
 
     @staticmethod
     def _ok(data: dict) -> dict:

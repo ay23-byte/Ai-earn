@@ -769,6 +769,30 @@ class CustomerProjects:
                 out.append(d)
             return out
 
+
+    def list_all(self, token: str, *, after_id: str | None = None, limit: int = 20) -> list[dict]:
+        """List owner-scoped customer-linked projects."""
+        cursor = "" if after_id is None else _input(_record_id, after_id)
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise CRMError("Invalid page size.")
+        with _authorized_transaction(self._auth, self._state, token) as (conn, owner, _now):
+            _version_check(conn)
+            rows = conn.execute(
+                """SELECT cp.id AS id, cp.id AS link_id, cp.customer_id,
+                          cp.project_task_id AS task_id, cp.created_at AS linked_at,
+                          c.name AS customer_name, c.contact AS customer_contact,
+                          t.title, t.description, t.status, t.priority, t.deadline_at,
+                          t.estimated_duration_seconds, t.actual_duration_seconds,
+                          t.created_at, t.updated_at
+                   FROM customer_projects cp
+                   JOIN customers c ON c.id=cp.customer_id AND c.owner_id=cp.owner_id
+                   JOIN project_tasks t ON t.id=cp.project_task_id AND t.owner_id=cp.owner_id
+                   WHERE cp.owner_id=? AND cp.id>? COLLATE BINARY
+                   ORDER BY cp.id COLLATE BINARY LIMIT ?""",
+                (owner, cursor, limit),
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     def unlink(self, token: str, link_id: str, *, operation_key: str) -> str:
         lid = _input(_record_id, link_id)
         key = _input(_key, operation_key)
