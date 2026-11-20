@@ -582,6 +582,109 @@ async function apiJson(path, options){
   }
   return body.data;
 }
+
+const LIVE_RESOURCES = {
+  opportunities:{title:"Opportunity records",fields:[["title","Title","text",true],["source_url","Source URL","url",true],["budget_paise","Budget (paise)","number",true],["deadline_at","Deadline (Unix seconds; optional)","number",false],["risk_level","Risk: low / medium / high / unknown","text",false],["skill_tags","Skills / tags","text",false]],actions:{discovered:["vetted"],vetted:["pursuing"]}},
+  services:{title:"Service catalog",fields:[["title","Service title","text",true],["scope","Scope","textarea",true],["deliverable","Deliverable","text",true],["price_paise","Price (paise)","number",true],["revisions","Revisions","number",true]],actions:{draft:["publish","archive"],published:["archive"]}},
+  proposals:{title:"Proposals",fields:[["service_id","Service ID","text",true],["customer_id","Customer ID (optional)","text",false],["title","Proposal title","text",true],["description","Description","textarea",true],["price_paise","Price (paise)","number",true],["delivery_days","Delivery days","number",true]],actions:{draft:["send"],sent:["accept","reject","cancel"],rejected:["archive"],accepted:["archive"]}},
+  customers:{title:"Customer CRM",fields:[["name","Customer name","text",true],["contact","Email / contact","text",true],["source","Lead source","text",false]],actions:{lead:["contacted","rejected"],contacted:["converted","rejected"]}},
+  tasks:{title:"Project tasks",fields:[["title","Task title","text",true],["description","Description","textarea",false],["priority","Priority (1–10)","number",false],["deadline_at","Deadline (Unix seconds; optional)","number",false]],actions:{draft:["submit_for_review"],pending_review:["approve","reject"],approved:["start","cancel"],scheduled:["start","cancel"],in_progress:["complete","cancel"]}},
+  products:{title:"Digital products",fields:[["title","Product title","text",true],["description","Description","textarea",true],["version","Version","text",true],["price_paise","Price (paise)","number",true]],actions:{draft:["publish","archive"],published:["archive"]}},
+  invoices:{title:"Invoices",fields:[["order_id","Order draft ID","text",true],["due_at","Due date (Unix seconds; optional)","number",false],["billing_name","Billing name","text",false],["billing_contact","Billing contact","text",false],["billing_address","Billing address","textarea",false]]},
+  payments:{title:"Payment records",fields:[["amount_paise","Amount (paise)","number",true],["provider","Provider (manual / sandbox)","text",false],["provider_ref","Provider reference","text",false],["invoice_id","Invoice ID (optional)","text",false],["order_id","Order ID (optional)","text",false]],actions:{initiated:["received","failed"],received:["settled","failed"],settled:["refunded"]}},
+  expenses:{title:"Expenses",fields:[["amount_paise","Amount (paise)","number",true],["category","Category","text",true],["note","Note","textarea",false]]},
+  ledger:{title:"Ledger entries (unverified)",fields:[["kind","Kind: income / expense / refund / fee","text",true],["amount_paise","Amount (paise)","number",true],["note","Note","text",false]]}
+};
+function liveFieldHtml(field){
+  const [name,label,type,required]=field;
+  const tag=type==="textarea"?"textarea":"input";
+  const inputType=type==="number"?"number":type==="url"?"url":"text";
+  return '<label class="live-field">'+escapeHtml(label)+(required?' <span aria-hidden="true">*</span>':'')+
+    (tag==="textarea"?'<textarea name="'+name+'" rows="2" '+(required?'required':'')+'></textarea>':'<input name="'+name+'" type="'+inputType+'" '+(type==="number"?'min="0" step="1"':'')+(required?' required':'')+'>')+'</label>';
+}
+function liveItemSummary(item){
+  const preferred=["title","name","status","contact","source_url","description","amount_paise","budget_paise","price_paise","category","kind"];
+  return preferred.filter(k=>item[k]!==undefined && item[k]!==null && item[k]!=="").slice(0,5).map(k=>{
+    const v=(k.endsWith("_paise") && Number.isSafeInteger(item[k]))?rupees(item[k]):String(item[k]);
+    return '<span><b>'+escapeHtml(k.replaceAll("_"," "))+'</b> '+escapeHtml(v.slice(0,180))+'</span>';
+  }).join("");
+}
+function liveActionButtons(resource,item){
+  const actions=LIVE_RESOURCES[resource].actions||{};
+  const names=actions[item.status]||[];
+  return names.map(action=>'<button type="button" class="button ghost" data-live-action="'+escapeHtml(action)+'" data-live-id="'+escapeHtml(item.id)+'" data-live-resource="'+resource+'">'+escapeHtml(action.replaceAll("_"," "))+'</button>').join("");
+}
+async function loadLiveResource(resource){
+  const root=document.querySelector('[data-live-resource="'+resource+'"]');
+  if(!root || !apiState.account) return;
+  try{
+    const result=await apiJson('/api/v1/workspace/'+resource+'?limit=50');
+    const rows=result.items||[];
+    const list=rows.length?rows.map(item=>'<article class="live-record"><div class="live-record-main"><strong>'+escapeHtml(item.title||item.name||item.invoice_number||item.id)+'</strong><small>'+escapeHtml(item.status||"record")+' · '+escapeHtml(item.id)+'</small><div class="live-record-details">'+liveItemSummary(item)+'</div></div><div class="live-record-actions">'+liveActionButtons(resource,item)+(resource==="services"?'<button type="button" class="button ghost" data-live-edit="'+escapeHtml(item.id)+'" data-live-title="'+escapeHtml(item.title||"")+'">Edit title</button>':'')+'</div></article>').join(""):'<div class="empty">No records yet. Create the first record above.</div>';
+    root.querySelector(".live-record-list").innerHTML=list;
+    root.querySelector(".live-resource-status").textContent=rows.length+' record(s) loaded from the local database.';
+  }catch(err){
+    root.querySelector(".live-resource-status").textContent=err.status===401?"Sign in to load account records.":"Backend unavailable; offline snapshot remains available.";
+    root.querySelector(".live-record-list").innerHTML='<div class="empty">Live records unavailable. '+escapeHtml(err.message)+'</div>';
+  }
+}
+function clearLiveResources(){
+  document.querySelectorAll("[data-live-resource]").forEach(root=>{
+    const status=root.querySelector(".live-resource-status"), list=root.querySelector(".live-record-list");
+    if(status) status.textContent="Sign in to load live records.";
+    if(list) list.innerHTML='<div class="empty">Sign in to load records from your local database.</div>';
+  });
+}
+async function refreshLiveResources(){
+  if(!apiState.account) return;
+  await Promise.all(Object.keys(LIVE_RESOURCES).map(loadLiveResource));
+}
+function liveIdempotencyKey(){ return window.crypto && typeof window.crypto.randomUUID==="function" ? window.crypto.randomUUID() : String(Date.now())+"-"+Math.random().toString(36).slice(2); }
+function initWorkspaceCrud(){
+  document.querySelectorAll("[data-live-resource]").forEach(root=>{
+    const resource=root.getAttribute("data-live-resource"), config=LIVE_RESOURCES[resource];
+    if(!config) return;
+    root.innerHTML='<div class="panel-head"><h2>'+escapeHtml(config.title)+'</h2><span class="muted live-resource-status">Sign in to load live records.</span></div>'+
+      '<form class="live-create-form" data-live-create="'+resource+'"><div class="live-form-grid">'+config.fields.map(liveFieldHtml).join("")+'</div><button class="button" type="submit">Create record</button></form>'+
+      '<h3>Account records</h3><div class="live-record-list"><div class="empty">Sign in to load records from your local database.</div></div>';
+    root.addEventListener("submit",async e=>{
+      const form=e.target.closest("[data-live-create]");
+      if(!form) return;
+      e.preventDefault();
+      if(!apiState.account){showToast("Sign in to create records.","error");return;}
+      const data={};
+      for(const field of config.fields){
+        const [name,,type]=field, el=form.elements.namedItem(name);
+        if(!el || el.value==="") continue;
+        data[name]=type==="number"?Number(el.value):el.value.trim();
+      }
+      try{
+        await apiJson("/api/v1/workspace/"+resource,{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":apiState.csrf,"Idempotency-Key":liveIdempotencyKey()},body:JSON.stringify(data)});
+        form.reset(); showToast("Record created in your local account.","success");
+        await loadLiveResource(resource); await refreshLiveDashboard(false);
+      }catch(err){showToast(err.message,"error");}
+    });
+    root.addEventListener("click",async e=>{
+      const action=e.target.closest("[data-live-action]");
+      const edit=e.target.closest("[data-live-edit]");
+      if(!action && !edit) return;
+      if(!apiState.account){showToast("Sign in to modify records.","error");return;}
+      const id=action?action.dataset.liveId:edit.dataset.liveEdit;
+      const verb=action?action.dataset.liveAction:"edit";
+      try{
+        if(verb==="edit"){
+          const title=window.prompt("Update service title",edit.dataset.liveTitle||"");
+          if(title===null) return;
+          await apiJson("/api/v1/workspace/services/"+encodeURIComponent(id),{method:"PATCH",headers:{"Content-Type":"application/json","X-CSRF-Token":apiState.csrf,"Idempotency-Key":liveIdempotencyKey()},body:JSON.stringify({title})});
+        }else{
+          await apiJson("/api/v1/workspace/"+resource+"/"+encodeURIComponent(id)+"/actions/"+encodeURIComponent(verb),{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":apiState.csrf,"Idempotency-Key":crypto.randomUUID()},body:"{}"});
+        }
+        showToast("Record updated.","success"); await loadLiveResource(resource); await refreshLiveDashboard(false);
+      }catch(err){showToast(err.message,"error");}
+    });
+  });
+}
+
 async function initLocalApi(){
   const form=$("loginForm"), logout=$("logoutButton"), user=$("signedInAs");
   try{
@@ -590,6 +693,7 @@ async function initLocalApi(){
     if(form) form.hidden=true; if(logout) logout.hidden=false;
     if(user) user.textContent="Signed in: "+(me.account.display_name||me.account.username);
     await refreshLiveDashboard();
+    await refreshLiveResources();
     apiState.timer=window.setInterval(()=>{ if(document.visibilityState==="visible" && apiState.account) refreshLiveDashboard(false); },30000);
   }catch(_){
     if(form) form.hidden=false; if(logout) logout.hidden=true; if(user) user.textContent="";
@@ -605,6 +709,7 @@ async function initLocalApi(){
       apiState.account=data.account; password.value=""; form.hidden=true; if(logout) logout.hidden=false;
       if(user) user.textContent="Signed in: "+(data.account.display_name||data.account.username);
       await refreshLiveDashboard();
+      await refreshLiveResources();
       if(apiState.timer) clearInterval(apiState.timer);
       apiState.timer=window.setInterval(()=>{ if(document.visibilityState==="visible" && apiState.account) refreshLiveDashboard(false); },30000);
     }catch(err){ if(message) message.textContent=err.message; }
@@ -612,7 +717,7 @@ async function initLocalApi(){
   if(logout) logout.addEventListener("click",async()=>{
     try{ await apiJson("/api/v1/auth/logout",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":apiState.csrf},body:"{}"}); }
     catch(_){ showToast("Could not confirm sign out. The local session may still be active.","error"); return; }
-    apiState.account=null; apiState.live=false; if(apiState.timer) clearInterval(apiState.timer);
+    apiState.account=null; apiState.live=false; if(apiState.timer) clearInterval(apiState.timer); apiState.timer=null; clearLiveResources();
     if(form) form.hidden=false; logout.hidden=true; if(user) user.textContent=""; renderEmpty();
     const status=$("snapshotStatus"); if(status) status.textContent="Signed out. Load an offline snapshot or sign in again.";
   });
@@ -626,7 +731,7 @@ async function refreshLiveDashboard(showErrors){
     apiState.live=false;
     if(err.status===401){
       apiState.account=null;
-      if(apiState.timer) clearInterval(apiState.timer);
+      if(apiState.timer) clearInterval(apiState.timer); apiState.timer=null; clearLiveResources();
       const form=$("loginForm"), logout=$("logoutButton"), user=$("signedInAs");
       if(form) form.hidden=false; if(logout) logout.hidden=true; if(user) user.textContent="";
       const status=$("snapshotStatus"); if(status){ status.textContent="Your local session expired. Sign in again to refresh live data."; status.className="status error"; }
@@ -695,6 +800,7 @@ document.addEventListener("DOMContentLoaded", ()=>{
   initFilters();
   initRevenueHandlers();
   initSettingsForm();
+  initWorkspaceCrud();
   renderEmpty();
   initLocalApi();
 });

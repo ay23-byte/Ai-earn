@@ -29,3 +29,18 @@ All POST requests require a same-origin Origin header and matching CSRF cookie/h
 - Existing owner-scoped metrics and financial verification semantics are unchanged.
 - The server is intentionally local-machine oriented and must not be exposed through a reverse proxy, LAN bind, tunnel, or public internet. It is plain HTTP on loopback; do not use it for remote access.
 - This initial API exposes read-only dashboard metrics plus login/logout/profile. Domain write endpoints and record-level CRUD screens are not yet exposed. The existing JSON snapshot loader/export remains available as an offline fallback.
+
+## Authenticated local workspace API (v1)
+
+All workspace routes are served only by the local loopback server started with the Earn OS CLI. They require the HttpOnly authenticated session cookie. Mutating requests require the same-origin Origin, the CSRF cookie/header pair, and a JSON object. Supply an Idempotency-Key header for safe retries; the server generates one when omitted. All domain authorization, validation, status transitions and audit writes are delegated to the existing domain service.
+
+- GET /api/v1/workspace/{resource}?limit=20&after_id=...&status=...
+- GET /api/v1/workspace/{resource}/{id}
+- POST /api/v1/workspace/{resource}
+- PATCH /api/v1/workspace/services/{id} (service content only)
+- POST /api/v1/workspace/{resource}/{id}/actions/{action}
+- GET /api/v1/workspace/ledger/summary
+
+Initial resource adapters: opportunities, services, proposals, customers, products, tasks, order drafts (create/get only), invoices, payments, expenses and ledger entries. Supported transitions are intentionally allowlisted in the adapter and enforced again by each domain service. Financial amounts are integer paise. Verified status is never inferred from payment status.
+
+The current domain model does not expose generic deletion for these resources, so the HTTP API does not invent delete endpoints. Project/customer-project CRUD, AI approvals/chat, integration management, settings persistence, file uploads, and other resources without a supported service adapter remain outside this initial API surface.
