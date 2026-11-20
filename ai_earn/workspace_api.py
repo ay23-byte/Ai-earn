@@ -227,6 +227,7 @@ class WorkspaceAPI:
             "products": {"publish": self.products.publish, "archive": self.products.archive},
             "tasks": {"approve": self.tasks.approve, "reject": self.tasks.reject, "start": self.tasks.start, "complete": self.tasks.complete, "cancel": self.tasks.cancel, "submit_for_review": self.tasks.submit_for_review},
             "orders": {"cancel": self.orders.cancel},
+            "invoices": {"issue": self.invoices.issued},
             "payments": {"received": self.payments.mark_received, "settled": self.payments.mark_settled, "failed": self.payments.mark_failed, "refunded": self.payments.mark_refunded, "verify": self.payments.set_verified},
         }
         fn = actions.get(resource, {}).get(action)
