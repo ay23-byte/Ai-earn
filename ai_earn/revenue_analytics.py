@@ -44,7 +44,7 @@ def _version_check(conn: sqlite3.Connection) -> int:
     return ver
 
 def _bucket_month(ts: int) -> str:
-    dt = datetime.datetime.utcfromtimestamp(ts)
+    dt = datetime.datetime.fromtimestamp(ts, datetime.timezone.utc)
     return f"{dt.year:04d}-{dt.month:02d}"
 
 def _count(conn, table: str, owner: str, from_ts: int, to_ts: int, time_col: str = "created_at", extra: str = "", params: tuple = ()) -> int:

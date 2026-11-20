@@ -471,7 +471,7 @@ class DashboardMetrics:
                         import datetime as _dt
                         rows = conn.execute("SELECT created_at, amount_paise FROM ledger_entries WHERE owner_id=? AND kind='income' ORDER BY created_at", (owner,)).fetchall()
                         for r in rows:
-                            dt = _dt.datetime.utcfromtimestamp(r["created_at"])
+                            dt = _dt.datetime.fromtimestamp(r["created_at"], _dt.timezone.utc)
                             key = f"{dt.year:04d}-{dt.month:02d}"
                             mrr_buckets[key] = mrr_buckets.get(key, 0) + r["amount_paise"]
                     result["analytics"] = {
