@@ -17,7 +17,7 @@ class WorkspaceAPITests(unittest.TestCase):
     def setUp(self):
         self.api = WorkspaceAPI.__new__(WorkspaceAPI)
         self.domain = StubDomain()
-        for name in ("opportunities","services","service_editor","proposals","customers","products","tasks","orders","invoices","payments","expenses","ledger"):
+        for name in ("opportunities","services","service_editor","proposals","customers","products","tasks","orders","invoices","payments","expenses","ledger","customer_projects","customer_notes","customer_requirements"):
             setattr(self.api, name, self.domain)
 
     def test_create_delegates_to_domain_and_passes_idempotency_key(self):
@@ -61,6 +61,56 @@ class WorkspaceAPITests(unittest.TestCase):
         name, args, kwargs = self.domain.calls[-1]
         self.assertEqual((name, args), ("update", ("session","service-1")))
         self.assertEqual(kwargs["title"], "Updated")
+
+
+    def test_project_creation_links_task_to_customer(self):
+        self.api.customers = self.domain
+        self.api.customer_projects = self.domain
+        self.api.tasks = self.domain
+        status, body = self.api.dispatch("POST", "/api/v1/workspace/projects", "session",
+            {"customer_id":"customer-1","title":"Client website","priority":7},
+            operation_key="project-key-123")
+        self.assertEqual(status, 201)
+        self.assertEqual([x[0] for x in self.domain.calls[-3:]], ["get","create","link"])
+        self.assertEqual(self.domain.calls[-2][2]["priority"], 7)
+        self.assertEqual(self.domain.calls[-1][1][1:3], ("customer-1","record-1"))
+
+    def test_project_list_uses_customer_project_domain(self):
+        self.api.customer_projects = self.domain
+        status, body = self.api.dispatch("GET", "/api/v1/workspace/projects", "session", query="limit=10")
+        self.assertEqual(status, 200)
+        self.assertEqual(self.domain.calls[-1][0], "list_all")
+
+    def test_customer_notes_and_requirements_delegate_to_crm(self):
+        self.api.customer_notes = self.domain
+        self.api.customer_requirements = self.domain
+        status, _ = self.api.dispatch("POST", "/api/v1/workspace/customers/c1/notes", "session",
+            {"note":"Prefers email"}, operation_key="note-key-123")
+        self.assertEqual(status, 201)
+        self.assertEqual(self.domain.calls[-1][0], "add")
+        status, _ = self.api.dispatch("POST", "/api/v1/workspace/customers/c1/requirements", "session",
+            {"requirement":"Responsive website"}, operation_key="req-key-123")
+        self.assertEqual(status, 201)
+        self.assertEqual(self.domain.calls[-1][0], "add")
+
+    def test_project_action_uses_project_task_state_machine(self):
+        status, body = self.api.dispatch("POST",
+            "/api/v1/workspace/projects/task-1/actions/submit_for_review", "session", {},
+            operation_key="project-action-123")
+        self.assertEqual(status, 200)
+        self.assertEqual(body["data"]["action"], "submit_for_review")
+        name, args, kwargs = self.domain.calls[-1]
+        self.assertEqual((name, args), ("submit_for_review", ("session", "task-1")))
+        self.assertEqual(kwargs["operation_key"], "project-action-123")
+
+    def test_project_action_rejects_unknown_transition(self):
+        before = len(self.domain.calls)
+        status, body = self.api.dispatch("POST",
+            "/api/v1/workspace/projects/task-1/actions/delete", "session", {},
+            operation_key="project-action-456")
+        self.assertEqual(status, 400)
+        self.assertEqual(body["error"]["code"], "invalid_request")
+        self.assertEqual(len(self.domain.calls), before)
 
     def test_unimplemented_resources_are_not_exposed(self):
         status, body = self.api.dispatch("POST", "/api/v1/workspace/security", "session", {})
