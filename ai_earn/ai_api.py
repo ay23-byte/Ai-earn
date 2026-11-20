@@ -76,6 +76,10 @@ class AIWorkspaceAPI:
                 values = self._only(payload, {"decision", "confirmed"})
                 if set(values) != {"decision", "confirmed"}:
                     raise ValueError("decision and confirmed are required.")
+                if values["confirmed"] is not True:
+                    raise ValueError("Explicit confirmation is required.")
+                if values["decision"] not in {"approved", "rejected"}:
+                    raise ValueError("Decision must be approved or rejected.")
                 ident = self.assistant.queue.decide(token, parts[4], values["decision"],
                     confirmed=values["confirmed"], operation_key=key)
                 return self._ok({"approval_id": ident, "decision": values["decision"]})
