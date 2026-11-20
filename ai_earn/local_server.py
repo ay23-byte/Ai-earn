@@ -23,6 +23,7 @@ from .auth_storage import AuthStorage, StorageError
 from .config import ConfigurationError, load_settings
 from .dashboard_metrics import DashboardMetrics
 from .state_storage import StateStorage, StateStorageError
+from .workspace_api import WorkspaceAPI
 
 SESSION_COOKIE = "ai_earn_session"
 CSRF_COOKIE = "ai_earn_csrf"
@@ -57,6 +58,7 @@ class EarnOSHTTPServer(ThreadingHTTPServer):
         self.auth_service = auth
         self.state_storage = state
         self.dashboard_metrics = metrics
+        self.workspace_api = WorkspaceAPI(auth, state)
         self.dashboard_root = dashboard_root.resolve()
         super().__init__(address, handler)
 
@@ -161,6 +163,16 @@ class EarnOSHandler(BaseHTTPRequestHandler):
                 except Exception:
                     self._error(503, "metrics_unavailable", "Dashboard metrics are temporarily unavailable.")
                 return
+            if path.startswith("/api/v1/workspace/"):
+                token = self._session()
+                try:
+                    self.server.auth_service.profile(token)
+                except (AccessDenied, AuthError):
+                    self._error(401, "authentication_required", "Sign in to continue.")
+                    return
+                status, result = self.server.workspace_api.dispatch("GET", path, token, query=urlsplit(self.path).query)
+                self._send_json(status, result)
+                return
             self._error(404, "not_found", "API route not found.")
             return
         self._serve_static(path)
@@ -216,7 +228,51 @@ class EarnOSHandler(BaseHTTPRequestHandler):
                 ("Set-Cookie", f"{SESSION_COOKIE}=; HttpOnly; Path=/; SameSite=Strict; Max-Age=0")
             ])
             return
+        if path.startswith("/api/v1/workspace/"):
+            token = self._session()
+            try:
+                self.server.auth_service.profile(token)
+            except (AccessDenied, AuthError):
+                self._error(401, "authentication_required", "Sign in to continue.")
+                return
+            status, result = self.server.workspace_api.dispatch(
+                "POST", path, token, payload,
+                operation_key=self.headers.get("Idempotency-Key"),
+            )
+            self._send_json(status, result)
+            return
         self._error(404, "not_found", "API route not found.")
+
+    def do_PATCH(self):
+        path = urlsplit(self.path).path
+        if not path.startswith("/api/v1/workspace/"):
+            self._error(404, "not_found", "Route not found.")
+            return
+        if not self._host_is_loopback():
+            self._error(403, "host_rejected", "Localhost access only.")
+            return
+        if not self._origin_is_same():
+            self._error(403, "origin_rejected", "Cross-origin requests are not allowed.")
+            return
+        if not self._csrf_ok():
+            self._error(403, "csrf_rejected", "Refresh the page and try again.")
+            return
+        try:
+            payload = self._body()
+        except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
+            self._error(400, "invalid_request", "A valid JSON object is required.")
+            return
+        token = self._session()
+        try:
+            self.server.auth_service.profile(token)
+        except (AccessDenied, AuthError):
+            self._error(401, "authentication_required", "Sign in to continue.")
+            return
+        status, result = self.server.workspace_api.dispatch(
+            "PATCH", path, token, payload,
+            operation_key=self.headers.get("Idempotency-Key"),
+        )
+        self._send_json(status, result)
 
     def do_OPTIONS(self):
         self._error(405, "method_not_allowed", "Method not allowed.")
