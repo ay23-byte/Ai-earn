@@ -250,8 +250,11 @@ def run(environ=None, host="127.0.0.1", port=8765):
     state_path = env.get("AI_EARN_STATE_DB", "")
     if not auth_path or not state_path:
         raise ConfigurationError("AI_EARN_AUTH_DB and AI_EARN_STATE_DB")
-    auth = AuthService(AuthStorage(Path(auth_path), create=False))
-    state = StateStorage(Path(state_path))
+    try:
+        auth = AuthService(AuthStorage(Path(auth_path), create=False))
+        state = StateStorage(Path(state_path))
+    except (StorageError, StateStorageError) as exc:
+        raise ConfigurationError("AI_EARN_AUTH_DB or AI_EARN_STATE_DB") from exc
     metrics = DashboardMetrics(auth, state)
     server = EarnOSHTTPServer((host, port), EarnOSHandler, auth, state, metrics, DASHBOARD_ROOT)
     print(f"Earn OS is available at http://127.0.0.1:{server.server_port}/", flush=True)
