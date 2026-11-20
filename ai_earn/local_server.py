@@ -94,8 +94,13 @@ class EarnOSHandler(BaseHTTPRequestHandler):
         host = self.headers.get("Host", "")
         if not host or any(c in host for c in "\r\n/@"):
             return False
-        hostname = host.rsplit(":", 1)[0].strip("[]").lower() if ":" not in host else host.strip("[]").lower()
-        return hostname in {"127.0.0.1", "localhost", "::1"}
+        if host.startswith("[") and "]" in host:
+            hostname = host[1:host.index("]")]
+        elif host.count(":") == 1:
+            hostname = host.rsplit(":", 1)[0]
+        else:
+            hostname = host
+        return hostname.lower() in {"127.0.0.1", "localhost", "::1"}
 
     def _origin_is_same(self) -> bool:
         origin = self.headers.get("Origin", "")
