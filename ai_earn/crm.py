@@ -30,6 +30,8 @@ every send() checks approval or safe workflow.
 
 from __future__ import annotations
 
+import builtins
+
 import hashlib
 import hmac
 import json
@@ -770,7 +772,7 @@ class CustomerProjects:
             return out
 
 
-    def list_all(self, token: str, *, after_id: str | None = None, limit: int = 20) -> list[dict]:
+    def list_all(self, token: str, *, after_id: str | None = None, limit: int = 20) -> builtins.list[dict]:
         """List owner-scoped customer-linked projects."""
         cursor = "" if after_id is None else _input(_record_id, after_id)
         if type(limit) is not int or not 1 <= limit <= 100:
