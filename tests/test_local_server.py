@@ -60,7 +60,10 @@ class LocalServerTests(unittest.TestCase):
         self.connection.request(method, path, body=body, headers=headers or {})
         response = self.connection.getresponse()
         payload = response.read()
-        return response.status, response.getheaders(), json.loads(payload) if payload else {}
+        headers = response.getheaders()
+        content_type = response.getheader("Content-Type", "")
+        decoded = json.loads(payload) if payload and content_type.startswith("application/json") else payload
+        return response.status, headers, decoded
 
     @staticmethod
     def cookie(headers, name):
