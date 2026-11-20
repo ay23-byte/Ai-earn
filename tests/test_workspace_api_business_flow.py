@@ -116,6 +116,22 @@ class WorkspaceAPIBusinessFlowTests(unittest.TestCase):
             expected=201,
         )["id"]
 
+        project = self.request(
+            "POST",
+            "/api/v1/workspace/projects",
+            payload={
+                "customer_id": customer_id,
+                "title": "Example Client website project",
+                "description": "Track delivery of the accepted website scope.",
+                "priority": 5,
+            },
+            key="flow-project-create",
+            expected=201,
+        )
+        project_id = project["task_id"]
+        projects = self.request("GET", "/api/v1/workspace/projects")["items"]
+        self.assertTrue(any(item["id"] == project_id for item in projects))
+
         proposal_id = self.request(
             "POST",
             "/api/v1/workspace/proposals",
