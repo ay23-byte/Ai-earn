@@ -3,7 +3,7 @@ from __future__ import annotations
 import secrets
 from urllib.parse import parse_qs
 from .ai_assistant import AIAssistant, AIProviderConfig
-from .ai_provider_config import AIProviderConfigs
+from .ai_provider_config import AIProviderConfigError, AIProviderConfigs
 
 class AIWorkspaceAPI:
     def __init__(self, auth, state, assistant=None):
@@ -184,7 +184,7 @@ class AIWorkspaceAPI:
             return self._error(400, "invalid_request", str(exc))
         except Exception as exc:
             name = type(exc).__name__
-            if name in {"AssistantError", "ApprovalError", "ToolError", "StateStorageError", "AIProviderConfigError"}:
+            if isinstance(exc, AIProviderConfigError) or name in {"AssistantError", "ApprovalError", "ToolError", "StateStorageError"}:
                 return self._error(400, "ai_policy", str(exc))
             if name == "AccessDenied":
                 return self._error(404, "not_found", "Approval not found.")
