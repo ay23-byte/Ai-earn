@@ -283,6 +283,10 @@ class WorkspaceHTTPEndToEndTests(unittest.TestCase):
         self.other.host = f"127.0.0.1:{self.server.server_port}"
         persisted = self.owner.get(f"/api/v1/workspace/invoices/{invoice_id}")["data"]["item"]
         self.assertEqual(persisted["status"], "issued")
+        self.assertIsInstance(persisted["pdf_hash"], str)
+        self.assertEqual(len(persisted["pdf_hash"]), 64)
+        listed_invoice = self.owner.get("/api/v1/workspace/invoices")["data"]["items"][0]
+        self.assertEqual(listed_invoice["pdf_hash"], persisted["pdf_hash"])
         self.assertEqual(
             self.owner.get(f"/api/v1/workspace/payments/{payment_id}")["data"]["item"]["verified"],
             0,
