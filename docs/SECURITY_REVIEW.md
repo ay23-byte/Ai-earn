@@ -22,7 +22,7 @@ This addendum supersedes historical statements below wherever the older review s
 
 ---
 
-## Implemented controls (updated — now includes production hardening: 127.0.0.1-only, no .env, secrets redacted, structured logs allowlisted, SafeError 8-hex, backup verified 27 chain, monitoring poll, export 50MB redacted, deletion DELETE <8>, security_check, CI hardening; see docs/PRIVACY.md, SECRET_MANAGEMENT.md, OPERATIONAL_RUNBOOKS.md) 2026-11-17, production hardening added) (verified where noted)
+## Historical review controls (2026-11-17; use the current addendum above where implementation has changed) (updated — at that time included production hardening: 127.0.0.1-only, no .env, secrets redacted, structured logs allowlisted, SafeError 8-hex, backup verified 27 chain, monitoring poll, export 50MB redacted, deletion DELETE <8>, security_check, CI hardening; see docs/PRIVACY.md, SECRET_MANAGEMENT.md, OPERATIONAL_RUNBOOKS.md) 2026-11-17, production hardening added) (verified where noted)
 
 - **Configuration:** `config.py` validates `AI_EARN_ENV`/`LOG_LEVEL`/`AUTH_DB`/`STATE_DB` without logging raw values; `load_database_paths` checks absolute paths before any file open. `ConfigurationError` leaks only variable name.
 - **Auth storage:** `auth_storage.py` `create=True` vs `create=False` semantics (register may init, login/recover must not), `_check_parent` + `_ensure_file` (POSIX 0700/0600, Windows `verify_private_path`), `PRAGMA user_version` schema gate, `BEGIN IMMEDIATE` transactions, `mode=rw` URI prevents recreation race.
@@ -38,7 +38,7 @@ This addendum supersedes historical statements below wherever the older review s
 - **Dashboard:** `dashboard_metrics.get` is read-only transaction, no token/username/title in snapshot, exclusive `O_EXCL|O_NOFOLLOW` create (POSIX) / `create_private_file` (Windows), `connected.html` loads file locally, `snapshot.js` 1-MB limit, no API.
 - **Logging:** `events.py` allowlist `Event` enum only, no arbitrary message/exception; `write_event` respects `minimum_level`.
 
-## Gaps & risks (what is NOT done)
+## Historical gaps & risks (2026-11-17; current changes and remaining gates are summarized in the addendum above)
 
 | Area | Gap | Risk | Required fixing milestone |
 |---|---|---|---|
