@@ -155,6 +155,28 @@ class WorkspaceAPIBusinessFlowTests(unittest.TestCase):
             key="flow-proposal-create",
             expected=201,
         )["id"]
+        draft_proposal_id = self.request(
+            "POST",
+            "/api/v1/workspace/proposals",
+            payload={
+                "service_id": service_id,
+                "customer_id": customer_id,
+                "title": "Draft proposal must not create an order",
+                "description": "This proposal has not been accepted.",
+                "price_paise": 2500000,
+                "delivery_days": 14,
+                "ai_generated": False,
+            },
+            key="flow-draft-proposal-create",
+            expected=201,
+        )["id"]
+        self.request(
+            "POST",
+            "/api/v1/workspace/orders",
+            payload={"proposal_id": draft_proposal_id},
+            key="flow-order-from-draft-proposal",
+            expected=400,
+        )
         self.request(
             "POST",
             f"/api/v1/workspace/proposals/{proposal_id}/actions/send",
