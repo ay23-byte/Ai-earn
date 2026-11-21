@@ -712,7 +712,7 @@ async function refreshLiveResources(){
   if(!apiState.account) return;
   await Promise.all(Object.keys(LIVE_RESOURCES).map(loadLiveResource));
 }
-function liveIdempotencyKey(){ return window.crypto && typeof window.crypto.randomUUID==="function" ? window.crypto.randomUUID() : String(Date.now())+"-"+Math.random().toString(36).slice(2); }
+function liveIdempotencyKey(){ return window.crypto && typeof window.crypto.randomUUID==="function" ? window.liveIdempotencyKey() : String(Date.now())+"-"+Math.random().toString(36).slice(2); }
 function initWorkspaceCrud(){
   document.querySelectorAll("[data-live-resource]").forEach(root=>{
     const resource=root.getAttribute("data-live-resource"), config=LIVE_RESOURCES[resource];
