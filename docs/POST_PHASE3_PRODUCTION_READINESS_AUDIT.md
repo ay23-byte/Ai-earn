@@ -1,7 +1,7 @@
 # Post-Phase-3 Production Readiness Audit
 
 **Audit date:** 2026-11-21  
-**Audited base:** `main` at merge commit `2ec6b8c3cd5670216ebb7dba0a40d920d7b0288f` (PR #55)  
+**Audited base:** `main` at PR #59 merge commit `2ae55c4aef0c09128faa0f5ab3198e4aab71d7a3` (schema v30)  
 **Purpose:** establish one current, evidence-based release checkpoint after Phase 3. This report does not override historical phase records or authorize live payments.
 
 ## Executive decision
@@ -11,7 +11,7 @@
 
 The repository contains substantially more than a prototype: opportunity discovery/manual intake, service and portfolio management, CRM, proposals, project/task workflows, invoices, finance/ledger/reconciliation, sandbox payment adapters, AI drafting with approval controls, analytics, backup/recovery, local authentication, a workspace API and a dashboard. The code and tests for these capabilities are present. However, the current supported product is local-first and experimental in important areas. It must not be described as a production SaaS or as capable of verified live payment collection.
 
-PR #55 is merged. The merge-triggered CI run `44795965244` was observed running at audit time: Ubuntu Python 3.11 and 3.13 jobs had succeeded, while both Windows jobs were still in progress. Therefore, post-merge CI was **not yet fully verified** when this report was written. Recheck the run before treating this checkpoint as green.
+PR #59 is merged. Its branch CI run `44893479423` completed successfully on all four Python 3.11/3.13 Ubuntu/Windows matrix jobs. The post-merge run `44895579177` was still in progress when this addendum was prepared; recheck it before recording post-merge verification as green.
 
 ## Evidence reviewed
 
@@ -63,9 +63,9 @@ The repository includes Windows-specific security and terminal tests. CI's Windo
 
 The repository contains conflicting snapshots from different historical dates/branches. Examples include:
 
-- `README.md` describes the app as early development, reports 963 tests and says there is no HTTP API / no customer data.
+- The previous README and several current-facing runbooks contained stale early-development claims, test totals, and schema v28/v29 references. The associated documentation PR refreshes the README and the current release/deployment/backup/payment-gate documents; older phase records remain historical.
 - `docs/COMPLETE_PRODUCT_AUDIT.md` and `docs/FINAL_PRODUCT_READINESS_REPORT.md` describe later CRM, project, finance, API and onboarding capabilities and cite 1,040+ tests.
-- `docs/PHASE_STATUS.md` contains historical statements such as Phase 3 not passed and no HTTP API, which predate the current merged workspace API and PR #55.
+- `docs/PHASE_STATUS.md` contains historical statements such as Phase 3 not passed and no HTTP API, which predate the current merged workspace API; retain these as history rather than current capability statements.
 - `docs/MASTER_IMPLEMENTATION_PLAN.md` and `docs/IMPLEMENTATION_ROADMAP.md` also retain earlier branch baselines and milestone descriptions.
 
 These documents should not be silently combined into a single claimed test count or release status. Update each historical document only with a dated amendment and evidence; keep old history identifiable. The README and phase register should be reconciled in a dedicated documentation change after the exact final CI result and current test totals are confirmed.
@@ -83,3 +83,12 @@ These documents should not be silently combined into a single claimed test count
 ## Safe operating statement
 
 Until the blockers above are closed, describe Ai-earn as a **local-first earning-workflow and business-management application with sandbox payment support**. It can help an operator manage manually sourced opportunities and local business workflows; it does not guarantee income, independently find paying clients, collect live payments, or verify bank settlement.
+
+
+## PR #59 follow-up addendum — 2026-11-21
+
+The canonical baseline for this addendum is main at 2ae55c4aef0c09128faa0f5ab3198e4aab71d7a3. PR #59 adds an accepted-proposal-to-order relationship and expands the SQLite-backed workspace API integration test through customer context, project task lifecycle, proposal acceptance, order conversion, invoice issuance and sandbox payment linkage. The test asserts the payment remains initiated and unverified and does not call an external provider.
+
+The PR branch CI run 44893479423 passed all four configured Python 3.11/3.13 Ubuntu/Windows jobs. The post-merge main run 44895579177 was still in progress at the time this addendum was authored; this document deliberately does not claim that run passed.
+
+The state schema is v30. A fresh v1-to-v30 initialization creates 29 migration backups (before-v2 through before-v30). Current-facing README, deployment, backup/recovery, production-readiness and release-checkpoint documents are being reconciled in the associated documentation PR. Historical milestone records are intentionally not rewritten wholesale.
