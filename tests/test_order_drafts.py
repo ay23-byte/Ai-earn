@@ -74,7 +74,7 @@ class OrderDraftTests(unittest.TestCase):
     def test_list_is_paginated_filtered_and_owner_scoped(self):
         first = self.orders.create(self.alice, "First scope", 100, operation_key="list-first")
         second = self.orders.create(self.alice, "Second scope", 200, operation_key="list-second")
-        self.orders.create(self.bob, "Other owner scope", 300, operation_key="list-other")
+        other = self.orders.create(self.bob, "Other owner scope", 300, operation_key="list-other")
         self.orders.cancel(self.alice, second, operation_key="list-cancel")
 
         rows = self.orders.list(self.alice, limit=1)
@@ -82,7 +82,8 @@ class OrderDraftTests(unittest.TestCase):
         self.assertEqual(rows[0]["id"], min(first, second))
         next_rows = self.orders.list(self.alice, after_id=rows[0]["id"], limit=10)
         self.assertEqual([row["id"] for row in next_rows], [max(first, second)])
-        self.assertTrue(all(row["id"] != self.orders.list(self.bob)[0]["id"] for row in rows + next_rows))
+        self.assertEqual([row["id"] for row in self.orders.list(self.bob)], [other])
+        self.assertTrue(all(row["id"] != other for row in rows + next_rows))
         self.assertEqual([row["id"] for row in self.orders.list(self.alice, status="cancelled")], [second])
         self.assertEqual([row["id"] for row in self.orders.list(self.alice, status="draft")], [first])
         for kwargs in ({"limit": 0}, {"limit": 101}, {"limit": True}, {"status": "paid"}, {"after_id": "bad"}):
