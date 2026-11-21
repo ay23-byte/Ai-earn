@@ -326,6 +326,101 @@ class WorkspaceAPIBusinessFlowTests(unittest.TestCase):
         self.assertEqual(payment["invoice_id"], invoice_id)
         self.assertEqual(payment["order_id"], order_id)
 
+        # Sandbox records must never be promoted to verified, even through the
+        # explicit verification route or a status transition.
+        self.request(
+            "POST",
+            f"/api/v1/workspace/payments/{payment_id}/actions/verify",
+            payload={"verified": 1},
+            key="flow-sandbox-payment-verify",
+            expected=400,
+        )
+        self.request(
+            "POST",
+            f"/api/v1/workspace/payments/{payment_id}/actions/settled",
+            payload={"verified": 1},
+            key="flow-sandbox-payment-settled-verified",
+            expected=400,
+        )
+        self.request(
+            "POST",
+            f"/api/v1/workspace/payments/{payment_id}/actions/received",
+            key="flow-sandbox-payment-received",
+        )
+        self.request(
+            "POST",
+            f"/api/v1/workspace/payments/{payment_id}/actions/settled",
+            key="flow-sandbox-payment-settled",
+        )
+        sandbox_payment = self.request(
+            "GET", f"/api/v1/workspace/payments/{payment_id}"
+        )["item"]
+        self.assertEqual(sandbox_payment["status"], "settled")
+        self.assertEqual(sandbox_payment["verified"], 0)
+
+        # A manually recorded payment requires settlement and a separate
+        # explicit operator verification action.
+        manual_payment_id = self.request(
+            "POST",
+            "/api/v1/workspace/payments",
+            payload={
+                "amount_paise": 2500000,
+                "provider": "manual",
+                "invoice_id": invoice_id,
+                "order_id": order_id,
+                "verified": 0,
+            },
+            key="flow-manual-payment-create",
+            expected=201,
+        )["id"]
+        self.request(
+            "POST",
+            f"/api/v1/workspace/payments/{manual_payment_id}/actions/received",
+            key="flow-manual-payment-received",
+        )
+        self.request(
+            "POST",
+            f"/api/v1/workspace/payments/{manual_payment_id}/actions/settled",
+            key="flow-manual-payment-settled",
+        )
+        self.request(
+            "POST",
+            f"/api/v1/workspace/payments/{manual_payment_id}/actions/verify",
+            payload={"verified": 1},
+            key="flow-manual-payment-verify",
+        )
+        manual_payment = self.request(
+            "GET", f"/api/v1/workspace/payments/{manual_payment_id}"
+        )["item"]
+        self.assertEqual(manual_payment["status"], "settled")
+        self.assertEqual(manual_payment["verified"], 1)
+
+        # Expenses are part of the same authenticated, owner-scoped workflow.
+        expense_id = self.request(
+            "POST",
+            "/api/v1/workspace/expenses",
+            payload={
+                "amount_paise": 125000,
+                "category": "Software",
+                "note": "Disposable test expense",
+                "verified": 0,
+            },
+            key="flow-expense-create",
+            expected=201,
+        )["id"]
+        expense = self.request(
+            "GET", f"/api/v1/workspace/expenses/{expense_id}"
+        )["item"]
+        self.assertEqual(expense["amount_paise"], 125000)
+        self.assertEqual(expense["category"], "Software")
+        self.assertEqual(expense["verified"], 0)
+        expenses = self.request("GET", "/api/v1/workspace/expenses")["items"]
+        self.assertTrue(any(item["id"] == expense_id for item in expenses))
+        other_expenses = self.request(
+            "GET", "/api/v1/workspace/expenses", token=self.other_token
+        )["items"]
+        self.assertFalse(any(item["id"] == expense_id for item in other_expenses))
+
         # The full workflow remains private to its owner.
         hidden = self.request(
             "GET",
