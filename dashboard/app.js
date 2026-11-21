@@ -646,9 +646,9 @@ async function openCustomerDetails(root, customerId){
     panel.innerHTML='<div class="panel-head"><h3>Customer notes &amp; requirements</h3><button type="button" class="button ghost" data-customer-details-close>Close</button></div>'+
       '<p class="muted">Customer record: '+escapeHtml(customerId)+'</p>'+
       '<div class="customer-detail-columns"><section><h4>Notes</h4><ul class="customer-detail-list">'+renderRows(notes.items||[],"note")+'</ul>'+
-      '<form class="customer-detail-form" data-customer-detail-kind="notes"><label class="live-field">Add a note<textarea name="note" rows="2" maxlength="4000" required></textarea></label><button class="button" type="submit">Save note</button></form></section>'+
+      '<form class="customer-detail-form" data-customer-detail-kind="notes"><label class="live-field">Add a note<textarea name="note" rows="2" maxlength="2000" required></textarea></label><button class="button" type="submit">Save note</button></form></section>'+
       '<section><h4>Requirements</h4><ul class="customer-detail-list">'+renderRows(requirements.items||[],"requirement")+'</ul>'+
-      '<form class="customer-detail-form" data-customer-detail-kind="requirements"><label class="live-field">Add a requirement<textarea name="requirement" rows="2" maxlength="4000" required></textarea></label><button class="button" type="submit">Save requirement</button></form></section></div>';
+      '<form class="customer-detail-form" data-customer-detail-kind="requirements"><label class="live-field">Add a requirement<input name="requirement" type="text" maxlength="500" required></label><button class="button" type="submit">Save requirement</button></form></section></div>';
     panel.dataset.customerId=customerId;
   }catch(err){
     panel.innerHTML='<div class="panel-head"><h3>Customer details unavailable</h3><button type="button" class="button ghost" data-customer-details-close>Close</button></div><p class="muted" role="status">'+escapeHtml(err.message)+'</p>';
