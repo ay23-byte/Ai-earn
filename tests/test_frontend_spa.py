@@ -136,6 +136,8 @@ class FrontendSPAStructureTests(unittest.TestCase):
         self.assertIn('["order_id","Order (optional)","select",false]', js)
         self.assertIn('invoice_id: { resource:"invoices", empty:"Select an issued invoice" }', js)
         self.assertIn('field==="invoice_id"?options.filter(item=>item.status==="issued")', js)
+        self.assertIn('Payment status changes do not prove money was received or settled.', js)
+        self.assertIn('k==="verified"?(item[k]===1?"VERIFIED":"UNVERIFIED")', js)
         self.assertIn('field==="order_id" && formResource==="payments"?options.filter(item=>item.status!=="cancelled")', js)
         self.assertIn('const LIVE_SELECTS = {', js)
         self.assertIn('function populateLiveSelects()', js)
