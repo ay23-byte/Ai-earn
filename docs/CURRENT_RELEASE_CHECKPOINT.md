@@ -1,8 +1,8 @@
 # Current Release Checkpoint
 
-**Checkpoint date:** 2026-11-22  
-**Audited code baseline:** `main` at PR #69 merge commit `b4e10769f3b6d7c19eb10ab6f2c32466da0e4c52` (includes PRs #68, #69 and #71)  
-**State schema:** v30 (`LATEST_SCHEMA_VERSION = 30`)  
+**Checkpoint date:** 2026-11-22
+**Audited code baseline:** `main` at PR #69 merge commit `b4e10769f3b6d7c19eb10ab6f2c32466da0e4c52` (includes PRs #68, #69 and #71)
+**State schema:** v30 (`LATEST_SCHEMA_VERSION = 30`)
 **Release candidate:** not approved; post-merge main CI run #44956929296 was still running when this checkpoint was refreshed.
 
 ## Product boundary
