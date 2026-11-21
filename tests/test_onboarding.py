@@ -31,7 +31,7 @@ class OnboardingTests(unittest.TestCase):
             d.mkdir(mode=0o700)
         self.auth = AuthService(AuthStorage(d / "auth.sqlite3"))
         state = StateStorage(d / "state.sqlite3", create=True, confirmed=True)
-        for v in range(2, 30):
+        for v in range(2, 31):
             getattr(state, f"migrate_to_v{v}")(d / f"before-v{v}.sqlite3", confirmed=True)
         self.state = StateStorage(d / "state.sqlite3")
         patcher = patch("ai_earn.auth.PASSWORD_ITERATIONS", 1000)

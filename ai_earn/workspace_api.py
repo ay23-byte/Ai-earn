@@ -175,7 +175,7 @@ class WorkspaceAPI:
             "customers": {"name", "contact", "source"},
             "products": {"title", "description", "version", "price_paise"},
             "tasks": {"title", "description", "opportunity_id", "parent_task_id", "priority", "deadline_at", "estimated_duration_seconds"},
-            "orders": {"title", "proposed_amount_paise"},
+            "orders": {"title", "proposed_amount_paise", "proposal_id"},
             "invoices": {"order_id", "due_at", "billing_name", "billing_contact", "billing_address", "tax_rate_bps", "tax_amount_paise"},
             "payments": {"amount_paise", "provider", "provider_ref", "invoice_id", "order_id", "verified"},
             "expenses": {"amount_paise", "category", "note", "incurred_at", "verified"},
@@ -200,6 +200,10 @@ class WorkspaceAPI:
         return service.get(token, ident)
 
     def _create(self, resource: str, token: str, data: dict, key: str) -> str:
+        if resource == "orders" and "proposal_id" in data:
+            if set(data) != {"proposal_id"}:
+                raise WorkspaceAPIError("proposal_id cannot be combined with manual order fields.")
+            return self.orders.create_from_proposal(token, data["proposal_id"], operation_key=key)
         creators = {
             "opportunities": lambda: self.opportunities.create(token, operation_key=key, **data),
             "services": lambda: self.services.create(token, operation_key=key, **data),

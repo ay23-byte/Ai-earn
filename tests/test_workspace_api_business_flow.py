@@ -129,6 +129,62 @@ class WorkspaceAPIBusinessFlowTests(unittest.TestCase):
             expected=201,
         )
         project_id = project["task_id"]
+
+        # Customer context is part of the same authenticated workflow.
+        note_id = self.request(
+            "POST",
+            f"/api/v1/workspace/customers/{customer_id}/notes",
+            payload={"note": "Client prefers email updates."},
+            key="flow-customer-note",
+            expected=201,
+        )["id"]
+        requirement_id = self.request(
+            "POST",
+            f"/api/v1/workspace/customers/{customer_id}/requirements",
+            payload={"requirement": "Website must work on mobile screens."},
+            key="flow-customer-requirement",
+            expected=201,
+        )["id"]
+        notes = self.request("GET", f"/api/v1/workspace/customers/{customer_id}/notes")["items"]
+        requirements = self.request(
+            "GET", f"/api/v1/workspace/customers/{customer_id}/requirements"
+        )["items"]
+        self.assertTrue(any(item["id"] == note_id for item in notes))
+        self.assertTrue(any(item["id"] == requirement_id for item in requirements))
+        # The customer-context routes intentionally normalize an inaccessible
+        # customer to the same domain-validation response as an unknown customer.
+        self.request(
+            "GET",
+            f"/api/v1/workspace/customers/{customer_id}/notes",
+            token=self.other_token,
+            expected=400,
+        )
+        self.request(
+            "GET",
+            f"/api/v1/workspace/customers/{customer_id}/requirements",
+            token=self.other_token,
+            expected=400,
+        )
+
+        # Exercise the real project task state machine through the workspace API.
+        task = self.request("GET", f"/api/v1/workspace/tasks/{project_id}")["item"]
+        self.assertEqual(task["status"], "draft")
+        self.request(
+            "POST",
+            f"/api/v1/workspace/projects/{project_id}/actions/start",
+            key="flow-project-start",
+        )
+        task = self.request("GET", f"/api/v1/workspace/tasks/{project_id}")["item"]
+        self.assertEqual(task["status"], "in_progress")
+        self.request(
+            "POST",
+            f"/api/v1/workspace/projects/{project_id}/actions/complete",
+            key="flow-project-complete",
+        )
+        task = self.request("GET", f"/api/v1/workspace/tasks/{project_id}")["item"]
+        self.assertEqual(task["status"], "completed")
+        self.assertGreaterEqual(task["execution_log_count"], 2)
+
         projects = self.request("GET", "/api/v1/workspace/projects")["items"]
         self.assertTrue(
             any(
@@ -138,6 +194,16 @@ class WorkspaceAPIBusinessFlowTests(unittest.TestCase):
                 for item in projects
             ),
             "The project list should expose the linked task and customer relationship.",
+        )
+        other_projects = self.request(
+            "GET", "/api/v1/workspace/projects", token=self.other_token
+        )["items"]
+        self.assertFalse(any(item["task_id"] == project_id for item in other_projects))
+        self.request(
+            "GET",
+            f"/api/v1/workspace/tasks/{project_id}",
+            token=self.other_token,
+            expected=404,
         )
 
         proposal_id = self.request(
@@ -155,6 +221,28 @@ class WorkspaceAPIBusinessFlowTests(unittest.TestCase):
             key="flow-proposal-create",
             expected=201,
         )["id"]
+        draft_proposal_id = self.request(
+            "POST",
+            "/api/v1/workspace/proposals",
+            payload={
+                "service_id": service_id,
+                "customer_id": customer_id,
+                "title": "Draft proposal must not create an order",
+                "description": "This proposal has not been accepted.",
+                "price_paise": 2500000,
+                "delivery_days": 14,
+                "ai_generated": False,
+            },
+            key="flow-draft-proposal-create",
+            expected=201,
+        )["id"]
+        self.request(
+            "POST",
+            "/api/v1/workspace/orders",
+            payload={"proposal_id": draft_proposal_id},
+            key="flow-order-from-draft-proposal",
+            expected=400,
+        )
         self.request(
             "POST",
             f"/api/v1/workspace/proposals/{proposal_id}/actions/send",
@@ -169,13 +257,28 @@ class WorkspaceAPIBusinessFlowTests(unittest.TestCase):
         order_id = self.request(
             "POST",
             "/api/v1/workspace/orders",
-            payload={
-                "title": "Website development — Example Client",
-                "proposed_amount_paise": 2500000,
-            },
+            payload={"proposal_id": proposal_id},
             key="flow-order-create",
             expected=201,
         )["id"]
+        order = self.request("GET", f"/api/v1/workspace/orders/{order_id}")["item"]
+        self.assertEqual(order["proposal_id"], proposal_id)
+        self.assertEqual(order["customer_id"], customer_id)
+        self.assertEqual(order["proposed_amount_paise"], 2500000)
+        self.assertEqual(order["title"], "Website development proposal")
+        self.request(
+            "POST",
+            "/api/v1/workspace/orders",
+            payload={"proposal_id": proposal_id},
+            key="flow-order-duplicate",
+            expected=400,
+        )
+        self.request(
+            "GET",
+            f"/api/v1/workspace/orders/{order_id}",
+            token=self.other_token,
+            expected=404,
+        )
         invoice_id = self.request(
             "POST",
             "/api/v1/workspace/invoices",
@@ -206,6 +309,7 @@ class WorkspaceAPIBusinessFlowTests(unittest.TestCase):
                 "provider": "sandbox",
                 "provider_ref": "disposable-flow-reference",
                 "invoice_id": invoice_id,
+                "order_id": order_id,
                 "verified": 0,
             },
             key="flow-payment-create",
@@ -215,6 +319,8 @@ class WorkspaceAPIBusinessFlowTests(unittest.TestCase):
         self.assertEqual(payment["status"], "initiated")
         self.assertEqual(payment["verified"], 0)
         self.assertEqual(payment["provider"], "sandbox")
+        self.assertEqual(payment["invoice_id"], invoice_id)
+        self.assertEqual(payment["order_id"], order_id)
 
         # The full workflow remains private to its owner.
         hidden = self.request(

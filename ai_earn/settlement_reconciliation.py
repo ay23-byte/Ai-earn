@@ -19,7 +19,7 @@ import sqlite3
 from .auth import AccessDenied, AuthService
 from .opportunity_drafts import DraftError, _digest, _key, _record_id
 from .state_authorization import _authorized_transaction
-from .state_storage import StateStorage, StateStorageError
+from .state_storage import LATEST_SCHEMA_VERSION, StateStorage, StateStorageError
 
 _RESOURCE = "settlement_evidence"
 _MAX_CSV_BYTES = 1_000_000
@@ -38,8 +38,11 @@ def _input(validator, value):
 
 
 def _version(conn: sqlite3.Connection) -> None:
-    if conn.execute("PRAGMA user_version").fetchone()[0] != 29:
-        raise StateStorageError("State schema version 29 is required for settlement reconciliation.")
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    if not 29 <= version <= LATEST_SCHEMA_VERSION:
+        raise StateStorageError(
+            f"State schema version 29 or newer (up to {LATEST_SCHEMA_VERSION}) is required for settlement reconciliation."
+        )
 
 
 def _retry(conn, owner, key, digest):
