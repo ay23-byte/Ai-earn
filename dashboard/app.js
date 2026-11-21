@@ -843,6 +843,12 @@ function initAiWorkspace(){
       await refreshAiWorkspace(false);
     }catch(err){showToast(err.message,"error");}
   });
+  const providerSelect=$("aiProviderSelect"),providerModel=$("aiProviderModel");
+  if(providerSelect)providerSelect.addEventListener("change",()=>{
+    if(!providerModel)return;
+    if(providerSelect.value==="ollama"&&providerModel.value==="stub-draft-v1")providerModel.value="";
+    if(providerSelect.value==="stub"&&!providerModel.value)providerModel.value="stub-draft-v1";
+  });
   if(chat)chat.addEventListener("submit",async e=>{
     e.preventDefault();if(!apiState.account){showToast("Sign in to use the AI assistant.","error");return;}
     aiPrint("aiChatOutput","Generating draft…");
