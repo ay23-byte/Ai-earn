@@ -1,10 +1,20 @@
 # Phase register and recovery checkpoint
 
-Updated: 2026-11-17. Initial audit baseline: `16bd10f091398cb191d455e1349164c731bbf713`; current session branch `arena/a2b30614-ai-earn`, based on commit `9d77101a0853e5d8bd0d42d880ff1e8ebef5575d` (LATEST 28, 963 tests: 946 passed 17 skipped on Linux). No HTTP API; disposable local CLI only. Valid phase states: `NOT_STARTED`, `IN_PROGRESS`, `BLOCKED`, `PASS`, `PASS_WITH_DOCUMENTED_LIMITATIONS`. Only one phase may be `IN_PROGRESS`. Status records evidence, not intent.
+Updated: 2026-11-22. Historical initial audit baseline: `16bd10f091398cb191d455e1349164c731bbf713`; current main release baseline: `b4e10769f3b6d7c19eb10ab6f2c32466da0e4c52` (schema v30; PR #69 merged; PR #71 HTTP workspace E2E merged). An authenticated loopback-only HTTP workspace API and live dashboard integration now exist; the application remains local-first and live payments remain blocked. Test counts in older phase entries are historical, not current CI claims. Valid phase states: `NOT_STARTED`, `IN_PROGRESS`, `BLOCKED`, `PASS`, `PASS_WITH_DOCUMENTED_LIMITATIONS`. Only one phase may be `IN_PROGRESS`. Status records evidence, not intent.
 
 ## Revised smaller-product scope (user approved)
 
-The user approved an offline manual tracker as a smaller goal. This is a separate MVP scope, now **PASS_WITH_DOCUMENTED_LIMITATIONS through v29** (original tracker M2-M16 done, 963 tests). It clearly distinguishes unverified manual claims (`unverified` proposed/quote/contract/invoice/initiated vs `verified` received/settled via sandbox) and 11-concept ledger. All financial amounts remain owner-asserted local; payment is sandbox HMAC only (no bank settlement, live blocked). No live provider, issuance, or real settlement is supported. M11 live payments remain BLOCKED. Windows and production readiness remain unverified (`production_ready:false`).
+The user approved a local-first manual tracker as the product scope. The current code baseline is **PASS_WITH_DOCUMENTED_LIMITATIONS through schema v30** for the implemented local workflow, subject to current CI and human operator acceptance. It includes the authenticated loopback workspace API, live dashboard CRUD workflows, HTTP E2E coverage, tax/billing/payment/expense records, AI provider configuration/usage records, settlement-evidence records, and proposal-to-order uniqueness. PR #69 tightens payment verification: sandbox/provider-backed payments cannot be promoted to verified locally; a manually recorded payment can receive an explicit verified annotation only after it is settled, which remains an operator assertion rather than independent bank settlement. No live provider processing or independent bank settlement is enabled. M11 live payments remain BLOCKED. Windows acceptance, restore, accessibility and independent security review remain unverified.
+
+
+## Current release checkpoint — 2026-11-22
+
+- Current main baseline: `b4e10769f3b6d7c19eb10ab6f2c32466da0e4c52`.
+- Current schema: v30; see `docs/DATABASE.md` for the v28–v30 migration inventory.
+- PR #69 payment verification safeguards and PR #71 HTTP workspace E2E coverage are included in the main baseline.
+- PR #73 is the open release-documentation refresh. Its current CI run is recorded in `docs/CURRENT_RELEASE_CHECKPOINT.md`; a run is green only after all four Python/OS matrix jobs pass.
+- Human gates remain open: actual Windows operator acceptance, keyboard/contrast/NVDA review, restore drill to a separate destination, and independent security review. Hosted SaaS and live payments remain unapproved.
+- Older milestone entries below are retained as an append-only historical record. Their dates, branches, schema versions, architecture descriptions, and test totals describe the state at the time they were written and must not be interpreted as current status.
 
 ## Phase 0 — Repository discovery and baseline audit
 
