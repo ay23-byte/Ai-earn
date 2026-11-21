@@ -114,6 +114,17 @@ class FrontendSPAStructureTests(unittest.TestCase):
         self.assertNotIn("localhost", js)
         self.assertNotIn("127.0.0.1", js)
 
+    def test_customer_notes_and_requirements_live_workspace(self):
+        js = APP_JS.read_text(encoding="utf-8")
+        css = APP_CSS.read_text(encoding="utf-8")
+        self.assertIn('data-live-customer-details=', js)
+        self.assertIn('/notes', js)
+        self.assertIn('/requirements', js)
+        self.assertIn('data-customer-detail-kind', js)
+        self.assertIn('X-CSRF-Token', js)
+        self.assertIn('customer-detail-columns', css)
+        self.assertIn('escapeHtml(item[key]||"")', js)
+
     def test_css_has_dark_and_light_themes(self):
         css = APP_CSS.read_text(encoding="utf-8")
         self.assertIn("--bg", css)
