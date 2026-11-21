@@ -43,4 +43,15 @@ All workspace routes are served only by the local loopback server started with t
 
 Initial resource adapters: opportunities, services, proposals, customers, products, tasks, customer-linked projects, order drafts (create/get only), invoices, payments, expenses and ledger entries. Client notes and requirements are exposed as owner-scoped customer subresources. Supported transitions are intentionally allowlisted in the adapter and enforced again by each domain service. Financial amounts are integer paise. Verified status is never inferred from payment status.
 
-The current domain model does not expose generic deletion for these resources, so the HTTP API does not invent delete endpoints. Project records are represented by existing project_tasks linked to customers through customer_projects; the API creates the task and relationship using deterministic idempotency keys. Binary file uploads and private document storage are not yet exposed; existing attachment tables are metadata-only. Integration management and persistent settings remain outside this API surface.
+The current domain model does not expose generic deletion for these resources, so the HTTP API does not invent delete endpoints. Project records are represented by existing project_tasks linked to customers through customer_projects; the API creates the task and relationship using deterministic idempotency keys. Binary file uploads and private document storage are not yet exposed; existing attachment tables are metadata-only. Connector account management and non-AI integration settings remain outside this API surface. The AI provider settings described below are the limited local exception.
+## AI assistant API
+
+All AI routes require the authenticated session cookie and same-origin CSRF protection for POST requests.
+
+- GET `/api/v1/ai/status` — provider availability/config summary, approval count, tool registry, emergency-stop state, and owner-scoped token-usage totals.
+- POST `/api/v1/ai/provider` — configure only `stub` or `ollama` with `provider`, `model`, and optional `base_url`. The Ollama endpoint must be plain HTTP on a numeric loopback address (default `http://127.0.0.1:11434`). Remote providers and API-key fields are rejected by this route.
+- POST `/api/v1/ai/chat` — generate an unverified draft. Optional reference content is passed as untrusted data. Ollama usage counters are persisted when the local server reports them.
+- POST `/api/v1/ai/proposals` — prepare a tool preview; consequential tools create an approval request rather than executing.
+- GET `/api/v1/ai/approvals`, GET approval detail/preview, POST approval decision/revoke, and POST emergency stop/clear — owner-scoped approval controls. Explicit confirmation is required for decisions and emergency controls.
+
+The Ollama adapter calls only the local `/api/tags` and `/api/chat` endpoints, uses bounded JSON responses and configured timeouts, and never streams. Local model output is always `draft_unverified`; it cannot send messages, publish services, modify finance records, or execute consequential tools by itself. OpenAI-compatible and hosted network providers remain disabled.
