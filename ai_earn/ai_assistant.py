@@ -1253,10 +1253,10 @@ class AIAssistant:
             _external_content(external_content)
         # Check provider availability explicitly; never assume
         if not self.provider.is_available():
-            # Still allow stub drafts; for non-stub, explain not available
+            # A missing local provider must not be described as a successful stub generation.
             info = self.provider.info()
             result = {
-                "output": f"Provider {self.config.provider} not available in {self.config.mode} (model={self.config.model}). Using stub draft.",
+                "output": f"Provider {self.config.provider} is unavailable in {self.config.mode} (model={self.config.model}). Start the local provider or select the built-in stub.",
                 "model": self.config.model,
                 "verification": "draft_unverified",
                 "provider_info": info,
