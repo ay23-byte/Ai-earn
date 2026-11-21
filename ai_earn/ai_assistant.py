@@ -320,10 +320,9 @@ class AIProviderConfig:
         """Never assume provider available without checking. Stub always available in sandbox."""
         if self.provider == "stub":
             return self.mode == "sandbox"
-        # For openai/ollama/hosted, check base_url and model configured, but live blocked -> not available
+        # This config-only check is conservative. Provider adapters perform their
+        # own availability checks; Ollama probes its local model endpoint.
         if self.mode == "sandbox":
-            # sandbox may simulate hosted; treat as not available unless explicitly sandbox provider stub
-            # For demo, only stub is available; others require live approval
             return False
         return False
 
