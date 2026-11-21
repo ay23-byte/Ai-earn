@@ -2,7 +2,7 @@
 
 **Purpose:** provide repeatable, human-run acceptance evidence for the supported Windows-local workflow. This is a test procedure, not a production approval. It must use a fresh disposable checkout and synthetic account only.
 
-**Baseline:** PR #61 merge commit `df5d147f7aa9aef05f94be9ebcbc67cdf0a47abd`, schema v30. Rebase this procedure against the release candidate before recording a result.
+**Baseline:** PR #67 merge commit `51545b9eae344783559519642b57b4f3fea821f3`, schema v30. Record the exact candidate commit used for the drill.
 
 ## Safety rules
 
@@ -88,7 +88,10 @@ Open `http://127.0.0.1:8765/` in a browser. Verify:
 - [ ] Create a service and proposal; exercise allowed state transitions only.
 - [ ] For an accepted customer-linked proposal, create and view its order; duplicate conversion is rejected.
 - [ ] Create and issue a local invoice; verify this is only an invoice record/PDF, not evidence of payment.
-- [ ] If using the sandbox payment flow, confirm records remain explicitly sandbox/unverified unless a separate verified process has been implemented and approved. Do not initiate real payments.
+- [ ] Create a synthetic expense; refresh and confirm it persists in the Expenses workspace and remains owner-scoped.
+- [ ] Create a sandbox payment linked to an issued invoice/order using the live selectors; verify its status and unverified flag.
+- [ ] Confirm sandbox/provider-backed records cannot be marked verified through the dashboard or workspace API. Never initiate real payments.
+- [ ] Confirm manual payment records can only be explicitly verified after the record is settled, and only after the operator checks external evidence outside this application.
 - [ ] Sign out and verify protected API requests no longer return account records.
 
 Stop the server with Ctrl+C. Do not use a tunnel, reverse proxy, LAN bind, or public internet exposure.
@@ -138,6 +141,8 @@ If any command fails, preserve the disposable files for diagnosis and stop. Do n
 | Live dashboard sign-in / sign-out | | |
 | CRM notes and requirements persistence | | |
 | Proposal → order → invoice workflow | | |
+| Expense create / list / persistence | | |
+| Payment linking and unverified sandbox boundary | | |
 | Loopback-only server verified | | |
 | Keyboard / contrast / screen-reader review | | |
 | Backup to new path + restored-copy health | | |
