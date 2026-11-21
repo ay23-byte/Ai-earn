@@ -292,7 +292,12 @@ class AIProviderConfig:
             endpoint = self.base_url or "http://127.0.0.1:11434"
             try:
                 parsed = urlsplit(endpoint)
-                loopback = parsed.hostname is not None and ipaddress.ip_address(parsed.hostname).is_loopback
+                port = parsed.port
+                loopback = (
+                    parsed.hostname is not None
+                    and ipaddress.ip_address(parsed.hostname).is_loopback
+                    and (port is None or 1 <= port <= 65535)
+                )
             except ValueError:
                 loopback = False
                 parsed = None
@@ -419,7 +424,12 @@ class OllamaProvider(ProviderBase):
         endpoint = self.config.base_url or "http://127.0.0.1:11434"
         try:
             parsed = urlsplit(endpoint)
-            loopback = parsed.hostname is not None and ipaddress.ip_address(parsed.hostname).is_loopback
+            port = parsed.port
+            loopback = (
+                parsed.hostname is not None
+                and ipaddress.ip_address(parsed.hostname).is_loopback
+                and (port is None or 1 <= port <= 65535)
+            )
         except ValueError as exc:
             raise AssistantError("Ollama must use a plain HTTP loopback endpoint.") from exc
         if (
@@ -443,7 +453,7 @@ class OllamaProvider(ProviderBase):
         try:
             with urlopen(request, timeout=timeout or self.config.timeout_seconds) as response:
                 raw = response.read(self._MAX_RESPONSE_BYTES + 1)
-        except (URLError, TimeoutError, OSError) as exc:
+        except (URLError, TimeoutError, OSError, ValueError) as exc:
             raise AssistantError("Local Ollama request failed; check that Ollama is running.") from exc
         if len(raw) > self._MAX_RESPONSE_BYTES:
             raise AssistantError("Local Ollama response exceeded the size limit.")
