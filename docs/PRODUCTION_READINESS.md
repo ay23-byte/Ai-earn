@@ -2,8 +2,8 @@
 
 **Status:** `production_ready` reflects offline foundation readiness (`true` when all 11 automated checks PASS); **live remains blocked** (`live_blocked: true`, `live_ready: false` until M11). No live transactions have been enabled. This checklist must be **fully signed** before any live payment enablement. Live mode is blocked in code (`ProviderConfig` `mode=live` raises) and requires explicit human approval (M11) plus all automated verifications below. Do not process live money, store cards, or trust client success screens.
 
-**Branch:** `arena/a2b30614-ai-earn` base `9d77101` — v28 + v21 provider sandbox HMAC verified.  
-**Date:** 2026-11-17  
+**Audited baseline:** `main` at PR #59 merge commit `2ae55c4aef0c09128faa0f5ab3198e4aab71d7a3` — state schema v30.  
+**Checklist reviewed:** 2026-11-21  
 **Gate:** M11 (see `PAYMENTS.md`). This document IS the production readiness checklist.
 
 ## Checklist — all 11 must pass before live enablement
@@ -18,7 +18,7 @@
 | 6 | **Verify failed payments.** | Automated: `check_failed_payments()` — `created→failed`, `authorized→failed`, `captured→failed` allowed; `settled`→`failed` denied; failed is terminal except to `failed` idempotency. No client success inferred. Tests: `test_payment_providers` failed transitions + `check_failed_payments()`. | `TRANSITIONS` `failed`, `check_failed_payments()` | Payments | ☐ |
 | 7 | **Verify settlement records.** | Automated: `check_settlement_records()` — `captured→settled` only, `get_settlement_status()` returns `settled` only when `settled` event exists (never inferred), owner-isolated, events logged. Tests: `test_payment_providers` settlement + `check_settlement_records()`. | `get_settlement_status()`, `handle_webhook` `settled`, `check_settlement_records()` | Payments | ☐ |
 | 8 | **Verify audit trails.** | Automated: `check_audit_trails()` — every order has `provider_order_created` + exactly one audit row per `state_operations` entry; `_owned` replays `state_audit` and rejects inconsistent history; `state_audit` + `state_operations` counts match; `check_integrity` passes. No `DELETE`/`UPDATE` of audit in services. | `state_audit`, `state_operations`, `_check_audit_operation_balance`, `check_audit_trails()` | Data | ☐ |
-| 9 | **Verify backups.** | Automated: `check_backups()` — `StateStorage` migration creates `before-v2..before-v{LATEST}` (≈27 for LATEST 28) via `backup_to` to new private path, never `REPLACE`; `health --with-backups` / `check_with_backups` reports `ok` with `count==expected`; restore drill on disposable copy (see `BACKUP_AND_RECOVERY.md` § drill). Tests: `test_state_migration`, `test_health.with_backups`, `check_backups()`. | `state_storage.backup_to`, `health.check_with_backups`, `check_backups()` | Ops | ☐ |
+| 9 | **Verify backups.** | Automated: `check_backups()` — `StateStorage` migration creates `before-v2..before-v{LATEST}` (29 for LATEST 30) via `backup_to` to new private path, never `REPLACE`; `health --with-backups` / `check_with_backups` reports `ok` with `count==expected` (29 backups for a fresh v30 database); restore drill on disposable copy (see `BACKUP_AND_RECOVERY.md` § drill). Tests: `test_state_migration`, `test_health.with_backups`, `check_backups()`. | `state_storage.backup_to`, `health.check_with_backups`, `check_backups()` | Ops | ☐ |
 | 10 | **Verify error recovery.** | Automated: `check_error_recovery()` — `_check_sandbox_payment_integrity`/`_check_operation_results`/`_check_audit_operation_balance`, `StateRecoveryComparison.compare_snapshot` reports per-table differences, `os._exit` partial-write rollback tests, `backup_to` to new path never overwrites, `doctor --plan-init` read-only plan. Tests: `test_state_crash_recovery`, `test_state_recovery_comparison`, `test_recovery_drill`, `check_error_recovery()`. | `state_storage`, `state_recovery_comparison`, `doctor`, `check_error_recovery()` | Ops | ☐ |
 | 11 | **Verify configuration separation.** | Automated: `check_configuration_separation()` — `ProviderConfig` `(provider,mode)` separate (sandbox vs live never share `webhook_secret`), live blocked without `docs/PRODUCTION_READINESS.md` sign-off, env vars `AI_EARN_ENV`/`AI_EARN_AUTH_DB`/`AI_EARN_STATE_DB` validated without logging, `.env` not loaded, secrets 32..128 bytes, never in repo/tests/logs/`dashboard_metrics`, no card storage (`PRAGMA table_info` has no `card`), provider/mode isolated in `handle_webhook`. Tests: `test_config`, `test_payment_providers.test_live_blocked`, `test_production_readiness`. | `ProviderConfig`, `config.Settings`, `check_configuration_separation()` | Security | ☐ |
 
@@ -31,13 +31,13 @@ Live transactions remain **blocked** until **all 11** above are `PASS` **and** t
 - **Ops reviewer:** ________________      Date: __________  Result: PASS / FAIL
 - **Final approver (explicit M11):** ________________  Date: __________  Result: PASS / FAIL
 
-Signing requires: independent verification of each evidence command above on a **disposable** private database (never reuse live DB), plus `python -m compileall -q ai_earn tests` OK, `python -m unittest discover` OK (1014/17 on Linux as of 2026-11-17), `git diff --check` clean, secret scan (`BEGIN PRIVATE KEY`, `sk-`) clean, and `ai_earn.production_readiness.evaluate()` reports `production_ready: true` offline (11 PASS) with `live_blocked: true` / `live_ready: false` until M11 form is stored out-of-repo and code gate is explicitly updated with the approval commit.
+Signing requires: independent verification of each evidence command above on a **disposable** private database (never reuse live DB), plus `python -m compileall -q ai_earn tests` OK, `python -m unittest discover` OK (Do not use a hard-coded historical test total; capture the current run's totals and skips for each OS/Python matrix leg), `git diff --check` clean, secret scan (`BEGIN PRIVATE KEY`, `sk-`) clean, and `ai_earn.production_readiness.evaluate()` reports `production_ready: true` offline (11 PASS) with `live_blocked: true` / `live_ready: false` until M11 form is stored out-of-repo and code gate is explicitly updated with the approval commit.
 
 ## How to verify (disposable)
 
 ```sh
 python -m compileall -q ai_earn tests
-python -m unittest discover -v  # expect 963 OK + 17 skipped (946 passed)
+python -m unittest discover -v  # record the exact current total, pass count and skips from this run; do not reuse historical totals
 python -m ai_earn health --json --with-backups
 python -m ai_earn doctor --json
 # automated checklist (read-only, no network, no card, no live):
@@ -53,4 +53,4 @@ Live enablement is a **code change** (remove `ProviderConfig` live block after t
 - `PAYMENTS.md` Gate M11, `SECURITY.md`, `SECURITY_REVIEW.md`, `THREAT_MODEL.md`, `BACKUP_AND_RECOVERY.md`, `DEPLOYMENT.md`, `FEATURE_MATRIX.md`, `docs/PHASE_STATUS.md`
 - Provider docs: Razorpay `X-Razorpay-Signature` HMAC-SHA256(raw_body) hex; Stripe `Stripe-Signature` `t=..,v1=HMAC-SHA256(t.raw_body)` hex + 300 s tolerance + multi-v1.
 
-Preserve warning: “Never mark a payment as received based only on a client-side success screen or unverified placeholder.” — No live money has been moved in this branch.
+Preserve warning: “Never mark a payment as received based only on a client-side success screen or unverified placeholder.” — No live-money enablement is authorized by this checklist. The current branch/main baseline must be re-audited before any future M11 decision.
