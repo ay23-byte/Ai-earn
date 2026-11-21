@@ -169,13 +169,28 @@ class WorkspaceAPIBusinessFlowTests(unittest.TestCase):
         order_id = self.request(
             "POST",
             "/api/v1/workspace/orders",
-            payload={
-                "title": "Website development — Example Client",
-                "proposed_amount_paise": 2500000,
-            },
+            payload={"proposal_id": proposal_id},
             key="flow-order-create",
             expected=201,
         )["id"]
+        order = self.request("GET", f"/api/v1/workspace/orders/{order_id}")["item"]
+        self.assertEqual(order["proposal_id"], proposal_id)
+        self.assertEqual(order["customer_id"], customer_id)
+        self.assertEqual(order["proposed_amount_paise"], 2500000)
+        self.assertEqual(order["title"], "Website development proposal")
+        self.request(
+            "POST",
+            "/api/v1/workspace/orders",
+            payload={"proposal_id": proposal_id},
+            key="flow-order-duplicate",
+            expected=400,
+        )
+        self.request(
+            "GET",
+            f"/api/v1/workspace/orders/{order_id}",
+            token=self.other_token,
+            expected=404,
+        )
         invoice_id = self.request(
             "POST",
             "/api/v1/workspace/invoices",
