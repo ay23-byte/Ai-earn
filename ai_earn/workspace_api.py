@@ -200,6 +200,10 @@ class WorkspaceAPI:
         return service.get(token, ident)
 
     def _create(self, resource: str, token: str, data: dict, key: str) -> str:
+        if resource == "orders" and "proposal_id" in data:
+            if set(data) != {"proposal_id"}:
+                raise WorkspaceAPIError("proposal_id cannot be combined with manual order fields.")
+            return self.orders.create_from_proposal(token, data["proposal_id"], operation_key=key)
         creators = {
             "opportunities": lambda: self.opportunities.create(token, operation_key=key, **data),
             "services": lambda: self.services.create(token, operation_key=key, **data),
@@ -207,7 +211,7 @@ class WorkspaceAPI:
             "customers": lambda: self.customers.create(token, operation_key=key, **data),
             "products": lambda: self.products.create(token, operation_key=key, **data),
             "tasks": lambda: self.tasks.create(token, operation_key=key, **data),
-            "orders": lambda: self.orders.create_from_proposal(token, data["proposal_id"], operation_key=key) if "proposal_id" in data and len(data) == 1 else self.orders.create(token, operation_key=key, **data),
+            "orders": lambda: self.orders.create(token, operation_key=key, **data),
             "invoices": lambda: self.invoices.create(token, operation_key=key, **data),
             "payments": lambda: self.payments.create(token, operation_key=key, **data),
             "expenses": lambda: self.expenses.create(token, operation_key=key, **data),
