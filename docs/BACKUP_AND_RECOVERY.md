@@ -1,11 +1,11 @@
-# Backup and Recovery — Ai-earn (2026-11-17, M15+M16+P0-3+P0-4, LATEST 28)
+# Backup and Recovery — Ai-earn (2026-11-21, schema v30)
 
 **Status:** Experimental, local SQLite only. No auto-repair. **Do not delete or overwrite files blindly.** M15 adds `health --with-backups` and a disposable restore drill.
 
 ## What is backed up
 
 - **Auth DB:** `AI_EARN_AUTH_DB` (`auth.sqlite3`) – single account expected; `recovery_hash` rotation on `replace_recovery_code`/`recover`.
-- **State DB:** `AI_EARN_STATE_DB` (`state.sqlite3`, v1→v28) plus 27 `before-v*.sqlite3` backups (`before-v2.sqlite3` … `before-v28.sqlite3`) created by `tracker init`/`migrate_to_v*`.
+- **State DB:** `AI_EARN_STATE_DB` (`state.sqlite3`, v1→v30) plus 27 `before-v*.sqlite3` backups (`before-v2.sqlite3` … `before-v30.sqlite3`) created by `tracker init`/`migrate_to_v*`.
 - **Snapshots:** `dashboard-snapshot-*.json` beside state DB (counts only, no titles/tokens; 1 MB cap; never overwrite).
 
 ## How backups are made (current code)
@@ -16,7 +16,7 @@
   3. `source.backup(destination)` (SQLite online backup), verifies destination.
   4. Leaves partial file on failure for inspection; never replaces.
 - **Migrations:** `migrate_to_vN` does `backup_to` **while holding write lock**, then DDL, then verification, all in one `transaction`. New files start at v1.
-- **Health backup check:** `python -m ai_earn health --json --with-backups` reports `backups: {count, expected:27, status:ok|incomplete}` when state is `ok`; otherwise `not_checked`.
+- **Health backup check:** `python -m ai_earn health --json --with-backups` reports `backups: {count, expected:29, status:ok|incomplete}` when state is `ok`; otherwise `not_checked`.
 
 ## How restores work (manual, human-approved)
 
@@ -55,19 +55,19 @@
   AI_EARN_AUTH_DB="$tmp/auth.sqlite3" AI_EARN_STATE_DB="$tmp/state.sqlite3" python -m ai_earn health --json --with-backups
   AI_EARN_AUTH_DB="$tmp/auth.sqlite3" AI_EARN_STATE_DB="$tmp/state.sqlite3" python -m ai_earn doctor --json
   # Verify backup chain
-  ls -1 "$tmp"/before-v*.sqlite3 2>/dev/null | wc -l  # expect 27 after fresh init (LATEST 28)
+  ls -1 "$tmp"/before-v*.sqlite3 2>/dev/null | wc -l  # expect 29 after fresh init (LATEST 30)
   # Exercise backup_to to new path (never overwrites)
   python -c "from pathlib import Path, os; from ai_earn.state_storage import StateStorage; s=StateStorage(Path(os.environ['AI_EARN_STATE_DB']), create=False); s.backup_to(Path(os.environ['AI_EARN_STATE_DB']+'.bak2'), confirmed=True)"
   AI_EARN_AUTH_DB="$tmp/auth.sqlite3" AI_EARN_STATE_DB="$tmp/state.sqlite3.bak2" python -m ai_earn health --json
   rm -rf "$tmp"
   ```
   Windows PowerShell equivalent uses `Join-Path $env:TEMP` + `python -c` with `pathlib`.
-- **CI drill:** `tests/test_health.py` (9 tests) does the same on `TemporaryDirectory` with `StateStorage(..., create=True)` → `migrate_to_v28` → `health` + `health --with-backups` + `backup_to(new_path)` verification.
+- **CI drill:** `tests/test_health.py` (9 tests) does the same on `TemporaryDirectory` with `StateStorage(..., create=True)` → `migrate_to_v30` → `health` + `health --with-backups` + `backup_to(new_path)` verification.
 - Real-data recovery remains unverified; no existing user DB has been migrated (per `PHASE_STATUS.md`).
 
 ## Retention & encryption (P0-3, 2026-11-17)
 
-- **Chain forever:** Keep `before-v*.sqlite3` forever until explicit user deletion; they are the migration audit trail (27 files for LATEST 28). Git ignores `*.sqlite3*` so they never commit. `prune_backups()` and `list_prunable_backups()` never return this chain — defense in depth even if a `*.backup-*` glob matched.
+- **Chain forever:** Keep `before-v*.sqlite3` forever until explicit user deletion; they are the migration audit trail (29 files for LATEST 30). Git ignores `*.sqlite3*` so they never commit. `prune_backups()` and `list_prunable_backups()` never return this chain — defense in depth even if a `*.backup-*` glob matched.
 - **Ephemeral prunable set:** Only `*.backup-*`, `*.bak`, `*.bak.*`, and `dashboard-snapshot-*.json` are prunable. `state.sqlite3` / `auth.sqlite3` and encrypted `*.enc`/`*.age` are never pruned automatically.
 - **Never auto-delete:** No automatic deletion on init/migration/health. User runs dry-run first:
   ```python
