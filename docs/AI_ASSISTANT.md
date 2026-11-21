@@ -44,7 +44,7 @@ from ai_earn.ai_assistant import AIProviderConfig, get_provider, StubProvider, O
 
 cfg = AIProviderConfig(provider="stub", mode="sandbox", model="stub-draft-v1")  # always available
 cfg = AIProviderConfig(provider="openai", mode="sandbox", model="gpt-4o", base_url="https://api.openai.com/v1", api_key=None)  # sandbox, not available until live approval
-cfg = AIProviderConfig(provider="ollama", mode="sandbox", model="llama3", base_url="http://localhost:11434")
+cfg = AIProviderConfig(provider="ollama", mode="sandbox", model="llama3", base_url="http://127.0.0.1:11434")
 cfg = AIProviderConfig(provider="hosted", mode="sandbox", model="claude-3", base_url="https://api.anthropic.com")
 
 provider = get_provider(cfg)
