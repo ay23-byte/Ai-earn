@@ -63,9 +63,9 @@ The repository includes Windows-specific security and terminal tests. CI's Windo
 
 The repository contains conflicting snapshots from different historical dates/branches. Examples include:
 
-- `README.md` describes the app as early development, reports 963 tests and says there is no HTTP API / no customer data.
+- The previous README and several current-facing runbooks contained stale early-development claims, test totals, and schema v28/v29 references. The associated documentation PR refreshes the README and the current release/deployment/backup/payment-gate documents; older phase records remain historical.
 - `docs/COMPLETE_PRODUCT_AUDIT.md` and `docs/FINAL_PRODUCT_READINESS_REPORT.md` describe later CRM, project, finance, API and onboarding capabilities and cite 1,040+ tests.
-- `docs/PHASE_STATUS.md` contains historical statements such as Phase 3 not passed and no HTTP API, which predate the current merged workspace API and PR #55.
+- `docs/PHASE_STATUS.md` contains historical statements such as Phase 3 not passed and no HTTP API, which predate the current merged workspace API; retain these as history rather than current capability statements.
 - `docs/MASTER_IMPLEMENTATION_PLAN.md` and `docs/IMPLEMENTATION_ROADMAP.md` also retain earlier branch baselines and milestone descriptions.
 
 These documents should not be silently combined into a single claimed test count or release status. Update each historical document only with a dated amendment and evidence; keep old history identifiable. The README and phase register should be reconciled in a dedicated documentation change after the exact final CI result and current test totals are confirmed.
