@@ -202,7 +202,7 @@ class ProductWorkspaceTests(unittest.TestCase):
             ideas2.create(token2, "Other Ideas", "Other", operation_key="idea_scope")
 
     def test_migrations_and_integrity(self):
-        self.assertEqual(LATEST_SCHEMA_VERSION, 29)
+        self.assertEqual(LATEST_SCHEMA_VERSION, 30)
         with StateStorage(self.state_path).transaction() as conn:
             self.assertEqual(_validate_schema(conn), LATEST_SCHEMA_VERSION)
             _check_integrity(conn)
