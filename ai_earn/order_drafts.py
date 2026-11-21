@@ -162,6 +162,32 @@ class OrderDrafts:
             _check_version(conn)
             return dict(_owned(conn, owner, record_id))
 
+    def list(
+        self,
+        token: str,
+        *,
+        after_id: str | None = None,
+        limit: int = 20,
+        status: str | None = None,
+    ) -> list[dict]:
+        """Return a bounded, cursor-paginated list of the caller's order drafts."""
+        cursor = "" if after_id is None else _input(_record_id, after_id)
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise OrderError("Invalid page size.")
+        if status is not None and status not in {"draft", "cancelled"}:
+            raise OrderError("Invalid status filter.")
+        with _authorized_transaction(self._auth, self._state, token) as (conn, owner, _now):
+            _check_version(conn)
+            query = "SELECT id FROM order_drafts WHERE owner_id=? AND id>? COLLATE BINARY"
+            params: list[object] = [owner, cursor]
+            if status is not None:
+                query += " AND status=?"
+                params.append(status)
+            query += " ORDER BY id COLLATE BINARY LIMIT ?"
+            params.append(limit)
+            rows = conn.execute(query, tuple(params)).fetchall()
+            return [dict(_owned(conn, owner, row["id"])) for row in rows]
+
     def cancel(self, token: str, record_id: str, *, operation_key: str) -> str:
         record_id = _input(_record_id, record_id)
         key = _input(_key, operation_key)
