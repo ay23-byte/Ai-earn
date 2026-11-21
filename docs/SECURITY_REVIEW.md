@@ -1,12 +1,26 @@
-# Security Review — Ai-earn (2026-11-17)
+# Security Review — Ai-earn (historical review 2026-11-17; current addendum 2026-11-22)
 
-**Branch:** `arena/4bd4230e-ai-earn` (base `9d77101`, post-#37)  
+**Historical review baseline:** `arena/4bd4230e-ai-earn` (base `9d77101`, post-#37).  
 **Baseline tests:** `1014 passed / 17 skipped` (Linux)  
-**Scope:** Offline local CLI + SQLite, no network listener, no provider credentials in repo. This review is a point-in-time assessment, not a certification.
+**Current scope:** Local-first SQLite application with an authenticated loopback-only HTTP workspace API. No hosted public service is approved. This is a point-in-time engineering review, not an independent penetration test or security certification.
 
 ## Summary verdict
 
-**NOT READY for production or real customer/financial data.** Phase 1+2 passed offline scope with documented limitations; Phase 3 `IN_PROGRESS`. Preserve all warnings in `README.md`, `SECURITY.md`, `PHASE_STATUS.md`.
+**NOT APPROVED for hosted production or live-money use.** The local disposable-data workflow has expanded since the historical review, but Windows operator acceptance, human accessibility review, restore drill, and independent security review remain outstanding. Preserve the local-only and live-payment restrictions.
+
+## Current implementation addendum (2026-11-22)
+
+This addendum supersedes historical statements below wherever the older review says that no HTTP server/API exists or describes the dashboard as snapshot-only. The original review notes are retained as historical evidence and were not re-run as an independent audit.
+
+- **Local HTTP boundary:** `ai_earn/local_server.py` serves the SPA and `/api/v1` on `127.0.0.1:8765` only. It rejects non-loopback Host values, does not enable CORS, applies restrictive response headers, bounds request bodies, and is not approved for LAN, tunnel, reverse-proxy, or public exposure. Transport is plain HTTP on loopback; do not treat it as a remote-access interface.
+- **Browser authentication:** the service token is stored in an HttpOnly, SameSite cookie and is not exposed to JavaScript. Mutating requests require same-origin Origin validation and a matching CSRF cookie/header pair. AuthService remains responsible for login throttling, expiry, and revocation.
+- **Workspace API:** `ai_earn/workspace_api.py` delegates to existing owner-scoped domain services for opportunities, services, proposals, customers, products, tasks/projects, orders, invoices, payments, expenses, and ledger. Mutations use bounded input allowlists and idempotency keys; the HTTP layer does not directly mutate business tables. The live SPA uses this authenticated API; the snapshot path remains read-only fallback.
+- **HTTP evidence:** PR #71 added HTTP-level end-to-end workspace coverage. PR #69 added payment safety coverage, including rejecting client-supplied pre-verification and preventing sandbox/provider-backed records from being locally marked verified. A manually recorded payment can be annotated verified only after it is settled; that is still an operator assertion and not independent bank reconciliation.
+- **Database baseline:** current state schema is v30. Migrations v28–v30 add tax/billing/payment records, AI provider configuration and usage/settlement evidence, and a unique accepted-proposal-to-order link. See `docs/DATABASE.md`.
+- **Remaining security gaps:** the local audit trail is not tamper-evident against coordinated database edits; auth and state stores do not commit atomically; local rate limiting is not a distributed network defense; secrets are environment-configured rather than backed by a managed vault; binary/private document upload is not exposed; actual Windows ACL behavior, real restore, and human accessibility have not been independently accepted.
+- **Release decision:** local disposable-data use may be evaluated only after current CI and the Windows operator checklist pass. Hosted SaaS and live payments remain separate blocked gates. No independent reviewer sign-off is claimed here.
+
+---
 
 ## Implemented controls (updated — now includes production hardening: 127.0.0.1-only, no .env, secrets redacted, structured logs allowlisted, SafeError 8-hex, backup verified 27 chain, monitoring poll, export 50MB redacted, deletion DELETE <8>, security_check, CI hardening; see docs/PRIVACY.md, SECRET_MANAGEMENT.md, OPERATIONAL_RUNBOOKS.md) 2026-11-17, production hardening added) (verified where noted)
 
