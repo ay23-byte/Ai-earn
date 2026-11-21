@@ -2,10 +2,10 @@
 
 **Status:** `production_ready` reflects offline foundation readiness (`true` when all 11 automated checks PASS); **live remains blocked** (`live_blocked: true`, `live_ready: false` until M11). No live transactions have been enabled. This checklist must be **fully signed** before any live payment enablement. Live mode is blocked in code (`ProviderConfig` `mode=live` raises) and requires explicit human approval (M11) plus all automated verifications below. Do not process live money, store cards, or trust client success screens.
 
-**Audited baseline:** `main` at PR #61 merge commit `df5d147f7aa9aef05f94be9ebcbc67cdf0a47abd` — state schema v30.  
+**Audited baseline:** `main` at PR #67 merge commit `51545b9eae344783559519642b57b4f3fea821f3` — state schema v30.  
 **Checklist reviewed:** 2026-11-21
 
-The PR #61 dashboard increment adds live order listing only; it does not change payment behavior or satisfy any manual sign-off gate.  
+PRs #62–#67 complete invoice/ledger, CRM detail, linked-record selector, and release-checkpoint increments. These do not satisfy any manual sign-off gate. Payment records must remain unverified unless an operator explicitly verifies a manually recorded payment after it is settled; sandbox and provider-backed records must never be promoted to verified income by a local UI action.  
 **Gate:** M11 (see `PAYMENTS.md`). This document IS the production readiness checklist.
 
 ## Checklist — all 11 must pass before live enablement

@@ -177,7 +177,7 @@ class WorkspaceAPI:
             "tasks": {"title", "description", "opportunity_id", "parent_task_id", "priority", "deadline_at", "estimated_duration_seconds"},
             "orders": {"title", "proposed_amount_paise", "proposal_id"},
             "invoices": {"order_id", "due_at", "billing_name", "billing_contact", "billing_address", "tax_rate_bps", "tax_amount_paise"},
-            "payments": {"amount_paise", "provider", "provider_ref", "invoice_id", "order_id", "verified"},
+            "payments": {"amount_paise", "provider", "provider_ref", "invoice_id", "order_id"},
             "expenses": {"amount_paise", "category", "note", "incurred_at", "verified"},
             "ledger": {"kind", "amount_paise", "note"},
         }

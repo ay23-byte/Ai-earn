@@ -577,7 +577,8 @@ const LIVE_SELECTS = {
   customer_id: { resource:"customers", empty:"Select a customer" },
   service_id: { resource:"services", empty:"Select a service" },
   proposal_id: { resource:"proposals", empty:"Select an accepted proposal" },
-  order_id: { resource:"orders", empty:"Select an order" }
+  order_id: { resource:"orders", empty:"Select an order" },
+  invoice_id: { resource:"invoices", empty:"Select an issued invoice" }
 };
 async function apiJson(path, options){
   const response = await fetch(path, Object.assign({ credentials:"same-origin", cache:"no-store" }, options||{}));
@@ -602,7 +603,7 @@ const LIVE_RESOURCES = {
   tasks:{title:"Project tasks",fields:[["title","Task title","text",true],["description","Description","textarea",false],["priority","Priority (1–10)","number",false],["deadline_at","Deadline (Unix seconds; optional)","number",false]],actions:{draft:["submit_for_review"],pending_review:["approve","reject"],approved:["start","cancel"],scheduled:["start","cancel"],in_progress:["complete","cancel"]}},
   products:{title:"Digital products",fields:[["title","Product title","text",true],["description","Description","textarea",true],["version","Version","text",true],["price_paise","Price (paise)","number",true]],actions:{draft:["publish","archive"],published:["archive"]}},
   invoices:{title:"Invoices",fields:[["order_id","Order","select",true],["due_at","Due date (Unix seconds; optional)","number",false],["billing_name","Billing name","text",false],["billing_contact","Billing contact","text",false],["billing_address","Billing address","textarea",false]],actions:{draft:["issue"]}},
-  payments:{title:"Payment records",fields:[["amount_paise","Amount (paise)","number",true],["provider","Provider (manual / sandbox)","text",false],["provider_ref","Provider reference","text",false],["invoice_id","Invoice ID (optional)","text",false],["order_id","Order ID (optional)","text",false]],actions:{initiated:["received","failed"],received:["settled","failed"],settled:["refunded"]}},
+  payments:{title:"Payment records",fields:[["amount_paise","Amount (paise)","number",true],["provider","Provider (manual / sandbox)","text",false],["provider_ref","Provider reference","text",false],["invoice_id","Invoice (optional)","select",false],["order_id","Order (optional)","select",false]],actions:{initiated:["received","failed"],received:["settled","failed"],settled:["refunded"]}},
   expenses:{title:"Expenses",fields:[["amount_paise","Amount (paise)","number",true],["category","Category","text",true],["note","Note","textarea",false]]},
   ledger:{title:"Ledger entries (unverified)",fields:[["kind","Kind: income / expense / refund / fee","text",true],["amount_paise","Amount (paise)","number",true],["note","Note","text",false]]}
 };
@@ -632,7 +633,11 @@ function populateLiveSelects(){
     const rows=liveRecordCache[config.resource];
     const previous=select.value;
     const options=Array.isArray(rows)?rows:[];
-    const allowed=field==="proposal_id"?options.filter(item=>item.status==="accepted" && item.customer_id):field==="order_id"?options.filter(item=>item.status==="draft"):options;
+    const formResource=select.closest("[data-live-resource]")?.getAttribute("data-live-resource")||"";
+    const allowed=field==="proposal_id"?options.filter(item=>item.status==="accepted" && item.customer_id):
+      field==="order_id" && formResource==="invoices"?options.filter(item=>item.status==="draft"):
+      field==="order_id" && formResource==="payments"?options.filter(item=>item.status!=="cancelled"):
+      field==="invoice_id"?options.filter(item=>item.status==="issued"):options;
     const first='<option value="">'+escapeHtml(config.empty)+'</option>';
     const rest=allowed.map(item=>'<option value="'+escapeHtml(item.id)+'">'+escapeHtml(liveSelectLabel(config.resource,item))+'</option>').join("");
     select.innerHTML=first+rest;
@@ -643,10 +648,11 @@ function populateLiveSelects(){
   });
 }
 function liveItemSummary(item){
-  const preferred=["title","name","status","contact","source_url","description","amount_paise","budget_paise","price_paise","category","kind"];
-  return preferred.filter(k=>item[k]!==undefined && item[k]!==null && item[k]!=="").slice(0,5).map(k=>{
-    const v=(k.endsWith("_paise") && Number.isSafeInteger(item[k]))?rupees(item[k]):String(item[k]);
-    return '<span><b>'+escapeHtml(k.replaceAll("_"," "))+'</b> '+escapeHtml(v.slice(0,180))+'</span>';
+  const preferred=["title","name","status","provider","verified","contact","source_url","description","amount_paise","budget_paise","price_paise","category","kind"];
+  return preferred.filter(k=>item[k]!==undefined && item[k]!==null && item[k]!=="").slice(0,7).map(k=>{
+    const v=k==="verified"?(item[k]===1?"VERIFIED":"UNVERIFIED"):(k.endsWith("_paise") && Number.isSafeInteger(item[k]))?rupees(item[k]):String(item[k]);
+    const label=k==="verified"?"payment verification":k.replaceAll("_"," ");
+    return '<span><b>'+escapeHtml(label)+'</b> '+escapeHtml(v.slice(0,180))+'</span>';
   }).join("");
 }
 function liveActionButtons(resource,item){
@@ -712,6 +718,7 @@ function initWorkspaceCrud(){
     const resource=root.getAttribute("data-live-resource"), config=LIVE_RESOURCES[resource];
     if(!config) return;
     root.innerHTML='<div class="panel-head"><h2>'+escapeHtml(config.title)+'</h2><span class="muted live-resource-status">Sign in to load live records.</span></div>'+
+      (resource==="payments"?'<p class="muted payment-safety-note" role="note">Payment status changes do not prove money was received or settled. Sandbox/provider records remain unverified. Live payments are disabled.</p>':"")+
       '<form class="live-create-form" data-live-create="'+resource+'"><div class="live-form-grid">'+config.fields.map(liveFieldHtml).join("")+'</div><button class="button" type="submit">Create record</button></form>'+
       '<h3>Account records</h3><div class="live-record-list"><div class="empty">Sign in to load records from your local database.</div></div>'+(resource==="customers"?'<section class="customer-detail-workspace" aria-live="polite" hidden></section>':'');
     root.addEventListener("submit",async e=>{
@@ -768,7 +775,7 @@ function initWorkspaceCrud(){
           if(title===null) return;
           await apiJson("/api/v1/workspace/services/"+encodeURIComponent(id),{method:"PATCH",headers:{"Content-Type":"application/json","X-CSRF-Token":apiState.csrf,"Idempotency-Key":liveIdempotencyKey()},body:JSON.stringify({title})});
         }else{
-          await apiJson("/api/v1/workspace/"+resource+"/"+encodeURIComponent(id)+"/actions/"+encodeURIComponent(verb),{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":apiState.csrf,"Idempotency-Key":crypto.randomUUID()},body:"{}"});
+          await apiJson("/api/v1/workspace/"+resource+"/"+encodeURIComponent(id)+"/actions/"+encodeURIComponent(verb),{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":apiState.csrf,"Idempotency-Key":liveIdempotencyKey()},body:"{}"});
         }
         showToast("Record updated.","success"); await loadLiveResource(resource); await refreshLiveDashboard(false);
       }catch(err){showToast(err.message,"error");}

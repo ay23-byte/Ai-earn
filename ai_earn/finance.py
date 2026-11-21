@@ -459,6 +459,9 @@ class PaymentRecords:
                 if current is not None:
                     raise StateStorageError("Payment history inconsistent.")
                 current = "initiated"
+            elif ev == "payment_verified":
+                # Verification is an audit annotation, not a payment-status transition.
+                continue
             elif ev.startswith("payment_"):
                 target = ev.replace("payment_", "")
                 # map event to status: payment_received -> received etc
@@ -493,6 +496,8 @@ class PaymentRecords:
         prov = _input(_provider, provider)
         pref = _input(_provider_ref, provider_ref)
         ver = _input(_verified, verified)
+        if ver == 1:
+            raise FinanceError("A new payment cannot be verified before it is settled.")
         key = _input(_key, operation_key)
         iid = _input(_record_id, invoice_id) if invoice_id is not None else None
         oid = _input(_record_id, order_id) if order_id is not None else None
@@ -581,6 +586,10 @@ class PaymentRecords:
             verified = row["verified"]
             if verified_update is not None:
                 verified = _input(_verified, verified_update)
+                if verified == 1 and (row["provider"] != "manual" or target != "settled"):
+                    raise FinanceError(
+                        "Only a manually recorded payment may be explicitly verified after settlement."
+                    )
             conn.execute(
                 "UPDATE payment_records SET status=?, verified=?, updated_at=? WHERE id=? AND owner_id=?",
                 (target, verified, now, pid_v, owner),
@@ -621,8 +630,13 @@ class PaymentRecords:
             existing = _retry(conn, owner, key, digest, _RES_PAYMENT, "payment_records")
             if existing:
                 return pid
-            self._owned(conn, owner, pid)
-            # Only allow setting verified if provider is manual and caller explicitly verifies - never infer
+            row = self._owned(conn, owner, pid)
+            # Verification is an explicit operator attestation, never inferred from a provider
+            # callback or sandbox record. Only manual records in settled state may be verified.
+            if ver == 1 and (row["provider"] != "manual" or row["status"] != "settled"):
+                raise FinanceError(
+                    "Only a manually recorded, settled payment may be explicitly verified."
+                )
             conn.execute(
                 "UPDATE payment_records SET verified=?, updated_at=? WHERE id=? AND owner_id=?",
                 (ver, now, pid, owner),
