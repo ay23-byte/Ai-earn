@@ -648,10 +648,11 @@ function populateLiveSelects(){
   });
 }
 function liveItemSummary(item){
-  const preferred=["title","name","status","contact","source_url","description","amount_paise","budget_paise","price_paise","category","kind"];
-  return preferred.filter(k=>item[k]!==undefined && item[k]!==null && item[k]!=="").slice(0,5).map(k=>{
-    const v=(k.endsWith("_paise") && Number.isSafeInteger(item[k]))?rupees(item[k]):String(item[k]);
-    return '<span><b>'+escapeHtml(k.replaceAll("_"," "))+'</b> '+escapeHtml(v.slice(0,180))+'</span>';
+  const preferred=["title","name","status","provider","verified","contact","source_url","description","amount_paise","budget_paise","price_paise","category","kind"];
+  return preferred.filter(k=>item[k]!==undefined && item[k]!==null && item[k]!=="").slice(0,7).map(k=>{
+    const v=k==="verified"?(item[k]===1?"VERIFIED":"UNVERIFIED"):(k.endsWith("_paise") && Number.isSafeInteger(item[k]))?rupees(item[k]):String(item[k]);
+    const label=k==="verified"?"payment verification":k.replaceAll("_"," ");
+    return '<span><b>'+escapeHtml(label)+'</b> '+escapeHtml(v.slice(0,180))+'</span>';
   }).join("");
 }
 function liveActionButtons(resource,item){
@@ -717,6 +718,7 @@ function initWorkspaceCrud(){
     const resource=root.getAttribute("data-live-resource"), config=LIVE_RESOURCES[resource];
     if(!config) return;
     root.innerHTML='<div class="panel-head"><h2>'+escapeHtml(config.title)+'</h2><span class="muted live-resource-status">Sign in to load live records.</span></div>'+
+      (resource==="payments"?'<p class="muted payment-safety-note" role="note">Payment status changes do not prove money was received or settled. Sandbox/provider records remain unverified. Live payments are disabled.</p>':"")+
       '<form class="live-create-form" data-live-create="'+resource+'"><div class="live-form-grid">'+config.fields.map(liveFieldHtml).join("")+'</div><button class="button" type="submit">Create record</button></form>'+
       '<h3>Account records</h3><div class="live-record-list"><div class="empty">Sign in to load records from your local database.</div></div>'+(resource==="customers"?'<section class="customer-detail-workspace" aria-live="polite" hidden></section>':'');
     root.addEventListener("submit",async e=>{
