@@ -296,6 +296,11 @@ class AIAssistantTests(unittest.TestCase):
                 provider="ollama", mode="sandbox", model="model",
                 base_url="https://example.com",
             )
+        with self.assertRaises(AssistantError):
+            AIProviderConfig(
+                provider="ollama", mode="sandbox", model="model",
+                base_url="http://127.0.0.1:99999",
+            )
 
     def test_idempotency_same_key(self):
         fake_id = secrets.token_hex(16)
