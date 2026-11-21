@@ -261,6 +261,15 @@ class RealAIProviderConfigAPITests(unittest.TestCase):
             "POST",
             "/api/v1/ai/provider",
             self.owner_token,
+            {"provider": "ollama", "model": "model", "base_url": "http://127.0.0.1:99999"},
+            operation_key="invalid-port-denied-001",
+        )
+        self.assertEqual(status, 400)
+
+        status, body = self.api.dispatch(
+            "POST",
+            "/api/v1/ai/provider",
+            self.owner_token,
             {"provider": "ollama", "model": "model", "api_key": "secret"},
             operation_key="api-key-denied-001",
         )
