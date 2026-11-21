@@ -106,13 +106,23 @@ class FrontendSPAStructureTests(unittest.TestCase):
         self.assertIn("read_only", js)
         self.assertIn("Unsupported snapshot", js)
 
-    def test_js_no_network_fetch(self):
+    def test_js_uses_same_origin_api_without_hardcoded_host(self):
         js = APP_JS.read_text(encoding="utf-8")
         # must not fetch from localhost or external CDN
         self.assertNotIn('fetch("http', js)
         self.assertNotIn("fetch('http", js)
         self.assertNotIn("localhost", js)
         self.assertNotIn("127.0.0.1", js)
+        self.assertIn('fetch(path, Object.assign({ credentials:"same-origin", cache:"no-store" }', js)
+
+    def test_live_invoice_issue_and_ledger_workspace_are_mounted(self):
+        html = APP_HTML.read_text(encoding="utf-8")
+        js = APP_JS.read_text(encoding="utf-8")
+        self.assertIn('data-live-resource="invoices"', html)
+        self.assertIn('data-live-resource="ledger"', html)
+        self.assertIn('invoices:{title:"Invoices",fields:[', js)
+        self.assertIn('actions:{draft:["issue"]}', js)
+        self.assertIn('"ledger": {"kind", "amount_paise", "note"}', (ROOT / "ai_earn" / "workspace_api.py").read_text(encoding="utf-8"))
 
     def test_css_has_dark_and_light_themes(self):
         css = APP_CSS.read_text(encoding="utf-8")
