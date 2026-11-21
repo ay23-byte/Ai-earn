@@ -581,6 +581,10 @@ class PaymentRecords:
             verified = row["verified"]
             if verified_update is not None:
                 verified = _input(_verified, verified_update)
+                if verified == 1 and (row["provider"] != "manual" or target != "settled"):
+                    raise FinanceError(
+                        "Only a manually recorded payment may be explicitly verified after settlement."
+                    )
             conn.execute(
                 "UPDATE payment_records SET status=?, verified=?, updated_at=? WHERE id=? AND owner_id=?",
                 (target, verified, now, pid_v, owner),
@@ -621,8 +625,14 @@ class PaymentRecords:
             existing = _retry(conn, owner, key, digest, _RES_PAYMENT, "payment_records")
             if existing:
                 return pid
-            self._owned(conn, owner, pid)
-            # Only allow setting verified if provider is manual and caller explicitly verifies - never infer
+            row = self._owned(conn, owner, pid)
+            # Sandbox/provider records are never manually verified. A manual
+            # record must first reach settled; verification is a separate,
+            # explicit assertion backed by external evidence.
+            if ver == 1 and (row["provider"] != "manual" or row["status"] != "settled"):
+                raise FinanceError(
+                    "Only a manually recorded payment may be explicitly verified after settlement."
+                )
             conn.execute(
                 "UPDATE payment_records SET verified=?, updated_at=? WHERE id=? AND owner_id=?",
                 (ver, now, pid, owner),
