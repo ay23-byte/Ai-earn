@@ -223,6 +223,13 @@ class WorkspaceHTTPEndToEndTests(unittest.TestCase):
             },
             expected=201,
         )["data"]["id"]
+        # The status-transition endpoint must not be a shortcut for
+        # marking a sandbox/provider payment verified.
+        self.owner.post(
+            f"/api/v1/workspace/payments/{payment_id}/actions/received",
+            {"verified": 1},
+            expected=400,
+        )
         self.owner.post(f"/api/v1/workspace/payments/{payment_id}/actions/received")
         self.owner.post(f"/api/v1/workspace/payments/{payment_id}/actions/settled")
         payment = self.owner.get(f"/api/v1/workspace/payments/{payment_id}")["data"]["item"]
