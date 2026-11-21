@@ -3,7 +3,7 @@
 **Checkpoint date:** 2026-11-22
 **Audited code baseline:** `main` at PR #69 merge commit `b4e10769f3b6d7c19eb10ab6f2c32466da0e4c52` (includes PRs #68, #69 and #71)
 **State schema:** v30 (`LATEST_SCHEMA_VERSION = 30`)
-**Release candidate:** not approved; post-merge main CI run #44956929296 was still running when this checkpoint was refreshed.
+**Release candidate:** not approved; post-merge main CI run #44956929296 completed successfully on all four Python/OS matrix jobs.
 
 ## Product boundary
 
@@ -27,7 +27,7 @@ It is not a hosted SaaS release, autonomous client-acquisition service, or incom
 - PR #66 CI [run #44913475413](https://github.com/ay23-byte/Ai-earn/actions/runs/44913475413): passed Python 3.11 and 3.13 on Ubuntu and Windows.
 - PR #69 CI [run #44952173539](https://github.com/ay23-byte/Ai-earn/actions/runs/44952173539): passed all four Python/OS matrix jobs on the PR head. The separate post-merge `main` run remains tracked above.
 - PR #67 CI [run #44929051309](https://github.com/ay23-byte/Ai-earn/actions/runs/44929051309): passed.
-- Main post-merge CI [run #44956929296](https://github.com/ay23-byte/Ai-earn/actions/runs/44956929296) for commit `b4e10769f3b6d7c19eb10ab6f2c32466da0e4c52`: at the time of this checkpoint refresh, Python 3.11 and 3.13 Ubuntu jobs had completed successfully, while both Windows jobs were still in progress. Do not call the matrix green until all four jobs complete successfully.
+- Main post-merge CI [run #44956929296](https://github.com/ay23-byte/Ai-earn/actions/runs/44956929296) for commit `b4e10769f3b6d7c19eb10ab6f2c32466da0e4c52`: all four jobs passed (Python 3.11 and 3.13 on Ubuntu and Windows). This verifies the main baseline, not the open PR #73 documentation head.
 
 Required matrix: Python 3.11 and 3.13 on Ubuntu and Windows, including lint/type/compile/security/health checks and the unit suite. Record exact results, skips and commit SHA after completion.
 
