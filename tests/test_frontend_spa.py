@@ -124,6 +124,17 @@ class FrontendSPAStructureTests(unittest.TestCase):
         self.assertIn('actions:{draft:["issue"]}', js)
         self.assertIn('"ledger": {"kind", "amount_paise", "note"}', (ROOT / "ai_earn" / "workspace_api.py").read_text(encoding="utf-8"))
 
+    def test_customer_notes_and_requirements_live_workspace(self):
+        js = APP_JS.read_text(encoding="utf-8")
+        css = APP_CSS.read_text(encoding="utf-8")
+        self.assertIn('data-live-customer-details=', js)
+        self.assertIn('/notes', js)
+        self.assertIn('/requirements', js)
+        self.assertIn('data-customer-detail-kind', js)
+        self.assertIn('X-CSRF-Token', js)
+        self.assertIn('customer-detail-columns', css)
+        self.assertIn('escapeHtml(item[key]||"")', js)
+
     def test_css_has_dark_and_light_themes(self):
         css = APP_CSS.read_text(encoding="utf-8")
         self.assertIn("--bg", css)

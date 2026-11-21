@@ -623,12 +623,35 @@ async function loadLiveResource(resource){
   try{
     const result=await apiJson('/api/v1/workspace/'+resource+'?limit=50');
     const rows=result.items||[];
-    const list=rows.length?rows.map(item=>'<article class="live-record"><div class="live-record-main"><strong>'+escapeHtml(item.title||item.name||item.invoice_number||item.id)+'</strong><small>'+escapeHtml(item.status||"record")+' · '+escapeHtml(item.id)+'</small><div class="live-record-details">'+liveItemSummary(item)+'</div></div><div class="live-record-actions">'+liveActionButtons(resource,item)+(resource==="services"?'<button type="button" class="button ghost" data-live-edit="'+escapeHtml(item.id)+'" data-live-title="'+escapeHtml(item.title||"")+'">Edit title</button>':'')+'</div></article>').join(""):'<div class="empty">No records yet. Create the first record above.</div>';
+    const list=rows.length?rows.map(item=>'<article class="live-record"><div class="live-record-main"><strong>'+escapeHtml(item.title||item.name||item.invoice_number||item.id)+'</strong><small>'+escapeHtml(item.status||"record")+' · '+escapeHtml(item.id)+'</small><div class="live-record-details">'+liveItemSummary(item)+'</div></div><div class="live-record-actions">'+liveActionButtons(resource,item)+(resource==="services"?'<button type="button" class="button ghost" data-live-edit="'+escapeHtml(item.id)+'" data-live-title="'+escapeHtml(item.title||"")+'">Edit title</button>':'')+(resource==="customers"?'<button type="button" class="button ghost" data-live-customer-details="'+escapeHtml(item.id)+'">Notes &amp; requirements</button>':'')+'</div></article>').join(""):'<div class="empty">No records yet. Create the first record above.</div>';
     root.querySelector(".live-record-list").innerHTML=list;
     root.querySelector(".live-resource-status").textContent=rows.length+' record(s) loaded from the local database.';
   }catch(err){
     root.querySelector(".live-resource-status").textContent=err.status===401?"Sign in to load account records.":"Backend unavailable; offline snapshot remains available.";
     root.querySelector(".live-record-list").innerHTML='<div class="empty">Live records unavailable. '+escapeHtml(err.message)+'</div>';
+  }
+}
+async function openCustomerDetails(root, customerId){
+  const panel=root.querySelector(".customer-detail-workspace");
+  if(!panel) return;
+  panel.hidden=false;
+  panel.innerHTML='<div class="panel-head"><h3>Customer notes &amp; requirements</h3><span class="muted">Loading…</span></div>';
+  try{
+    const base="/api/v1/workspace/customers/"+encodeURIComponent(customerId);
+    const [notes,requirements]=await Promise.all([
+      apiJson(base+"/notes"),
+      apiJson(base+"/requirements")
+    ]);
+    const renderRows=(items,key)=>items.length?items.map(item=>'<li>'+escapeHtml(item[key]||"")+'</li>').join(""):'<li class="muted">None recorded yet.</li>';
+    panel.innerHTML='<div class="panel-head"><h3>Customer notes &amp; requirements</h3><button type="button" class="button ghost" data-customer-details-close>Close</button></div>'+
+      '<p class="muted">Customer record: '+escapeHtml(customerId)+'</p>'+
+      '<div class="customer-detail-columns"><section><h4>Notes</h4><ul class="customer-detail-list">'+renderRows(notes.items||[],"note")+'</ul>'+
+      '<form class="customer-detail-form" data-customer-detail-kind="notes"><label class="live-field">Add a note<textarea name="note" rows="2" maxlength="2000" required></textarea></label><button class="button" type="submit">Save note</button></form></section>'+
+      '<section><h4>Requirements</h4><ul class="customer-detail-list">'+renderRows(requirements.items||[],"requirement")+'</ul>'+
+      '<form class="customer-detail-form" data-customer-detail-kind="requirements"><label class="live-field">Add a requirement<input name="requirement" type="text" maxlength="500" required></label><button class="button" type="submit">Save requirement</button></form></section></div>';
+    panel.dataset.customerId=customerId;
+  }catch(err){
+    panel.innerHTML='<div class="panel-head"><h3>Customer details unavailable</h3><button type="button" class="button ghost" data-customer-details-close>Close</button></div><p class="muted" role="status">'+escapeHtml(err.message)+'</p>';
   }
 }
 function clearLiveResources(){
@@ -649,8 +672,24 @@ function initWorkspaceCrud(){
     if(!config) return;
     root.innerHTML='<div class="panel-head"><h2>'+escapeHtml(config.title)+'</h2><span class="muted live-resource-status">Sign in to load live records.</span></div>'+
       '<form class="live-create-form" data-live-create="'+resource+'"><div class="live-form-grid">'+config.fields.map(liveFieldHtml).join("")+'</div><button class="button" type="submit">Create record</button></form>'+
-      '<h3>Account records</h3><div class="live-record-list"><div class="empty">Sign in to load records from your local database.</div></div>';
+      '<h3>Account records</h3><div class="live-record-list"><div class="empty">Sign in to load records from your local database.</div></div>'+(resource==="customers"?'<section class="customer-detail-workspace" aria-live="polite" hidden></section>':'');
     root.addEventListener("submit",async e=>{
+      const detailForm=e.target.closest("[data-customer-detail-kind]");
+      if(detailForm){
+        e.preventDefault();
+        if(!apiState.account){showToast("Sign in to modify customer details.","error");return;}
+        const customerRoot=root;
+        const customerId=customerRoot.querySelector(".customer-detail-workspace").dataset.customerId;
+        const field=detailForm.dataset.customerDetailKind==="notes"?"note":"requirement";
+        const value=detailForm.elements.namedItem(field).value.trim();
+        if(!value) return;
+        try{
+          await apiJson("/api/v1/workspace/customers/"+encodeURIComponent(customerId)+"/"+detailForm.dataset.customerDetailKind,{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":apiState.csrf,"Idempotency-Key":liveIdempotencyKey()},body:JSON.stringify({[field]:value})});
+          showToast(field==="note"?"Note saved.":"Requirement saved.","success");
+          await openCustomerDetails(customerRoot,customerId);
+        }catch(err){showToast(err.message,"error");}
+        return;
+      }
       const form=e.target.closest("[data-live-create]");
       if(!form) return;
       e.preventDefault();
@@ -668,6 +707,14 @@ function initWorkspaceCrud(){
       }catch(err){showToast(err.message,"error");}
     });
     root.addEventListener("click",async e=>{
+      const detail=e.target.closest("[data-live-customer-details]");
+      const close=e.target.closest("[data-customer-details-close]");
+      if(detail){
+        if(!apiState.account){showToast("Sign in to view customer details.","error");return;}
+        await openCustomerDetails(root,detail.dataset.liveCustomerDetails);
+        return;
+      }
+      if(close){const panel=root.querySelector(".customer-detail-workspace");if(panel){panel.hidden=true;panel.innerHTML="";}return;}
       const action=e.target.closest("[data-live-action]");
       const edit=e.target.closest("[data-live-edit]");
       if(!action && !edit) return;
