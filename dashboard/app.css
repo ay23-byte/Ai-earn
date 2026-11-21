@@ -125,3 +125,11 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
 .ai-output{white-space:pre-wrap;overflow-wrap:anywhere;max-height:360px;overflow:auto;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--text);font:12px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace}
 .ai-safety-note{padding:12px;border:1px solid var(--line);border-radius:10px;color:var(--muted);font-size:13px;line-height:1.5;margin-top:12px}
 .ai-emergency{border-color:var(--danger,var(--line))}
+
+.customer-detail-workspace{margin-top:16px;padding:14px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+.customer-detail-workspace[hidden]{display:none}
+.customer-detail-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.customer-detail-columns section{min-width:0}
+.customer-detail-list{padding-left:20px;color:var(--text);font-size:13px;line-height:1.6;overflow-wrap:anywhere}
+.customer-detail-form{display:grid;gap:10px;margin-top:12px}
+@media(max-width:700px){.customer-detail-columns{grid-template-columns:1fr}}
