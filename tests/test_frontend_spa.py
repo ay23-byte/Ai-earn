@@ -124,6 +124,22 @@ class FrontendSPAStructureTests(unittest.TestCase):
         self.assertIn('actions:{draft:["issue"]}', js)
         self.assertIn('"ledger": {"kind", "amount_paise", "note"}', (ROOT / "ai_earn" / "workspace_api.py").read_text(encoding="utf-8"))
 
+    def test_live_workspace_uses_owner_scoped_linked_record_selectors(self):
+        js = APP_JS.read_text(encoding="utf-8")
+        # Foreign-key fields must be selected from live account records, not copied IDs.
+        self.assertIn('projects:{title:"Client projects",fields:[["customer_id","Customer","select",true]', js)
+        self.assertIn('["service_id","Service","select",true]', js)
+        self.assertIn('["customer_id","Customer (optional)","select",false]', js)
+        self.assertIn('["proposal_id","Accepted proposal","select",true]', js)
+        self.assertIn('["order_id","Order","select",true]', js)
+        self.assertIn('const LIVE_SELECTS = {', js)
+        self.assertIn('function populateLiveSelects()', js)
+        self.assertIn('liveRecordCache[resource]=rows;', js)
+        self.assertIn('Object.keys(liveRecordCache).forEach(key=>delete liveRecordCache[key]);', js)
+        self.assertIn('item.status==="accepted" && item.customer_id', js)
+        self.assertIn('item.status==="draft"):options', js)
+        self.assertIn('escapeHtml(liveSelectLabel(config.resource,item))', js)
+
     def test_customer_notes_and_requirements_live_workspace(self):
         js = APP_JS.read_text(encoding="utf-8")
         css = APP_CSS.read_text(encoding="utf-8")
