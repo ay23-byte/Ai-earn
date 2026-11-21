@@ -2,12 +2,44 @@
 from __future__ import annotations
 import secrets
 from urllib.parse import parse_qs
-from .ai_assistant import AIAssistant
+from .ai_assistant import AIAssistant, AIProviderConfig
+from .ai_provider_config import AIProviderConfigs
 
 class AIWorkspaceAPI:
     def __init__(self, auth, state, assistant=None):
         self.auth, self.state = auth, state
+        self._injected_assistant = assistant is not None
+        self.provider_configs = None if self._injected_assistant else AIProviderConfigs(auth, state)
         self.assistant = assistant or AIAssistant(auth, state)
+
+    def _load_assistant(self, token):
+        if self.provider_configs is None:
+            return
+        config = self.provider_configs.current(token)
+        provider = config.get("provider", "stub") if config.get("configured") else "stub"
+        if provider not in {"stub", "ollama"}:
+            provider = "stub"
+        self.assistant = AIAssistant(
+            self.auth,
+            self.state,
+            provider_config=AIProviderConfig(
+                provider=provider,
+                mode="sandbox",
+                model=config.get("model") or "stub-draft-v1",
+                base_url=config.get("base_url") or "",
+            ),
+        )
+
+    def _provider_config(self, token):
+        if self.provider_configs is not None:
+            return self.provider_configs.current(token)
+        info = self.assistant.provider_info()
+        return {
+            "provider": info.get("provider", "stub"),
+            "model": info.get("model", ""),
+            "configured": False,
+            "has_api_key": False,
+        }
 
     @staticmethod
     def _ok(data):
@@ -38,12 +70,21 @@ class AIWorkspaceAPI:
         if not isinstance(payload, dict):
             return self._error(400, "invalid_request", "A JSON object is required.")
         try:
+            if self.provider_configs is not None:
+                self._load_assistant(token)
             if method == "GET":
                 params = parse_qs(query, keep_blank_values=False)
                 if parts == ["api", "v1", "ai", "status"]:
                     rows = self.assistant.queue.list(token, limit=100)
-                    return self._ok({"provider": self.assistant.provider_info(),
-                        "provider_available": self.assistant.check_provider_available(),
+                    provider_info = self.assistant.provider_info()
+                    provider_available = provider_info.get("available")
+                    if provider_available is None:
+                        provider_available = self.assistant.check_provider_available()
+                    usage = self.provider_configs.usage_totals(token) if self.provider_configs is not None else None
+                    return self._ok({"provider": provider_info,
+                        "provider_available": provider_available,
+                        "provider_config": self._provider_config(token),
+                        "usage": usage,
                         "tools": self.assistant.registry.list(),
                         "emergency_stopped": self.assistant.queue.is_stopped(token),
                         "approvals": {"count": len(rows)}})
@@ -61,11 +102,49 @@ class AIWorkspaceAPI:
             if method != "POST":
                 return self._error(405, "method_not_allowed", "Method is not supported.")
             key = self._key(payload, operation_key)
+            if parts == ["api", "v1", "ai", "provider"]:
+                if self.provider_configs is None:
+                    raise ValueError("Provider settings are unavailable for this injected assistant.")
+                values = self._only(payload, {"provider", "model", "base_url"})
+                provider = values.get("provider")
+                model = values.get("model")
+                base_url = values.get("base_url", "")
+                if provider not in {"stub", "ollama"}:
+                    raise ValueError("Only the built-in stub and local Ollama providers are enabled.")
+                if not isinstance(model, str) or not model.strip():
+                    raise ValueError("A model name is required.")
+                if not isinstance(base_url, str):
+                    raise ValueError("base_url must be a string.")
+                if provider == "stub" and base_url:
+                    raise ValueError("The built-in stub does not use a base URL.")
+                config = self.provider_configs.configure(
+                    token,
+                    provider=provider,
+                    model=model.strip(),
+                    base_url=base_url.strip(),
+                    operation_key=key,
+                )
+                self._load_assistant(token)
+                info = self.assistant.provider_info()
+                return self._ok({
+                    "config": config,
+                    "provider": info,
+                    "provider_available": info.get("available", False),
+                })
             if parts == ["api", "v1", "ai", "chat"]:
                 values = self._only(payload, {"prompt", "external_content"})
                 if not isinstance(values.get("prompt"), str) or not values["prompt"].strip():
                     raise ValueError("prompt is required.")
-                return self._ok({"response": self.assistant.chat(token, **values)})
+                response = self.assistant.chat(token, **values)
+                usage = response.get("usage")
+                if isinstance(usage, dict) and self.provider_configs is not None:
+                    self.provider_configs.record_usage(
+                        token,
+                        prompt_tokens=usage.get("prompt_tokens", 0),
+                        completion_tokens=usage.get("completion_tokens", 0),
+                        operation_key=key,
+                    )
+                return self._ok({"response": response})
             if parts == ["api", "v1", "ai", "proposals"]:
                 values = self._only(payload, {"tool_name", "args"})
                 if set(values) != {"tool_name", "args"} or not isinstance(values["args"], dict):
