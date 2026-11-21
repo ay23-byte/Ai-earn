@@ -632,7 +632,7 @@ function populateLiveSelects(){
     const rows=liveRecordCache[config.resource];
     const previous=select.value;
     const options=Array.isArray(rows)?rows:[];
-    const allowed=field==="proposal_id"?options.filter(item=>item.status==="accepted" && item.customer_id):options;
+    const allowed=field==="proposal_id"?options.filter(item=>item.status==="accepted" && item.customer_id):field==="order_id"?options.filter(item=>item.status==="draft"):options;
     const first='<option value="">'+escapeHtml(config.empty)+'</option>';
     const rest=allowed.map(item=>'<option value="'+escapeHtml(item.id)+'">'+escapeHtml(liveSelectLabel(config.resource,item))+'</option>').join("");
     select.innerHTML=first+rest;
