@@ -5,7 +5,7 @@
 ## What is backed up
 
 - **Auth DB:** `AI_EARN_AUTH_DB` (`auth.sqlite3`) – single account expected; `recovery_hash` rotation on `replace_recovery_code`/`recover`.
-- **State DB:** `AI_EARN_STATE_DB` (`state.sqlite3`, v1→v30) plus 27 `before-v*.sqlite3` backups (`before-v2.sqlite3` … `before-v30.sqlite3`) created by `tracker init`/`migrate_to_v*`.
+- **State DB:** `AI_EARN_STATE_DB` (`state.sqlite3`, v1→v30) plus 29 `before-v*.sqlite3` backups (`before-v2.sqlite3` … `before-v30.sqlite3`) created by `tracker init`/`migrate_to_v*`.
 - **Snapshots:** `dashboard-snapshot-*.json` beside state DB (counts only, no titles/tokens; 1 MB cap; never overwrite).
 
 ## How backups are made (current code)
@@ -73,11 +73,11 @@
   ```python
   from pathlib import Path
   from ai_earn.backup import prune_backups, backup_retention_status
-  backup_retention_status(Path("/private/dir"))  # chain 27 expected, prunable counts
+  backup_retention_status(Path("/private/dir"))  # chain 29 expected, prunable counts
   prune_backups(Path("/private/dir"), keep=7, dry_run=True)   # review would_delete
   prune_backups(Path("/private/dir"), keep=7, dry_run=False, confirmed=True)  # actually delete oldest
   ```
-  `keep=27+7` mental model: 27 chain (protected forever) + 7 newest ephemeral kept; `prune_backups(keep=7)` keeps 7 ephemeral newest, oldest deleted. `prune_backups` never overwrites, requires `confirmed=True` when `dry_run=False`, and refuses to delete chain/main DBs.
+  `keep=29+7` mental model: 29 chain (protected forever) + 7 newest ephemeral kept; `prune_backups(keep=7)` keeps 7 ephemeral newest, oldest deleted. `prune_backups` never overwrites, requires `confirmed=True` when `dry_run=False`, and refuses to delete chain/main DBs.
 - **Plaintext until vault:** `dashboard-snapshot-*.json` + `*.sqlite3` and `*.backup-*` remain plaintext 0600 (POSIX) / explicit ACL (Windows) until age/libsodium or OS keychain approved. Do not store backups on shared/synced drives.
 - **STUB authenticated encryption (stdlib only, NOT production-grade):** `ai_earn.backup.encrypt_backup(path, key=bytes, confirmed=True)` and `decrypt_backup(enc_path, dest, key=...)` provide an HMAC-SHA256 authenticated, PBKDF2-derived keystream wrapper so disposable drills can prove `backup_to -> encrypt (.enc/.age) -> decrypt -> StateStorage verify / integrity_check` without new deps. Never logs keys, never overwrites, 50 MB cap. Real deployment must replace with `age` or `libsodium sealed box` + OS keychain (`AI_EARN_BACKUP_KEY_{key_id}` or `AI_EARN_BACKUP_KEY` env, 32..256 chars via `secrets.validate_secret`). Alternate `suffix=".age"` accepted for docs parity.
   ```python
