@@ -112,11 +112,13 @@ from .migrations.v27 import (
 )
 from .migrations import v28 as _migration_v28
 from .migrations import v29 as _migration_v29
+from .migrations import v30 as _migration_v30
 from .migrations.v29 import (
     _V29_AI_CONFIG_INDEX,
     _V29_AI_USAGE_INDEX,
     _V29_SETTLEMENT_INDEX,
 )
+from .migrations.v30 import _V30_PROPOSAL_ORDER_INDEX, _V30_SCHEMA
 from .migrations.v28 import (
     _V28_TAX_INDEX,
     _V28_BILLING_ID_INDEX,
@@ -160,10 +162,11 @@ _apply_v26 = _migration_v26.apply
 _apply_v27 = _migration_v27.apply
 _apply_v28 = _migration_v28.apply
 _apply_v29 = _migration_v29.apply
+_apply_v30 = _migration_v30.apply
 
 APPLICATION_ID = 0x41494533  # AIE3, distinct from the auth-only database.
 SCHEMA_VERSION = 1  # New files still bootstrap as version 1; upgrades are explicit.
-LATEST_SCHEMA_VERSION = 29
+LATEST_SCHEMA_VERSION = 30
 SUPPORTED_STATE_VERSIONS = frozenset(range(1, LATEST_SCHEMA_VERSION + 1))
 
 
@@ -555,6 +558,11 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
             expected_columns["fee_records"] = [
                 ("id", "TEXT", 1, 1), ("owner_id", "TEXT", 1, 0), ("payment_id", "TEXT", 0, 0), ("amount_paise", "INTEGER", 1, 0), ("currency", "TEXT", 1, 0), ("fee_type", "TEXT", 1, 0), ("note", "TEXT", 1, 0), ("verified", "INTEGER", 1, 0), ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
             ]
+    if version >= 30:
+        expected_columns["proposal_orders"] = [
+            ("order_id", "TEXT", 1, 1), ("proposal_id", "TEXT", 1, 0),
+            ("owner_id", "TEXT", 1, 0), ("created_at", "INTEGER", 1, 0),
+        ]
     if version >= 29:
         expected_columns["ai_provider_configs"] = [
             ("owner_id", "TEXT", 1, 1), ("provider", "TEXT", 1, 0), ("model", "TEXT", 1, 0), ("base_url", "TEXT", 1, 0), ("api_key_hash", "BLOB", 0, 0), ("created_at", "INTEGER", 1, 0), ("updated_at", "INTEGER", 1, 0),
@@ -652,6 +660,8 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         expected_objects.append(("index", "refund_records_payment_idx"))
         expected_objects.append(("index", "fee_records_id_owner_idx"))
         expected_objects.append(("index", "fee_records_payment_idx"))
+    if version >= 30:
+        expected_objects.append(("index", "proposal_orders_proposal_idx"))
     if version >= 29:
         expected_objects.append(("index", "ai_provider_configs_owner_idx"))
         expected_objects.append(("index", "ai_token_usage_owner_idx"))
@@ -661,6 +671,10 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         expected_objects.append(("index", "invoices_number_owner_idx"))
     if [tuple(row) for row in objects] != sorted(expected_objects, key=lambda item: item[1]):
         raise StateStorageError("State database schema is incompatible.")
+    if version >= 30:
+        row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='proposal_orders_proposal_idx'").fetchone()
+        if row is None or row[0] != _V30_PROPOSAL_ORDER_INDEX:
+            raise StateStorageError("State database schema constraints are incompatible.")
     if version >= 6:
         row = conn.execute("SELECT sql FROM sqlite_master WHERE type='index' AND name='order_drafts_id_owner_idx'").fetchone()
         if row is None or row[0] != _V6_INDEX:
@@ -887,6 +901,8 @@ def _validate_schema(conn: sqlite3.Connection) -> int:
         schemas.append(_V27_SCHEMA)
     if version >= 28:
         schemas.append(_V28_SCHEMA)
+    if version >= 30:
+        schemas.append(_V30_SCHEMA)
     for schema in schemas:
         for name, statement in schema.items():
             # v24 alters project_tasks via ALTER TABLE; sql formatting differs from CREATE literal, so rely on PRAGMA table_info instead
@@ -1935,6 +1951,19 @@ class StateStorage:
             self.backup_to(backup, confirmed=True)
             _apply_v28(conn)
             if _validate_schema(conn) != 28:
+                raise StateStorageError("Migration produced an incompatible schema.")
+            _check_integrity(conn)
+
+    def migrate_to_v30(self, backup: Path, *, confirmed: bool = False) -> None:
+        """Upgrade version 29 only after a checked non-overwriting backup."""
+        if confirmed is not True:
+            raise StateStorageError("Explicit confirmation is required to migrate state.")
+        with self.transaction() as conn:
+            if _validate_schema(conn) != 29:
+                raise StateStorageError("Only version 29 can be upgraded to version 30.")
+            self.backup_to(backup, confirmed=True)
+            _apply_v30(conn)
+            if _validate_schema(conn) != 30:
                 raise StateStorageError("Migration produced an incompatible schema.")
             _check_integrity(conn)
 
