@@ -529,7 +529,7 @@ class OllamaProvider(ProviderBase):
                 "model": self.config.model,
                 "messages": messages,
                 "stream": False,
-                "options": {"temperature": self.config.temperature},
+                "options": {"temperature": self.config.temperature, "num_predict": 1024},
             },
         )
         message = response.get("message")
