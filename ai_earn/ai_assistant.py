@@ -301,6 +301,8 @@ class AIProviderConfig:
             if any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in self.base_url):
                 raise AssistantError("Invalid base_url.")
         if self.provider == "ollama":
+            if self.api_key is not None:
+                raise AssistantError("Ollama does not accept an API key.")
             endpoint = self.base_url or "http://127.0.0.1:11434"
             try:
                 parsed = urlsplit(endpoint)
