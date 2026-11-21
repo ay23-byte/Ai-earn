@@ -144,7 +144,7 @@ class FrontendSPAStructureTests(unittest.TestCase):
         self.assertIn('liveRecordCache[resource]=rows;', js)
         self.assertIn('Object.keys(liveRecordCache).forEach(key=>delete liveRecordCache[key]);', js)
         self.assertIn('item.status==="accepted" && item.customer_id', js)
-        self.assertIn('item.status==="draft"):options', js)
+        self.assertIn('options.filter(item=>item.status==="draft")', js)
         self.assertIn('escapeHtml(liveSelectLabel(config.resource,item))', js)
 
     def test_customer_notes_and_requirements_live_workspace(self):
