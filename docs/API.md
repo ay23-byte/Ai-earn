@@ -44,6 +44,7 @@ All workspace routes are served only by the local loopback server started with t
 Initial resource adapters: opportunities, services, proposals, customers, products, tasks, customer-linked projects, order drafts (create/get only), invoices, payments, expenses and ledger entries. Client notes and requirements are exposed as owner-scoped customer subresources. Supported transitions are intentionally allowlisted in the adapter and enforced again by each domain service. Financial amounts are integer paise. Verified status is never inferred from payment status.
 
 The current domain model does not expose generic deletion for these resources, so the HTTP API does not invent delete endpoints. Project records are represented by existing project_tasks linked to customers through customer_projects; the API creates the task and relationship using deterministic idempotency keys. Binary file uploads and private document storage are not yet exposed; existing attachment tables are metadata-only. Connector account management and non-AI integration settings remain outside this API surface. The AI provider settings described below are the limited local exception.
+
 ## AI assistant API
 
 All AI routes require the authenticated session cookie and same-origin CSRF protection for POST requests.
