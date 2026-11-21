@@ -203,6 +203,40 @@ class RealAIProviderConfigAPITests(unittest.TestCase):
             self.assertEqual(other["data"]["provider"]["provider"], "stub")
             self.assertFalse(other["data"]["provider_config"]["configured"])
 
+    def test_local_chat_usage_is_persisted_for_the_owner(self):
+        from unittest.mock import patch
+
+        with patch("ai_earn.ai_assistant.OllamaProvider.is_available", return_value=True), patch(
+            "ai_earn.ai_assistant.OllamaProvider.generate",
+            return_value={
+                "output": "A draft",
+                "model": "qwen3.5:4b",
+                "verification": "draft_unverified",
+                "usage": {"prompt_tokens": 11, "completion_tokens": 9},
+            },
+        ):
+            status, configured = self.api.dispatch(
+                "POST",
+                "/api/v1/ai/provider",
+                self.owner_token,
+                {"provider": "ollama", "model": "qwen3.5:4b", "base_url": "http://127.0.0.1:11434"},
+                operation_key="ollama-usage-config-001",
+            )
+            self.assertEqual(status, 200, configured)
+            status, chat = self.api.dispatch(
+                "POST",
+                "/api/v1/ai/chat",
+                self.owner_token,
+                {"prompt": "Draft a short proposal"},
+                operation_key="ollama-chat-usage-001",
+            )
+            self.assertEqual(status, 200, chat)
+            self.assertEqual(chat["data"]["response"]["verification"], "draft_unverified")
+            status, summary = self.api.dispatch("GET", "/api/v1/ai/status", self.owner_token)
+            self.assertEqual(status, 200, summary)
+            self.assertEqual(summary["data"]["usage"]["calls"], 1)
+            self.assertEqual(summary["data"]["usage"]["total_tokens"], 20)
+
     def test_remote_provider_and_api_key_are_rejected(self):
         status, body = self.api.dispatch(
             "POST",
