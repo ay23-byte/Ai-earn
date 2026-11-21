@@ -1,6 +1,17 @@
-# Architecture: baseline and proposed boundaries
+# Architecture — current implementation and historical boundaries
 
-## Current snapshot (2026-11-17, branch arena/4bd4230e-ai-earn, base 9d77101)
+## Current implementation snapshot (2026-11-22; main baseline after PR #69)
+
+- **Runtime and server:** Python 3.11+ standard-library application. `python -m ai_earn serve` starts `ai_earn/local_server.py` on `127.0.0.1:8765`; it serves the SPA and `/api/v1` from one origin. The server is intentionally loopback-only, not a hosted or remote-access service.
+- **Authentication and browser boundary:** local AuthService-backed login; the browser receives an HttpOnly, SameSite session cookie, not the raw service token. Mutating API requests require same-origin Origin validation and a CSRF cookie/header pair. The server bounds request bodies, rejects non-loopback Host values, does not enable CORS, and applies restrictive response headers.
+- **Persistence:** separate private auth and state SQLite stores. `ai_earn/state_storage.py` reports `LATEST_SCHEMA_VERSION = 30`; fresh initialization migrates v1→v30 with 29 backup-first migration copies. See `DATABASE.md` and `STATE_MIGRATIONS.md`.
+- **Workspace integration:** `ai_earn/workspace_api.py` exposes authenticated owner-scoped CRUD/list/detail/action workflows by delegating to existing domain services. The SPA (`dashboard/app.html`, `app.js`, `app.css`) uses this API for live workspace data. The JSON snapshot remains a read-only offline fallback and must not be described as a live connection.
+- **Business domains:** opportunities, service catalog/portfolio, proposals, customers/CRM notes and requirements, projects/tasks, accepted-proposal orders, invoices, expenses, payments, ledger, analytics, AI drafts/approvals, and connector status. External marketplace publishing, autonomous client acquisition, external email delivery, and production provider settlement are not implied by local records.
+- **Financial safety:** amounts use integer paise. PR #69 prevents client-supplied pre-verification and prevents sandbox/provider-backed payment records from being locally verified. A settled manual payment may receive an explicit operator verification annotation; this is not an independent bank settlement confirmation. Live provider mode remains blocked.
+- **Testing:** CI matrix covers Python 3.11 and 3.13 on Ubuntu and Windows. PR #71 adds HTTP-level workspace E2E coverage; PR #69 adds payment verification and expense workflow tests. Current exact CI status belongs in `CURRENT_RELEASE_CHECKPOINT.md` and must be checked live.
+- **Trust boundary and limitations:** local OS account and private filesystem remain trusted assumptions; auth/state commits are separate; local audit data is not tamper-evident against coordinated database edits; Windows operator acceptance, human accessibility testing, a restore drill, and independent security review remain pending. Do not expose this server or SQLite stores to a network.
+
+## Historical architecture snapshot (2026-11-17; retained for traceability; superseded where contradicted above)
 
 - **Runtime:** Python 3.11+ stdlib only (`python -m ai_earn status`), no HTTP listener. Entry `ai_earn/__main__.py` dispatches `status|auth|tracker|dashboard|doctor`. Config from env only (`config.py` + `DatabasePaths`), validated without logging values.
 - **Auth:** `auth_storage.py` (SQLite `user_version 1`, private POSIX 0700/0600 or Windows ACL via `windows_security.py`), `auth.py` (PBKDF2 600k, 30-min sessions, `token_hash`, rate limits, recovery-code replacement), `auth_cli.py` (hidden input). Experimental local, not OS sandbox, not production.
