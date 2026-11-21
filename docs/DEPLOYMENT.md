@@ -1,4 +1,4 @@
-# Deployment — Ai-earn (2026-11-17, Phase 16 — Production Hardening)
+# Deployment — Ai-earn (2026-11-21, schema v30 release checkpoint)
 
 **Status:** Local development first, `production_ready` reflects offline readiness (`true` when 11 checks PASS) with **live still blocked** (`live_blocked: true`). No live payment deployment is approved until `docs/PRODUCTION_READINESS.md` 11-item gate plus M11 sign-off. Local offline deployment is ready when `health --json` is `ok:true` and `production_readiness` reports 11 PASS. This runbook is the **Windows-local-first** deployment path, then the optional production architecture. **Never expose the local SQLite database directly over the network.**
 
@@ -16,7 +16,7 @@ Local Windows is the **supported** deployment for disposable test data. It uses 
 
 ```powershell
 # 0. Verify Python
-python --version  # 3.11+ required; stdlib only, no requirements.txt
+python --version  # Python 3.11+; runtime uses stdlib (dev tools are in requirements-dev.txt)
 
 # 1. Clone and compile
 git clone https://github.com/ay23-byte/Ai-earn.git
@@ -42,13 +42,13 @@ $env:AI_EARN_STATE_DB = Join-Path $private "state.sqlite3"
 .\.venv\Scripts\python.exe -m ai_earn auth register
 # Save the 43-char recovery code OUTSIDE $private (paper / password manager). Never in chat/screenshot/log.
 
-# 5. Initialize state (creates state.sqlite3 + 27 before-v*.sqlite3 backups for v1→v28)
+# 5. Initialize state (creates state.sqlite3 + 29 before-v*.sqlite3 backups for v1→v30)
 .\.venv\Scripts\python.exe -m ai_earn tracker init
 # Type YES exactly (case-sensitive) when prompted. Refuses if files already exist — never delete automatically.
 
 # 6. Verify hardening
-.\.venv\Scripts\python.exe -m ai_earn health --json --with-backups  # expect ok:true, backups count 27, ok
-.\.venv\Scripts\python.exe -m ai_earn doctor --json                 # expect auth:ok (1 account), state:ok (v28)
+.\.venv\Scripts\python.exe -m ai_earn health --json --with-backups  # expect ok:true, backups count 29, ok
+.\.venv\Scripts\python.exe -m ai_earn doctor --json                 # expect auth:ok (1 account), state:ok (v30)
 .\.venv\Scripts\python.exe -m ai_earn status                       # production_ready:true offline when healthy, live_blocked:true, component offline_foundation
 
 # 7. Use the tracker (1-4 financial, 5-8 opportunities, 9-12 services/portfolio, 13-33 full menu)
@@ -88,14 +88,14 @@ $env:AI_EARN_STATE_DB = Join-Path $private "state.sqlite3"
 
 - **State:** `StateStorage.backup_to(new_private_path, confirmed=True)` — verified SQLite backup, holds write lock, checks `validate_schema`+`check_integrity` before/after, never overwrites. Each `migrate_to_vN` creates `before-vN.sqlite3` while holding lock. Fresh init → 27 files `before-v2`…`before-v28`.
 - **Auth:** `AuthStorage` via `ai_earn/backup.py:create_auth_backup` (same guarantees).
-- **Verification:** `health --json --with-backups` reports `backups: {count, expected:27, status:ok|incomplete}`.
+- **Verification:** `health --json --with-backups` reports `backups: {count, expected:29, status:ok|incomplete}`.
 - **Retention:** Keep `before-v*.sqlite3` forever (migration audit trail); user backups 30 days then delete after verifying new. Never commit `*.sqlite3*`.
 
 ## 5. Recovery procedures
 
 See `docs/BACKUP_AND_RECOVERY.md` and `docs/ROLLBACK.md`. Summary:
 1. Stop processes, `health` + `doctor` → record statuses.
-2. Pick verified backup (`before-v28.sqlite3` or daily `*.backup-*`).
+2. Pick verified backup (`before-v30.sqlite3` or daily `*.backup-*`).
 3. Restore: `StateStorage(src, create=False).backup_to(new_path, confirmed=True)` to **new** path.
 4. Verify `AI_EARN_STATE_DB=new_path health --json` is `ok`.
 5. Swap `AI_EARN_STATE_DB`, re-run `health --with-backups` + `doctor`.
