@@ -86,7 +86,7 @@ $env:AI_EARN_STATE_DB = Join-Path $private "state.sqlite3"
 
 ## 4. Database backups
 
-- **State:** `StateStorage.backup_to(new_private_path, confirmed=True)` — verified SQLite backup, holds write lock, checks `validate_schema`+`check_integrity` before/after, never overwrites. Each `migrate_to_vN` creates `before-vN.sqlite3` while holding lock. Fresh init → 27 files `before-v2`…`before-v28`.
+- **State:** `StateStorage.backup_to(new_private_path, confirmed=True)` — verified SQLite backup, holds write lock, checks `validate_schema`+`check_integrity` before/after, never overwrites. Each `migrate_to_vN` creates `before-vN.sqlite3` while holding lock. Fresh init → 29 files `before-v2`…`before-v30`.
 - **Auth:** `AuthStorage` via `ai_earn/backup.py:create_auth_backup` (same guarantees).
 - **Verification:** `health --json --with-backups` reports `backups: {count, expected:29, status:ok|incomplete}`.
 - **Retention:** Keep `before-v*.sqlite3` forever (migration audit trail); user backups 30 days then delete after verifying new. Never commit `*.sqlite3*`.
