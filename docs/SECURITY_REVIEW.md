@@ -1,7 +1,7 @@
 # Security Review — Ai-earn (historical review 2026-11-17; current addendum 2026-11-22)
 
 **Historical review baseline:** `arena/4bd4230e-ai-earn` (base `9d77101`, post-#37).
-**Baseline tests:** `1014 passed / 17 skipped` (Linux)  
+**Historical baseline tests (2026-11-17):** `1014 passed / 17 skipped` (Linux)  
 **Current scope:** Local-first SQLite application with an authenticated loopback-only HTTP workspace API. No hosted public service is approved. This is a point-in-time engineering review, not an independent penetration test or security certification.
 
 ## Summary verdict
