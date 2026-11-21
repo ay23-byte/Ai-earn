@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from ai_earn.auth import AuthService
+from ai_earn.finance import FinanceError
 from ai_earn.auth_storage import AuthStorage
 from ai_earn.state_storage import LATEST_SCHEMA_VERSION, StateStorage
 from ai_earn.workspace_api import WorkspaceAPI
@@ -304,6 +305,21 @@ class WorkspaceAPIBusinessFlowTests(unittest.TestCase):
         invoice = self.request("GET", f"/api/v1/workspace/invoices/{invoice_id}")["item"]
         self.assertEqual(invoice["status"], "issued")
         self.assertIsNotNone(invoice["pdf_hash"])
+
+        # A payment cannot be created as verified, through either the API
+        # allowlist or the underlying domain service.
+        self.request(
+            "POST",
+            "/api/v1/workspace/payments",
+            payload={"amount_paise": 10000, "provider": "manual", "verified": 1},
+            key="flow-payment-create-preverified",
+            expected=400,
+        )
+        with self.assertRaises(FinanceError):
+            self.api.payments.create(
+                self.owner_token, 10000, provider="manual", verified=1,
+                operation_key="flow-domain-payment-create-preverified",
+            )
 
         payment_id = self.request(
             "POST",
