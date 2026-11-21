@@ -221,6 +221,17 @@
         </div>
         <div class="ai-safety-note">AI output is draft-only and unverified. Consequential actions require a separate approval decision. Approving an item records consent; it does not send, publish, purchase, refund, delete, or modify external systems.</div>
       </div>
+      <div class="panel ai-panel">
+        <h3>Local AI provider</h3>
+        <p class="muted">Use the built-in stub or a model served by Ollama on this computer. Remote AI providers remain disabled.</p>
+        <form id="aiProviderForm" class="ai-form">
+          <label class="live-field">Provider<select id="aiProviderSelect" required><option value="stub">Built-in draft stub</option><option value="ollama">Local Ollama</option></select></label>
+          <label class="live-field">Model name<input id="aiProviderModel" maxlength="128" required placeholder="e.g. qwen3.5:4b" value="stub-draft-v1"></label>
+          <label class="live-field">Ollama endpoint<input id="aiProviderBaseUrl" maxlength="512" value="http://127.0.0.1:11434" spellcheck="false"></label>
+          <button class="button" type="submit">Save local provider</button>
+        </form>
+        <p class="muted" id="aiProviderConfigNote" aria-live="polite">Ollama requests are restricted to a loopback HTTP endpoint. Model output is always an unverified draft.</p>
+      </div>
       <div class="panel ai-panel"><h3>Ask the assistant</h3>
         <form id="aiChatForm" class="ai-form">
           <label class="live-field">Your request<textarea id="aiPrompt" rows="3" maxlength="4000" required placeholder="e.g. Help outline a proposal for a website client"></textarea></label>
