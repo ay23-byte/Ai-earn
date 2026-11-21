@@ -1,55 +1,72 @@
 # Current Release Checkpoint
 
 **Checkpoint date:** 2026-11-21  
-**Canonical code baseline:** `main` at PR #55 merge commit `2ec6b8c3cd5670216ebb7dba0a40d920d7b0288f`  
-**Purpose:** provide a current summary without rewriting the historical phase log or treating old branch snapshots as current evidence.
+**Canonical code baseline:** main at PR #59 merge commit 2ae55c4aef0c09128faa0f5ab3198e4aab71d7a3  
+**State schema:** v30 (LATEST_SCHEMA_VERSION = 30)  
+**Purpose:** current evidence-based release status. Historical phase logs remain historical and are not silently rewritten.
 
-## Current product boundary
+## Product boundary
 
-Ai-earn is a local-first freelance workflow and business-management application. The repository contains opportunity intake and ranking, service/portfolio workflows, proposals and outreach drafts, customer/CRM and client-linked projects, tasks, invoices and finance records, sandbox payment adapters, AI drafting with approval controls, analytics, local authentication, workspace API/dashboard components, and backup/recovery foundations.
+Ai-earn is a local-first freelance workflow and business-management application. The repository includes opportunity intake, services and portfolio, proposals, customer CRM, customer-linked projects and tasks, orders, invoices, finance records, sandbox payment foundations, AI drafting with approval controls, analytics, local authentication, workspace API/dashboard components, and backup/recovery tooling.
 
-These capabilities are not equivalent to a production SaaS release. Operator acceptance and end-to-end verification on the supported Windows environment remain necessary. The application must not be described as guaranteeing income or autonomously obtaining paying clients.
+This is not a production hosted SaaS release. Operator acceptance on the supported Windows environment and an independent security review remain outstanding. The application does not guarantee income or independently obtain paying clients.
+
+## Merged workflow increment
+
+PR #59, **accepted proposal → customer order linking**, is merged into main at 2ae55c4aef0c09128faa0f5ab3198e4aab71d7a3.
+
+The integrated business-flow regression test now covers:
+- owner registration and tenant isolation;
+- opportunity vetting and pursuit;
+- service publication and customer/project creation;
+- customer notes and requirements;
+- project task transitions and execution history;
+- draft-proposal rejection for order conversion;
+- accepted customer-linked proposal conversion into an order;
+- inherited order title/amount/customer/proposal relationship and duplicate rejection;
+- invoice creation and issuance;
+- sandbox payment creation with invoice and order links, remaining initiated and unverified.
+
+This is a disposable SQLite-backed automated test. It does not call an external payment provider, prove external delivery, or establish real revenue.
+
+## CI evidence
+
+- PR #59 branch workflow run [#44893479423](https://github.com/ay23-byte/Ai-earn/actions/runs/44893479423) completed successfully on the four-job Python 3.11/3.13 Ubuntu/Windows matrix before merge.
+- Post-merge workflow run [#44895579177](https://github.com/ay23-byte/Ai-earn/actions/runs/44895579177) was still running when this checkpoint was prepared. Do not infer a post-merge all-platform result from the PR run; recheck the linked run and update this record with its final conclusions.
+- CI runs Ruff, mypy, compilation, security checks, dependency audit policy checks, health/doctor probes and python -m unittest discover -v.
 
 ## Release gates
 
-| Gate | Current evidence-based status | Required next action |
+| Gate | Evidence-based status | Required next action |
 |---|---|---|
-| Phase 3 CRM/project workspace | PR #55 merged to main | Complete operator Windows smoke test |
-| Post-merge CI | Run [#228](https://github.com/ay23-byte/Ai-earn/actions/runs/44795965244): both Ubuntu jobs succeeded; both Windows jobs were still reported in progress at this checkpoint | Recheck final conclusions; do not record green until all four jobs complete |
-| Audit documentation | PR #56 open as draft | Review and merge only after its checks and content are accepted |
-| Documentation consistency | Historical README/phase/roadmap snapshots conflict | Reconcile each current-facing document against one audited commit; preserve historical records as history |
-| Full business workflow | Individual modules and tests exist; complete operator journey not yet evidenced | Rehearse opportunity → proposal → customer → project → tasks → invoice → payment observation/reconciliation using disposable data |
-| Backup and recovery | Code and disposable-database tests/documentation exist | Run a restore drill on the operator's Windows machine; never overwrite the working database |
-| Accessibility | Automated checks and partial manual validation documented | Complete the outstanding human browser review |
-| Independent security review | Pending | Commission scoped independent penetration testing and remediate findings |
-| Hosted SaaS deployment | Not established | Make an explicit hosted-product decision and design TLS, secrets, database lifecycle, tenant isolation, monitoring, incident response, and backup ownership |
-| Live payments / verified settlement | Blocked by design | Keep live mode disabled until provider/KYC verification, all required checks, real reconciliation evidence, and accountable human sign-off are complete |
+| Core opportunity/service/proposal/CRM/project/order/invoice workflow | Implemented and covered by the merged end-to-end API test | Complete operator smoke test using disposable data |
+| Post-merge CI for PR #59 | Pending at checkpoint authoring time | Recheck run #44895579177; record all four conclusions |
+| Windows operator acceptance | Not evidenced by GitHub CI alone | Run the Windows setup, workspace and backup/recovery smoke tests on the actual device |
+| Backup and recovery | Code and disposable-database tests exist; real-device restore not evidenced | Perform a restore drill to a new private path; never overwrite the working DB |
+| Accessibility | Automated checks and partial manual validation documented | Complete and record human browser review |
+| Independent security review | Pending | Obtain scoped independent review and remediate findings |
+| Hosted SaaS deployment | Not established | Make a separate product decision and design TLS, secrets, tenant isolation, monitoring, incident response and backup ownership |
+| Live payments / verified settlement | Blocked by design | Keep live mode disabled until provider validation, reconciliation evidence, all required checks and accountable human sign-off |
 
 ## Payment and data safety
 
 - Sandbox webhook signatures and local reconciliation are not proof of a real payment or bank settlement.
-- Never mark income as verified from a client-side success screen, a manually entered claim, or a sandbox event.
+- Never mark income verified from a client-side success screen, manual claim or sandbox event.
 - Do not store card data.
-- Do not expose the loopback/local application or SQLite files directly to the public internet.
-- Use disposable records for release rehearsals until the independent security review and operator acceptance are complete.
+- Do not expose the local application or SQLite files directly to the public internet.
+- Use disposable records for release rehearsals until operator acceptance and independent security review are complete.
 - Preserve existing databases and backups; never use a destructive reset as a troubleshooting shortcut.
 
 ## Historical documentation policy
 
-The phase register and older audits contain detailed historical snapshots from earlier branches. Those records should remain available as history. A later amendment must identify its audited commit, evidence, test command/results, platform, skips, and limitations. Do not copy a test total from an older branch or infer that a historical phase passed on the current commit.
+The phase register and older audits contain detailed snapshots from earlier branches. Keep those records available as history. A later amendment must identify its audited commit, evidence, test command/results, platform, skips and limitations. Do not copy historical test totals or infer that a historical phase passed on the current commit.
 
 ## Next execution sequence
 
-1. Recheck the four jobs in post-merge CI run #228 and the checks for PR #56.
-2. Run the documented Windows Phase 3 and backup/recovery smoke procedures on the operator's actual machine with disposable data.
-3. Reconcile the README and phase register using the exact current commit and verified test totals.
-4. Add or improve an automated end-to-end regression test for the complete local business workflow, then run the full supported CI matrix.
-5. Complete manual accessibility review and independent security testing.
-6. Decide whether the target remains local-first or becomes hosted SaaS; implement the corresponding operational design as a separate release track.
-7. Evaluate live payment enablement only after all required provider, settlement, security, and human approval gates are satisfied.
+1. Recheck post-merge CI run #44895579177 and record the final four-job result.
+2. Run the documented Windows smoke and backup/recovery procedures on the operator's machine with disposable data.
+3. Complete manual accessibility review and independent security testing.
+4. Decide whether the product remains local-first or moves to a hosted SaaS track; treat hosted architecture as a separate security and operations project.
+5. Evaluate live payments only after all provider, settlement, security, deployment and human approval gates are independently satisfied.
 
-## Verification record
-
-At this checkpoint, the GitHub API reported the post-merge run #228 as `in_progress`; Python 3.11 and 3.13 Ubuntu jobs were `success`, while both Windows jobs were `in_progress`. The PR #56 run likewise reported both Ubuntu jobs successful and both Windows jobs in progress. The workflow job-log endpoint did not provide downloadable logs for those in-progress jobs. No final all-platform CI pass is claimed here.
-
-This file is a status record, not a release approval, security certification, deployment authorization, or payment authorization.
+This checkpoint is not a release approval, security certification, deployment authorization or payment authorization.
