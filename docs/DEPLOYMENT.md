@@ -54,15 +54,19 @@ $env:AI_EARN_STATE_DB = Join-Path $private "state.sqlite3"
 # 7. Use the tracker (1-4 financial, 5-8 opportunities, 9-12 services/portfolio, 13-33 full menu)
 .\.venv\Scripts\python.exe -m ai_earn tracker open
 
-# 8. Export a read-only snapshot (interactive, asks username + hidden password, writes beside state DB, 1 MB cap)
-.\.venv\Scripts\python.exe -m ai_earn dashboard snapshot
-# Creates $private\dashboard-snapshot-*.json (counts only, no token/title). Never overwrite.
+# 8. Start the authenticated live dashboard (same process environment and existing DBs)
+.\.venv\Scripts\python.exe -m ai_earn serve
+# Open http://127.0.0.1:8765/ and sign in with the local account.
+# The server binds to 127.0.0.1, uses an HttpOnly session cookie + CSRF token,
+# and serves the SPA and authenticated workspace API from one origin.
+# Stop with Ctrl+C. Never expose the server through a tunnel, LAN bind or proxy.
 
-# 9. Open the dashboard locally (bind 127.0.0.1 ONLY — never 0.0.0.0)
-.\.venv\Scripts\python.exe -m http.server 8000 --bind 127.0.0.1
-# Then open http://127.0.0.1:8000/dashboard/app.html (17 views) or /dashboard/connected.html legacy
-# In the page: Load snapshot → choose $private\dashboard-snapshot-*.json → Clear data to remove from browser
-# Never place *.sqlite3 under dashboard/ or serve them — the server root is repository, not $private.
+# 9. Optional offline snapshot fallback (read-only, no live connection)
+# Stop the live server first, then run this in another PowerShell window:
+.\.venv\Scripts\python.exe -m ai_earn dashboard snapshot
+# Creates $private\dashboard-snapshot-*.json. Never overwrite.
+# When using the static dashboard fallback, load the snapshot manually.
+# Never use python -m http.server to expose private data or database files.
 ```
 
 ### Windows hardening notes

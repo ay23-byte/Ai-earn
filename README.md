@@ -62,6 +62,26 @@ $env:AI_EARN_STATE_DB = Join-Path $private "state.sqlite3"
 .\.venv\Scripts\python.exe -m ai_earn tracker open
 ~~~
 
+## Launch the live local dashboard
+
+After the auth and state databases have been initialized, start the authenticated
+loopback application server in a separate PowerShell window:
+
+~~~powershell
+# Reuse the same AI_EARN_* environment variables set above.
+.\.venv\Scripts\python.exe -m ai_earn serve
+~~~
+
+Open [http://127.0.0.1:8765/](http://127.0.0.1:8765/) and sign in with the
+local account. The browser uses an HttpOnly session cookie and CSRF protection;
+the server binds to loopback only. Workspace records and dashboard metrics load
+from the local database. Stop the server with Ctrl+C. Do not expose this server
+through a tunnel, reverse proxy, LAN bind, or public internet.
+
+The JSON snapshot workflow remains available as an offline, read-only fallback
+when the local application server is not running. The snapshot is not a live
+connection.
+
 The helper refuses unsafe or pre-existing private directories. If setup fails, stop and inspect the files; do not delete them or retry initialization blindly. The detailed runbook, including dashboard startup and recovery, is in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) and [docs/BACKUP_AND_RECOVERY.md](docs/BACKUP_AND_RECOVERY.md).
 
 Runtime application code uses the Python standard library. Development quality tools are pinned separately in requirements-dev.txt.

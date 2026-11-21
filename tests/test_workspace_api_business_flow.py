@@ -261,6 +261,10 @@ class WorkspaceAPIBusinessFlowTests(unittest.TestCase):
             key="flow-order-create",
             expected=201,
         )["id"]
+        listed_orders = self.request("GET", "/api/v1/workspace/orders")["items"]
+        self.assertTrue(any(item["id"] == order_id for item in listed_orders))
+        other_orders = self.request("GET", "/api/v1/workspace/orders", token=self.other_token)["items"]
+        self.assertFalse(any(item["id"] == order_id for item in other_orders))
         order = self.request("GET", f"/api/v1/workspace/orders/{order_id}")["item"]
         self.assertEqual(order["proposal_id"], proposal_id)
         self.assertEqual(order["customer_id"], customer_id)
