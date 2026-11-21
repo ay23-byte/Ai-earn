@@ -804,7 +804,7 @@ async function refreshAiWorkspace(showErrors){
       providerForm.dataset.loaded="1";
     }
     const usage=status.usage||{};
-    setText("aiProviderConfigNote",usage.calls===undefined?"Provider usage is not available.":("Recorded local calls: "+usage.calls+" · tokens: "+(usage.total_tokens||0)));
+    setText("aiProviderUsage",usage.calls===undefined?"Provider usage is not available.":("Recorded local calls: "+usage.calls+" · tokens: "+(usage.total_tokens||0)));
     const pending=(queue.items||[]).filter(x=>x.effective_status==="pending").length;
     setText("aiCount",pending+" pending / "+(queue.count||0)+" total");
     const stopped=!!status.emergency_stopped;
@@ -828,7 +828,7 @@ function clearAiWorkspace(){
   const list=$("aiApprovalList");if(list)list.innerHTML='<div class="empty">Sign in to load your approvals.</div>';
   const tools=$("aiToolName");if(tools)tools.innerHTML='<option value="">Load tools after sign-in</option>';
   aiPrint("aiChatOutput","No AI response yet.");aiPrint("aiProposalOutput","No proposal prepared.");
-  const providerForm=$("aiProviderForm");if(providerForm)providerForm.dataset.loaded="";
+  const providerForm=$("aiProviderForm");if(providerForm)providerForm.dataset.loaded="";setText("aiProviderUsage","Sign in to view local token usage.");
 }
 function initAiWorkspace(){
   const providerForm=$("aiProviderForm"),chat=$("aiChatForm"),proposal=$("aiProposalForm"),list=$("aiApprovalList");
