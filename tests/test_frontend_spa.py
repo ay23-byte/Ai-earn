@@ -119,7 +119,8 @@ class FrontendSPAStructureTests(unittest.TestCase):
         js = APP_JS.read_text(encoding="utf-8")
         self.assertIn('data-live-resource="invoices"', html)
         self.assertIn('data-live-resource="ledger"', html)
-        self.assertRegex(js, r'invoices:\\{[^\\n]*actions:\\{draft:\\["issue"\\]\\}')
+        self.assertIn('invoices:{title:"Invoices",fields:[', js)
+        self.assertIn('actions:{draft:["issue"]}', js)
         self.assertIn('"ledger": {"kind", "amount_paise", "note"}', (ROOT / "ai_earn" / "workspace_api.py").read_text(encoding="utf-8"))
 
     def test_css_has_dark_and_light_themes(self):
