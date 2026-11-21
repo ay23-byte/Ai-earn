@@ -496,6 +496,8 @@ class PaymentRecords:
         prov = _input(_provider, provider)
         pref = _input(_provider_ref, provider_ref)
         ver = _input(_verified, verified)
+        if ver == 1:
+            raise FinanceError("A new payment cannot be verified before it is settled.")
         key = _input(_key, operation_key)
         iid = _input(_record_id, invoice_id) if invoice_id is not None else None
         oid = _input(_record_id, order_id) if order_id is not None else None
