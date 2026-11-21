@@ -153,6 +153,10 @@ class WorkspaceHTTPEndToEndTests(unittest.TestCase):
         app_js = self.owner.get("/app.js")
         self.assertIn(b"/api/v1/workspace/", app_js)
 
+        anonymous = WorkspaceHTTPClient(self.server.server_port, "anonymous", "unused")
+        denied = anonymous.get("/api/v1/workspace/opportunities", expected=401)
+        self.assertEqual(denied["error"]["code"], "authentication_required")
+
         opportunity_id = self.owner.post(
             "/api/v1/workspace/opportunities",
             {
