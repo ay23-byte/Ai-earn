@@ -186,7 +186,7 @@ class WorkspaceAPI:
         return fields[resource]
 
     def _list(self, resource: str, token: str, page: dict) -> list[dict]:
-        services = {"opportunities": self.opportunities, "services": self.services, "proposals": self.proposals, "customers": self.customers, "products": self.products, "tasks": self.tasks, "invoices": self.invoices, "payments": self.payments, "expenses": self.expenses, "ledger": self.ledger}
+        services = {"opportunities": self.opportunities, "services": self.services, "proposals": self.proposals, "customers": self.customers, "products": self.products, "tasks": self.tasks, "orders": self.orders, "invoices": self.invoices, "payments": self.payments, "expenses": self.expenses, "ledger": self.ledger}
         service = services.get(resource)
         if service is None:
             raise WorkspaceAPIError("Listing is not supported for this resource.")
