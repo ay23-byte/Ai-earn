@@ -9,7 +9,7 @@
 - The dashboard uses the authenticated loopback workspace API for live workspace records; the offline JSON snapshot remains a read-only fallback. See `docs/API.md` and `docs/DEPLOYMENT.md`.
 - PR #69 adds payment verification safeguards; sandbox/provider-backed payments cannot be locally promoted to verified income. Manual verification is permitted only for a settled manual record and remains an operator assertion, not independent bank confirmation.
 - PR #71 adds HTTP-level end-to-end workspace coverage.
-- PR #73 is an open documentation-only PR. At the last check, both Ubuntu matrix jobs passed and both Windows matrix jobs were still running in CI run [#44957399853](https://github.com/ay23-byte/Ai-earn/actions/runs/44957399853). Do not report the run green until all four jobs finish.
+- PR #73 is an open documentation-only PR. Its current CI status is shown on the [PR checks page](https://github.com/ay23-byte/Ai-earn/pull/73); do not report it green until all four Python/OS matrix jobs complete successfully.
 - Still not completed by repository automation: real Windows operator acceptance, keyboard/contrast/NVDA review, a human-run restore drill, independent security review, provider eligibility/KYC, hosted deployment review, and live-payment authorization. Live payments remain blocked.
 
 ---
