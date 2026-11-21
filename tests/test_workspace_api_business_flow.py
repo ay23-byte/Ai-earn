@@ -151,6 +151,18 @@ class WorkspaceAPIBusinessFlowTests(unittest.TestCase):
         )["items"]
         self.assertTrue(any(item["id"] == note_id for item in notes))
         self.assertTrue(any(item["id"] == requirement_id for item in requirements))
+        self.request(
+            "GET",
+            f"/api/v1/workspace/customers/{customer_id}/notes",
+            token=self.other_token,
+            expected=404,
+        )
+        self.request(
+            "GET",
+            f"/api/v1/workspace/customers/{customer_id}/requirements",
+            token=self.other_token,
+            expected=404,
+        )
 
         # Exercise the real project task state machine through the workspace API.
         task = self.request("GET", f"/api/v1/workspace/tasks/{project_id}")["item"]
@@ -180,6 +192,16 @@ class WorkspaceAPIBusinessFlowTests(unittest.TestCase):
                 for item in projects
             ),
             "The project list should expose the linked task and customer relationship.",
+        )
+        other_projects = self.request(
+            "GET", "/api/v1/workspace/projects", token=self.other_token
+        )["items"]
+        self.assertFalse(any(item["task_id"] == project_id for item in other_projects))
+        self.request(
+            "GET",
+            f"/api/v1/workspace/tasks/{project_id}",
+            token=self.other_token,
+            expected=404,
         )
 
         proposal_id = self.request(
