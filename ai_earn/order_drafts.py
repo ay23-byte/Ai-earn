@@ -41,14 +41,26 @@ def _check_version(conn: sqlite3.Connection) -> None:
         raise StateStorageError("State schema version 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 or 15 is required for order drafts.")
 
 
-def _owned(conn: sqlite3.Connection, owner: str, record_id: str) -> sqlite3.Row:
+def _owned(conn: sqlite3.Connection, owner: str, record_id: str) -> dict:
     row = conn.execute(
         "SELECT id, title, proposed_amount_paise, currency, status, created_at, updated_at "
         "FROM order_drafts WHERE id=? AND owner_id=?", (record_id, owner),
     ).fetchone()
     if row is None:
         raise AccessDenied("Access denied.")
-    return row
+    result = dict(row)
+    if conn.execute("PRAGMA user_version").fetchone()[0] >= 30:
+        link = conn.execute(
+            "SELECT po.proposal_id, p.customer_id, p.price_paise, p.title "
+            "FROM proposal_orders po JOIN proposals p ON p.id=po.proposal_id AND p.owner_id=po.owner_id "
+            "WHERE po.order_id=? AND po.owner_id=?",
+            (record_id, owner),
+        ).fetchone()
+        result["proposal_id"] = link["proposal_id"] if link else None
+        result["customer_id"] = link["customer_id"] if link else None
+        if link and (result["proposed_amount_paise"] != link["price_paise"] or result["title"] != link["title"]):
+            raise StateStorageError("Order and accepted proposal are inconsistent.")
+    return result
 
 
 def _retry(conn: sqlite3.Connection, owner: str, key: str, digest: bytes) -> str | None:
@@ -103,6 +115,44 @@ class OrderDrafts:
                 "VALUES(?,?,?,?,'INR','draft',?,?)", (record_id, owner, title, amount, now, now),
             )
             _audit(conn, now, owner, "order_draft_created", record_id)
+            _remember(conn, owner, key, digest, record_id)
+            return record_id
+
+
+    def create_from_proposal(self, token: str, proposal_id: str, *, operation_key: str) -> str:
+        """Create one owner-scoped order draft from an accepted client proposal."""
+        pid = _input(_record_id, proposal_id)
+        key = _input(_key, operation_key)
+        digest = _digest("order_draft_from_proposal", pid)
+        with _authorized_transaction(self._auth, self._state, token) as (conn, owner, now):
+            _check_version(conn)
+            if conn.execute("PRAGMA user_version").fetchone()[0] < 30:
+                raise StateStorageError("State schema version 30 is required for proposal-linked orders.")
+            existing = _retry(conn, owner, key, digest)
+            if existing is not None:
+                return existing
+            from .service_workspace import Proposals
+            proposal = Proposals(self._auth, self._state)._owned(conn, owner, pid)
+            if proposal["status"] != "accepted":
+                raise OrderError("Only an accepted proposal can become an order.")
+            if proposal["customer_id"] is None:
+                raise OrderError("A customer-linked proposal is required to create an order.")
+            if conn.execute(
+                "SELECT 1 FROM proposal_orders WHERE proposal_id=? AND owner_id=?",
+                (pid, owner),
+            ).fetchone() is not None:
+                raise OrderError("This accepted proposal already has an order.")
+            record_id = secrets.token_hex(16)
+            conn.execute(
+                "INSERT INTO order_drafts(id, owner_id, title, proposed_amount_paise, currency, status, created_at, updated_at) "
+                "VALUES(?,?,?,?, 'INR','draft',?,?)",
+                (record_id, owner, proposal["title"], proposal["price_paise"], now, now),
+            )
+            conn.execute(
+                "INSERT INTO proposal_orders(order_id, proposal_id, owner_id, created_at) VALUES(?,?,?,?)",
+                (record_id, pid, owner, now),
+            )
+            _audit(conn, now, owner, "order_draft_created_from_proposal", record_id)
             _remember(conn, owner, key, digest, record_id)
             return record_id
 
