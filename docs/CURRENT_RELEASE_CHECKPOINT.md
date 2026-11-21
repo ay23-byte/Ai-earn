@@ -1,7 +1,7 @@
 # Current Release Checkpoint
 
 **Checkpoint date:** 2026-11-21  
-**Canonical code baseline:** main at PR #59 merge commit 2ae55c4aef0c09128faa0f5ab3198e4aab71d7a3  
+**Canonical code baseline:** main at PR #60 merge commit 563bc1fc3676cfac9891e89c1969ffa6cd63dbf8  
 **State schema:** v30 (LATEST_SCHEMA_VERSION = 30)  
 **Purpose:** current evidence-based release status. Historical phase logs remain historical and are not silently rewritten.
 
@@ -31,8 +31,9 @@ This is a disposable SQLite-backed automated test. It does not call an external 
 
 ## CI evidence
 
-- PR #59 branch workflow run [#44893479423](https://github.com/ay23-byte/Ai-earn/actions/runs/44893479423) completed successfully on the four-job Python 3.11/3.13 Ubuntu/Windows matrix before merge.
-- Post-merge workflow run [#44895579177](https://github.com/ay23-byte/Ai-earn/actions/runs/44895579177) was still running when this checkpoint was prepared. Do not infer a post-merge all-platform result from the PR run; recheck the linked run and update this record with its final conclusions.
+- PR #59 post-merge workflow run [#44895579177](https://github.com/ay23-byte/Ai-earn/actions/runs/44895579177) completed successfully on all four Python 3.11/3.13 Ubuntu/Windows jobs.
+- PR #60 workflow run [#44895852566](https://github.com/ay23-byte/Ai-earn/actions/runs/44895852566) completed successfully on all four matrix jobs before merge.
+- Main post-merge workflow run [#44898855718](https://github.com/ay23-byte/Ai-earn/actions/runs/44898855718) was still in progress when this checkpoint update was prepared; record its final result after completion.
 - CI runs Ruff, mypy, compilation, security checks, dependency audit policy checks, health/doctor probes and python -m unittest discover -v.
 
 ## Release gates
@@ -40,7 +41,7 @@ This is a disposable SQLite-backed automated test. It does not call an external 
 | Gate | Evidence-based status | Required next action |
 |---|---|---|
 | Core opportunity/service/proposal/CRM/project/order/invoice workflow | Implemented and covered by the merged end-to-end API test | Complete operator smoke test using disposable data |
-| Post-merge CI for PR #59 | Pending at checkpoint authoring time | Recheck run #44895579177; record all four conclusions |
+| Post-merge CI for PR #59 | Passed | Four Python 3.11/3.13 Ubuntu/Windows jobs succeeded in run #44895579177 |
 | Windows operator acceptance | Not evidenced by GitHub CI alone | Run the Windows setup, workspace and backup/recovery smoke tests on the actual device |
 | Backup and recovery | Code and disposable-database tests exist; real-device restore not evidenced | Perform a restore drill to a new private path; never overwrite the working DB |
 | Accessibility | Automated checks and partial manual validation documented | Complete and record human browser review |
@@ -63,9 +64,9 @@ The phase register and older audits contain detailed snapshots from earlier bran
 
 ## Next execution sequence
 
-1. Recheck post-merge CI run #44895579177 and record the final four-job result.
-2. Run the documented Windows smoke and backup/recovery procedures on the operator's machine with disposable data.
-3. Complete manual accessibility review and independent security testing.
+1. Complete the Windows operator smoke test and backup/recovery drill on the actual device using disposable data.
+2. Complete manual accessibility review and independent security testing.
+3. Keep closing dashboard workflow gaps with owner-isolated API and browser integration tests.
 4. Decide whether the product remains local-first or moves to a hosted SaaS track; treat hosted architecture as a separate security and operations project.
 5. Evaluate live payments only after all provider, settlement, security, deployment and human approval gates are independently satisfied.
 
