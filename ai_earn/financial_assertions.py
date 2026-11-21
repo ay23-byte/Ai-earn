@@ -36,7 +36,7 @@ def _request(action, values):
 
 
 def _version(conn):
-    if conn.execute("PRAGMA user_version").fetchone()[0] not in (13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29):
+    if conn.execute("PRAGMA user_version").fetchone()[0] not in (13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30):
         raise StateStorageError("State schema version 13, 14 or 15 is required for financial assertions.")
 
 
