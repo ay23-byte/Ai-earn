@@ -828,7 +828,10 @@ function clearAiWorkspace(){
   const list=$("aiApprovalList");if(list)list.innerHTML='<div class="empty">Sign in to load your approvals.</div>';
   const tools=$("aiToolName");if(tools)tools.innerHTML='<option value="">Load tools after sign-in</option>';
   aiPrint("aiChatOutput","No AI response yet.");aiPrint("aiProposalOutput","No proposal prepared.");
-  const providerForm=$("aiProviderForm");if(providerForm)providerForm.dataset.loaded="";setText("aiProviderUsage","Sign in to view local token usage.");
+  const providerForm=$("aiProviderForm");if(providerForm)providerForm.dataset.loaded="";
+  const provider=$("aiProviderSelect"),model=$("aiProviderModel"),endpoint=$("aiProviderBaseUrl");
+  if(provider)provider.value="stub";if(model)model.value="stub-draft-v1";if(endpoint)endpoint.value="http://127.0.0.1:11434";
+  setText("aiProviderUsage","Sign in to view local token usage.");
 }
 function initAiWorkspace(){
   const providerForm=$("aiProviderForm"),chat=$("aiChatForm"),proposal=$("aiProposalForm"),list=$("aiApprovalList");
