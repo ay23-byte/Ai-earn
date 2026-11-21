@@ -459,6 +459,9 @@ class PaymentRecords:
                 if current is not None:
                     raise StateStorageError("Payment history inconsistent.")
                 current = "initiated"
+            elif ev == "payment_verified":
+                # Verification is an audit annotation, not a payment-status transition.
+                continue
             elif ev.startswith("payment_"):
                 target = ev.replace("payment_", "")
                 # map event to status: payment_received -> received etc
