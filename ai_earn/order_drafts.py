@@ -7,6 +7,7 @@ import hmac
 import json
 import secrets
 import sqlite3
+from typing import Any
 
 from .auth import AccessDenied, AuthService
 from .opportunity_drafts import DraftError, _digest, _key, _record_id, _title
@@ -179,7 +180,7 @@ class OrderDrafts:
         with _authorized_transaction(self._auth, self._state, token) as (conn, owner, _now):
             _check_version(conn)
             query = "SELECT id FROM order_drafts WHERE owner_id=? AND id>? COLLATE BINARY"
-            params: list[object] = [owner, cursor]
+            params: list[Any] = [owner, cursor]
             if status is not None:
                 query += " AND status=?"
                 params.append(status)
