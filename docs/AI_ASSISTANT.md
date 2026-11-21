@@ -48,13 +48,13 @@ cfg = AIProviderConfig(provider="ollama", mode="sandbox", model="llama3", base_u
 cfg = AIProviderConfig(provider="hosted", mode="sandbox", model="claude-3", base_url="https://api.anthropic.com")
 
 provider = get_provider(cfg)
-provider.is_available()  # never assumes available without check; stub True, others False in sandbox (live blocked)
+provider.is_available()  # stub is always available; Ollama checks the local model; remote providers remain blocked
 provider.info()          # {provider, model, base_url, available, verification}
-provider.generate("prompt", external_content="...")  # Stub returns draft_unverified; others raise until available
+provider.generate("prompt", external_content="...")  # Stub or local Ollama returns draft_unverified; remote providers remain unavailable
 ```
 
-- **Configurable:** `provider` (`stub`/`openai`/`ollama`/`hosted`), `model` (1..128, no control), `base_url` (http(s)://, 0..2048), `timeout_seconds` (1..60), `temperature` (0..2), `api_key` (32..128 bytes, live only). No hard-coded provider/model.
-- **Never assume available:** `AIProviderConfig.is_available()` returns `True` only for `stub` in `sandbox`; `openai`/`ollama`/`hosted` require `live` mode + valid `api_key` + `base_url`, but `live` is **blocked** (`Live AI provider is not enabled; sandbox only until explicit approval`) — matches `production_readiness` gate.
+- **Configurable:** `provider` (`stub`/`openai`/`ollama`/`hosted`), `model` (1..128, no control), `base_url`, `timeout_seconds` (1..60), and `temperature` (0..2). The dashboard exposes only `stub` and local `ollama`; Ollama must use numeric loopback HTTP. No API key is accepted or stored for Ollama.
+- **Never assume available:** `StubProvider` is always available; `OllamaProvider` probes the configured local `/api/tags` endpoint and checks for the exact model. OpenAI-compatible and hosted providers remain unavailable in sandbox and live mode remains **blocked** by the `production_readiness` gate.
 - **Live blocked:** `AIProviderConfig(... mode="live" ...)` raises `AssistantError` even with key, until checklist signed and code gate updated.
 
 ## Tool registry & permissions
