@@ -36,7 +36,7 @@ import time
 from dataclasses import dataclass
 from urllib.error import URLError
 from urllib.parse import urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 from typing import Any, Dict, List
 
 from .auth import AccessDenied, AuthService
@@ -55,6 +55,18 @@ _MAX_EXTERNAL = 4096
 _TTL_SECONDS = 900  # 15 min approval window
 _MAX_TIME = 4_102_444_800
 _MAX_URL = 2048
+
+
+class _NoRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _open_local(request: Request, *, timeout: int):
+    # Disable both environment-configured proxies and redirects: an Ollama
+    # endpoint must never turn this local service into an outbound HTTP proxy.
+    return build_opener(ProxyHandler({}), _NoRedirectHandler()).open(request, timeout=timeout)
+
 
 _TRANSITIONS: dict[tuple[Any, str], str] = {
     (None, "ai_approval_created"): "pending",
@@ -451,7 +463,7 @@ class OllamaProvider(ProviderBase):
             headers["Content-Type"] = "application/json"
         request = Request(self._base_url() + path, data=body, headers=headers, method="GET" if body is None else "POST")
         try:
-            with urlopen(request, timeout=timeout or self.config.timeout_seconds) as response:
+            with _open_local(request, timeout=timeout or self.config.timeout_seconds) as response:
                 raw = response.read(self._MAX_RESPONSE_BYTES + 1)
         except (URLError, TimeoutError, OSError, ValueError) as exc:
             raise AssistantError("Local Ollama request failed; check that Ollama is running.") from exc
