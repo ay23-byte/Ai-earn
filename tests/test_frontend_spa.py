@@ -114,6 +114,14 @@ class FrontendSPAStructureTests(unittest.TestCase):
         self.assertNotIn("localhost", js)
         self.assertNotIn("127.0.0.1", js)
 
+    def test_live_invoice_issue_and_ledger_workspace_are_mounted(self):
+        html = APP_HTML.read_text(encoding="utf-8")
+        js = APP_JS.read_text(encoding="utf-8")
+        self.assertIn('data-live-resource="invoices"', html)
+        self.assertIn('data-live-resource="ledger"', html)
+        self.assertRegex(js, r'invoices:\\{[^\\n]*actions:\\{draft:\\["issue"\\]\\}')
+        self.assertIn('"ledger": {"kind", "amount_paise", "note"}', (ROOT / "ai_earn" / "workspace_api.py").read_text(encoding="utf-8"))
+
     def test_css_has_dark_and_light_themes(self):
         css = APP_CSS.read_text(encoding="utf-8")
         self.assertIn("--bg", css)
