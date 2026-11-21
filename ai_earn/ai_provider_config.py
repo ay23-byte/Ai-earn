@@ -14,7 +14,7 @@ import sqlite3
 from .auth import AuthService
 from .opportunity_drafts import DraftError, _digest, _key
 from .state_authorization import _authorized_transaction
-from .state_storage import StateStorage, StateStorageError
+from .state_storage import LATEST_SCHEMA_VERSION, StateStorage, StateStorageError
 
 _RESOURCE = "ai_provider_config"
 _PROVIDERS = frozenset({"stub", "ollama", "openai", "hosted"})
@@ -25,8 +25,11 @@ class AIProviderConfigError(Exception):
 
 
 def _version(conn: sqlite3.Connection) -> None:
-    if conn.execute("PRAGMA user_version").fetchone()[0] != 29:
-        raise StateStorageError("State schema version 29 is required for AI provider configuration.")
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    if not 29 <= version <= LATEST_SCHEMA_VERSION:
+        raise StateStorageError(
+            f"State schema version 29 or newer (up to {LATEST_SCHEMA_VERSION}) is required for AI provider configuration."
+        )
 
 
 def _text(value, *, maximum: int, label: str) -> str:
