@@ -1296,8 +1296,11 @@ class AIAssistant:
 
     def provider_info(self) -> dict:
         info = self.provider.info()
+        info.setdefault("base_url", self.config.base_url or ("(stub, no network)" if self.config.provider == "stub" else ""))
         info["mode"] = self.config.mode
+        info["api_key_configured"] = self.config.api_key is not None
         info["timeout_seconds"] = self.config.timeout_seconds
+        info["temperature"] = self.config.temperature
         return info
 
     def check_provider_available(self) -> bool:
