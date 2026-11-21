@@ -2,10 +2,10 @@
 
 **Status:** `production_ready` reflects offline foundation readiness (`true` when all 11 automated checks PASS); **live remains blocked** (`live_blocked: true`, `live_ready: false` until M11). No live transactions have been enabled. This checklist must be **fully signed** before any live payment enablement. Live mode is blocked in code (`ProviderConfig` `mode=live` raises) and requires explicit human approval (M11) plus all automated verifications below. Do not process live money, store cards, or trust client success screens.
 
-**Audited baseline:** `main` at PR #67 merge commit `51545b9eae344783559519642b57b4f3fea821f3` — state schema v30.  
+**Audited baseline:** `main` at PR #69 merge commit `b4e10769f3b6d7c19eb10ab6f2c32466da0e4c52` — includes merged PRs #68, #69 and #71; state schema v30. This is a documentation baseline update, not a fresh independent security audit.  
 **Checklist reviewed:** 2026-11-21
 
-PRs #62–#67 complete invoice/ledger, CRM detail, linked-record selector, and release-checkpoint increments. These do not satisfy any manual sign-off gate. Payment records must remain unverified unless an operator explicitly verifies a manually recorded payment after it is settled; sandbox and provider-backed records must never be promoted to verified income by a local UI action.  
+PRs #62–#67 complete invoice/ledger, CRM detail, linked-record selector, and release-checkpoint increments; PR #68 corrected the release checkpoint; PR #69 added payment-verification safeguards and finance workflow coverage; PR #71 added HTTP-level workspace end-to-end coverage and JSON-safe invoice hash persistence. These do not satisfy any manual sign-off gate. Payment records must remain unverified unless an operator explicitly verifies a manually recorded payment after it is settled; sandbox and provider-backed records must never be promoted to verified income by a local UI action.  
 **Gate:** M11 (see `PAYMENTS.md`). This document IS the production readiness checklist.
 
 ## Checklist — all 11 must pass before live enablement
@@ -55,4 +55,4 @@ Live enablement is a **code change** (remove `ProviderConfig` live block after t
 - `PAYMENTS.md` Gate M11, `SECURITY.md`, `SECURITY_REVIEW.md`, `THREAT_MODEL.md`, `BACKUP_AND_RECOVERY.md`, `DEPLOYMENT.md`, `FEATURE_MATRIX.md`, `docs/PHASE_STATUS.md`
 - Provider docs: Razorpay `X-Razorpay-Signature` HMAC-SHA256(raw_body) hex; Stripe `Stripe-Signature` `t=..,v1=HMAC-SHA256(t.raw_body)` hex + 300 s tolerance + multi-v1.
 
-Preserve warning: “Never mark a payment as received based only on a client-side success screen or unverified placeholder.” — No live-money enablement is authorized by this checklist. The current branch/main baseline must be re-audited before any future M11 decision.
+Preserve warning: “Never mark a payment as received based only on a client-side success screen or unverified placeholder.” — No live-money enablement is authorized by this checklist. The current branch/main baseline must be re-audited before any future M11 decision. The baseline SHA above identifies the latest reviewed documentation checkpoint, not independent reviewer approval.
