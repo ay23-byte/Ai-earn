@@ -1,4 +1,4 @@
-// Earn OS SPA — vanilla, hash router, theme, snapshot renderer. No network, no framework.
+// Earn OS SPA — vanilla hash router, authenticated same-origin workspace API, and snapshot fallback.
 // Premium SaaS polish: reusable components, notifications, validation, charts, a11y.
 "use strict";
 const $ = (id) => document.getElementById(id);
@@ -593,7 +593,7 @@ const LIVE_RESOURCES = {
   customers:{title:"Customer CRM",fields:[["name","Customer name","text",true],["contact","Email / contact","text",true],["source","Lead source","text",false]],actions:{lead:["contacted","rejected"],contacted:["converted","rejected"]}},
   tasks:{title:"Project tasks",fields:[["title","Task title","text",true],["description","Description","textarea",false],["priority","Priority (1–10)","number",false],["deadline_at","Deadline (Unix seconds; optional)","number",false]],actions:{draft:["submit_for_review"],pending_review:["approve","reject"],approved:["start","cancel"],scheduled:["start","cancel"],in_progress:["complete","cancel"]}},
   products:{title:"Digital products",fields:[["title","Product title","text",true],["description","Description","textarea",true],["version","Version","text",true],["price_paise","Price (paise)","number",true]],actions:{draft:["publish","archive"],published:["archive"]}},
-  invoices:{title:"Invoices",fields:[["order_id","Order draft ID","text",true],["due_at","Due date (Unix seconds; optional)","number",false],["billing_name","Billing name","text",false],["billing_contact","Billing contact","text",false],["billing_address","Billing address","textarea",false]]},
+  invoices:{title:"Invoices",fields:[["order_id","Order draft ID","text",true],["due_at","Due date (Unix seconds; optional)","number",false],["billing_name","Billing name","text",false],["billing_contact","Billing contact","text",false],["billing_address","Billing address","textarea",false]],actions:{draft:["issue"]}},
   payments:{title:"Payment records",fields:[["amount_paise","Amount (paise)","number",true],["provider","Provider (manual / sandbox)","text",false],["provider_ref","Provider reference","text",false],["invoice_id","Invoice ID (optional)","text",false],["order_id","Order ID (optional)","text",false]],actions:{initiated:["received","failed"],received:["settled","failed"],settled:["refunded"]}},
   expenses:{title:"Expenses",fields:[["amount_paise","Amount (paise)","number",true],["category","Category","text",true],["note","Note","textarea",false]]},
   ledger:{title:"Ledger entries (unverified)",fields:[["kind","Kind: income / expense / refund / fee","text",true],["amount_paise","Amount (paise)","number",true],["note","Note","text",false]]}
