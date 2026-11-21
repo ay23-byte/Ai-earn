@@ -36,6 +36,13 @@ class WorkspaceAPITests(unittest.TestCase):
         self.assertEqual(body["data"]["items"][0]["id"], "record-1")
         self.assertEqual(body["data"]["count"], 1)
 
+    def test_order_list_returns_owner_scoped_domain_rows(self):
+        status, body = self.api.dispatch("GET", "/api/v1/workspace/orders", "session", query="limit=20")
+        self.assertEqual(status, 200)
+        self.assertEqual(body["data"]["items"][0]["id"], "record-1")
+        self.assertEqual(body["data"]["count"], 1)
+        self.assertEqual(self.domain.calls[-1][0], "list")
+
     def test_rejects_unknown_fields_before_calling_domain(self):
         before = len(self.domain.calls)
         status, body = self.api.dispatch("POST", "/api/v1/workspace/customers", "session",
