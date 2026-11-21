@@ -151,17 +151,19 @@ class WorkspaceAPIBusinessFlowTests(unittest.TestCase):
         )["items"]
         self.assertTrue(any(item["id"] == note_id for item in notes))
         self.assertTrue(any(item["id"] == requirement_id for item in requirements))
+        # The customer-context routes intentionally normalize an inaccessible
+        # customer to the same domain-validation response as an unknown customer.
         self.request(
             "GET",
             f"/api/v1/workspace/customers/{customer_id}/notes",
             token=self.other_token,
-            expected=404,
+            expected=400,
         )
         self.request(
             "GET",
             f"/api/v1/workspace/customers/{customer_id}/requirements",
             token=self.other_token,
-            expected=404,
+            expected=400,
         )
 
         # Exercise the real project task state machine through the workspace API.
