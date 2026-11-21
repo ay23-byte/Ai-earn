@@ -185,19 +185,28 @@ class WorkspaceAPI:
             raise WorkspaceAPIError("This workspace resource is not available through the local API yet.")
         return fields[resource]
 
+    @staticmethod
+    def _public_record(resource: str, record: dict) -> dict:
+        """Convert domain-only binary fields into stable JSON-safe API values."""
+        result = dict(record)
+        if resource == "invoices" and isinstance(result.get("pdf_hash"), bytes):
+            result["pdf_hash"] = result["pdf_hash"].hex()
+        return result
+
     def _list(self, resource: str, token: str, page: dict) -> list[dict]:
         services = {"opportunities": self.opportunities, "services": self.services, "proposals": self.proposals, "customers": self.customers, "products": self.products, "tasks": self.tasks, "orders": self.orders, "invoices": self.invoices, "payments": self.payments, "expenses": self.expenses, "ledger": self.ledger}
         service = services.get(resource)
         if service is None:
             raise WorkspaceAPIError("Listing is not supported for this resource.")
-        return service.list(token, **page)
+        rows = service.list(token, **page)
+        return [self._public_record(resource, row) for row in rows]
 
     def _get(self, resource: str, token: str, ident: str | None) -> dict:
         services = {"opportunities": self.opportunities, "services": self.services, "proposals": self.proposals, "customers": self.customers, "products": self.products, "tasks": self.tasks, "orders": self.orders, "invoices": self.invoices, "payments": self.payments, "expenses": self.expenses, "ledger": self.ledger}
         service = services.get(resource)
         if service is None or not ident:
             raise WorkspaceAPIError("Record lookup is not supported.")
-        return service.get(token, ident)
+        return self._public_record(resource, service.get(token, ident))
 
     def _create(self, resource: str, token: str, data: dict, key: str) -> str:
         if resource == "orders" and "proposal_id" in data:
