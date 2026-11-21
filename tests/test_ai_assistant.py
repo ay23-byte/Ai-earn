@@ -249,7 +249,7 @@ class AIAssistantTests(unittest.TestCase):
         )
         provider = OllamaProvider(config)
         with patch(
-            "ai_earn.ai_assistant.urlopen",
+            "ai_earn.ai_assistant._open_local",
             side_effect=[
                 FakeResponse({"models": [{"name": "qwen3.5:4b"}]}),
                 FakeResponse({
@@ -289,7 +289,7 @@ class AIAssistantTests(unittest.TestCase):
             provider="ollama", mode="sandbox", model="missing-model",
             base_url="http://127.0.0.1:11434",
         ))
-        with patch("ai_earn.ai_assistant.urlopen", return_value=FakeResponse()):
+        with patch("ai_earn.ai_assistant._open_local", return_value=FakeResponse()):
             self.assertFalse(provider.is_available())
         with self.assertRaises(AssistantError):
             AIProviderConfig(
