@@ -1,6 +1,22 @@
-# Prioritized Implementation Plan — 2026-11-17 Audit
+# Prioritized Implementation Plan — historical audit snapshot (2026-11-17)
 
-Branch `arena/a2b30614-ai-earn` base `9d77101` LATEST 28 983 tests OK skipped=17.
+> **Historical document:** the findings and plan below describe the 2026-11-17 repository state. They are not a current audit. Several statements were superseded by later implementation, including the authenticated local HTTP workspace API, schema migrations v28–v30, PR #69 payment-safety work, and PR #71 HTTP end-to-end coverage. Use `docs/CURRENT_RELEASE_CHECKPOINT.md`, `docs/DATABASE.md`, and `docs/FEATURE_MATRIX.md` for the current release baseline.
+
+## Current repository status (2026-11-22)
+
+- Main baseline: `b4e10769f3b6d7c19eb10ab6f2c32466da0e4c52` (PR #69 merged; release documentation refresh is tracked in PR #73).
+- State schema: v30; fresh initialization applies 29 backup-first migrations after v1. See `docs/DATABASE.md`.
+- The dashboard uses the authenticated loopback workspace API for live workspace records; the offline JSON snapshot remains a read-only fallback. See `docs/API.md` and `docs/DEPLOYMENT.md`.
+- PR #69 adds payment verification safeguards; sandbox/provider-backed payments cannot be locally promoted to verified income. Manual verification is permitted only for a settled manual record and remains an operator assertion, not independent bank confirmation.
+- PR #71 adds HTTP-level end-to-end workspace coverage.
+- PR #73 is an open documentation-only PR. At the last check, both Ubuntu matrix jobs passed and both Windows matrix jobs were still running in CI run [#44957399853](https://github.com/ay23-byte/Ai-earn/actions/runs/44957399853). Do not report the run green until all four jobs finish.
+- Still not completed by repository automation: real Windows operator acceptance, keyboard/contrast/NVDA review, a human-run restore drill, independent security review, provider eligibility/KYC, hosted deployment review, and live-payment authorization. Live payments remain blocked.
+
+---
+
+## Historical audit findings (2026-11-17; retained for traceability)
+
+Branch `arena/a2b30614-ai-earn` base `9d77101` LATEST 28 983 tests OK skipped=17 at that historical point.
 
 ## Audit Findings (2026-11-17)
 
