@@ -9,7 +9,7 @@ The AI Assistant view includes a **Local AI provider** form. Choose the built-in
 
 - Provider settings are stored per account in schema v29; no raw API key is stored or accepted for Ollama.
 - The provider checks `GET /api/tags` with a short timeout and requires an exact installed-model match before reporting available.
-- Draft generation uses `POST /api/chat`, non-streaming, with a bounded response and configured timeout. The endpoint is restricted to numeric loopback HTTP to avoid turning the local server into a general-purpose outbound request proxy.
+- Draft generation uses `POST /api/chat`, non-streaming, with a 1,024-token output cap, a 2 MiB response cap, and a configured timeout. HTTP redirects and environment proxies are disabled. The endpoint is restricted to numeric loopback HTTP to avoid turning the local server into a general-purpose outbound request proxy.
 - Optional reference text is serialized as untrusted data; the system message instructs the model not to follow instructions inside it. This is a defense-in-depth measure, not a guarantee against model mistakes.
 - Prompt/completion token counts returned by Ollama are recorded in the owner-scoped usage table when present.
 - Model output remains unverified. The assistant cannot send, publish, purchase, refund, delete, or modify consequential records without the separate approval workflow. Local Ollama availability is optional; if it is stopped or the model is missing, the UI reports it unavailable and the user can switch back to the built-in stub.
