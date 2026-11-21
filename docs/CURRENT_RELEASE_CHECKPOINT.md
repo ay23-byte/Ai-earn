@@ -1,9 +1,9 @@
 # Current Release Checkpoint
 
 **Checkpoint date:** 2026-11-21  
-**Audited code baseline:** `main` at PR #66 merge commit `dab3a49513f03c02a02845f256f29ec4f0463656`  
+**Audited code baseline:** `main` at PR #67 merge commit `51545b9eae344783559519642b57b4f3fea821f3`  
 **State schema:** v30 (`LATEST_SCHEMA_VERSION = 30`)  
-**Release candidate:** not yet cut; PR #66 is merged and the current main CI run is still being verified.
+**Release candidate:** not approved; post-merge main CI is still running.
 
 ## Product boundary
 
@@ -14,17 +14,18 @@ It is not a hosted SaaS release, autonomous client-acquisition service, or incom
 ## Recent merged increments
 
 - **PR #63 — customer notes and requirements workspace:** merged at `b461a78fce896488413d82273439d7e6f8979515`. Adds owner-scoped customer notes/requirements to the live CRM detail workspace, with CSRF protection, idempotency keys, escaped text and responsive layout.
-- **PR #64 — Windows operator acceptance and recovery drill:** merged at `fb6cd3494e34bb7a7ee50d57da3c2153a0e59d31`. Adds a repeatable procedure. The procedure being merged is not evidence that the actual device-level drill has been performed.
-- **PR #65 — linked-record selectors:** closed without merge because its base became stale after PR #63 merged. It is superseded by PR #66.
-- **PR #66 — linked-record selectors:** merged into main at `dab3a49513f03c02a02845f256f29ec4f0463656`. Adds owner-scoped live selectors for project customers, proposal services/customers, accepted customer-linked proposals when creating orders, and draft orders when creating invoices. The selector regression test and all four PR CI matrix jobs passed in run [#44913475413](https://github.com/ay23-byte/Ai-earn/actions/runs/44913475413).
+- **PR #64 — Windows operator acceptance and recovery drill:** merged at `fb6cd3494e34bb7a7ee50d57da3c2153a0e59d31`. Adds a repeatable procedure; it does not prove the actual device-level drill has been performed.
+- **PR #65 — linked-record selectors:** closed without merge because its base became stale after PR #63 merged; superseded by PR #66.
+- **PR #66 — linked-record selectors:** merged at `dab3a49513f03c02a02845f256f29ec4f0463656`. Adds owner-scoped live selectors for project customers, proposal services/customers, accepted customer-linked proposals when creating orders, and draft orders when creating invoices. PR CI passed all four Python/OS jobs in [run #44913475413](https://github.com/ay23-byte/Ai-earn/actions/runs/44913475413).
+- **PR #67 — evidence-based release candidate checkpoint:** merged at `51545b9eae344783559519642b57b4f3fea821f3`. Updates the release checkpoint and records outstanding acceptance and release gates.
 
 ## Current CI evidence
 
-- PR #66 run [#44913475413](https://github.com/ay23-byte/Ai-earn/actions/runs/44913475413) completed successfully for Python 3.11 and 3.13 on Ubuntu and Windows.
-- Main post-merge run [#44928872876](https://github.com/ay23-byte/Ai-earn/actions/runs/44928872876) for commit `dab3a49513f03c02a02845f256f29ec4f0463656` was in progress when this checkpoint was updated; do not treat it as passed until all jobs complete successfully.
-- PR #67's earlier documentation-only run [#44913527145](https://github.com/ay23-byte/Ai-earn/actions/runs/44913527145) passed on its previous documentation head, before this refresh. The new commit must receive its own CI verification.
+- PR #66 CI [run #44913475413](https://github.com/ay23-byte/Ai-earn/actions/runs/44913475413): passed Python 3.11 and 3.13 on Ubuntu and Windows.
+- PR #67 CI [run #44929051309](https://github.com/ay23-byte/Ai-earn/actions/runs/44929051309): passed.
+- Main post-merge CI [run #44932504048](https://github.com/ay23-byte/Ai-earn/actions/runs/44932504048) for commit `51545b9eae344783559519642b57b4f3fea821f3`: was still in progress at the time of this checkpoint update. Do not call it green until all four jobs complete successfully.
 
-Required matrix: Python 3.11 and 3.13 on Ubuntu and Windows, including lint/type/compile/security/health checks and the unit suite. Record exact current results, skips and commit SHA after completion.
+Required matrix: Python 3.11 and 3.13 on Ubuntu and Windows, including lint/type/compile/security/health checks and the unit suite. Record exact results, skips and commit SHA after completion.
 
 ## Release gates
 
