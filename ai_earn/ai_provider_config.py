@@ -61,7 +61,12 @@ class AIProviderConfigs:
             endpoint = base_url or "http://127.0.0.1:11434"
             try:
                 parsed = urlsplit(endpoint)
-                loopback = parsed.hostname is not None and ipaddress.ip_address(parsed.hostname).is_loopback
+                port = parsed.port
+                loopback = (
+                    parsed.hostname is not None
+                    and ipaddress.ip_address(parsed.hostname).is_loopback
+                    and (port is None or 1 <= port <= 65535)
+                )
             except ValueError:
                 parsed = None
                 loopback = False
