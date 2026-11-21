@@ -775,7 +775,7 @@ function initWorkspaceCrud(){
           if(title===null) return;
           await apiJson("/api/v1/workspace/services/"+encodeURIComponent(id),{method:"PATCH",headers:{"Content-Type":"application/json","X-CSRF-Token":apiState.csrf,"Idempotency-Key":liveIdempotencyKey()},body:JSON.stringify({title})});
         }else{
-          await apiJson("/api/v1/workspace/"+resource+"/"+encodeURIComponent(id)+"/actions/"+encodeURIComponent(verb),{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":apiState.csrf,"Idempotency-Key":crypto.randomUUID()},body:"{}"});
+          await apiJson("/api/v1/workspace/"+resource+"/"+encodeURIComponent(id)+"/actions/"+encodeURIComponent(verb),{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":apiState.csrf,"Idempotency-Key":liveIdempotencyKey()},body:"{}"});
         }
         showToast("Record updated.","success"); await loadLiveResource(resource); await refreshLiveDashboard(false);
       }catch(err){showToast(err.message,"error");}
