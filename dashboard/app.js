@@ -571,6 +571,14 @@ function initRevenueHandlers(){
   });
 }
 const apiState = { csrf: "", account: null, timer: null, live: false };
+// These caches are populated only from the signed-in account's owner-scoped workspace API.
+const liveRecordCache = Object.create(null);
+const LIVE_SELECTS = {
+  customer_id: { resource:"customers", empty:"Select a customer" },
+  service_id: { resource:"services", empty:"Select a service" },
+  proposal_id: { resource:"proposals", empty:"Select an accepted proposal" },
+  order_id: { resource:"orders", empty:"Select an order" }
+};
 async function apiJson(path, options){
   const response = await fetch(path, Object.assign({ credentials:"same-origin", cache:"no-store" }, options||{}));
   let body;
@@ -584,16 +592,16 @@ async function apiJson(path, options){
 }
 
 const LIVE_RESOURCES = {
-  projects:{title:"Client projects",fields:[["customer_id","Customer ID","text",true],["title","Project title","text",true],["description","Project scope / description","textarea",false],["priority","Priority (0–9)","number",false],["deadline_at","Deadline (Unix seconds; optional)","number",false]],actions:{draft:["submit_for_review"],pending_review:["approve","reject"],approved:["start","cancel"],scheduled:["start","cancel"],in_progress:["complete","cancel"]}},
+  projects:{title:"Client projects",fields:[["customer_id","Customer","select",true],["title","Project title","text",true],["description","Project scope / description","textarea",false],["priority","Priority (0–9)","number",false],["deadline_at","Deadline (Unix seconds; optional)","number",false]],actions:{draft:["submit_for_review"],pending_review:["approve","reject"],approved:["start","cancel"],scheduled:["start","cancel"],in_progress:["complete","cancel"]}},
 
   opportunities:{title:"Opportunity records",fields:[["title","Title","text",true],["source_url","Source URL","url",true],["budget_paise","Budget (paise)","number",true],["deadline_at","Deadline (Unix seconds; optional)","number",false],["risk_level","Risk: low / medium / high / unknown","text",false],["skill_tags","Skills / tags","text",false]],actions:{discovered:["vetted"],vetted:["pursuing"]}},
   services:{title:"Service catalog",fields:[["title","Service title","text",true],["scope","Scope","textarea",true],["deliverable","Deliverable","text",true],["price_paise","Price (paise)","number",true],["revisions","Revisions","number",true]],actions:{draft:["publish","archive"],published:["archive"]}},
-  proposals:{title:"Proposals",fields:[["service_id","Service ID","text",true],["customer_id","Customer ID (optional)","text",false],["title","Proposal title","text",true],["description","Description","textarea",true],["price_paise","Price (paise)","number",true],["delivery_days","Delivery days","number",true]],actions:{draft:["send"],sent:["accept","reject","cancel"],rejected:["archive"],accepted:["archive"]}},
-  orders:{title:"Customer orders",fields:[["proposal_id","Accepted customer-linked proposal ID","text",true]],actions:{draft:["cancel"]}},
+  proposals:{title:"Proposals",fields:[["service_id","Service","select",true],["customer_id","Customer (optional)","select",false],["title","Proposal title","text",true],["description","Description","textarea",true],["price_paise","Price (paise)","number",true],["delivery_days","Delivery days","number",true]],actions:{draft:["send"],sent:["accept","reject","cancel"],rejected:["archive"],accepted:["archive"]}},
+  orders:{title:"Customer orders",fields:[["proposal_id","Accepted proposal","select",true]],actions:{draft:["cancel"]}},
   customers:{title:"Customer CRM",fields:[["name","Customer name","text",true],["contact","Email / contact","text",true],["source","Lead source","text",false]],actions:{lead:["contacted","rejected"],contacted:["converted","rejected"]}},
   tasks:{title:"Project tasks",fields:[["title","Task title","text",true],["description","Description","textarea",false],["priority","Priority (1–10)","number",false],["deadline_at","Deadline (Unix seconds; optional)","number",false]],actions:{draft:["submit_for_review"],pending_review:["approve","reject"],approved:["start","cancel"],scheduled:["start","cancel"],in_progress:["complete","cancel"]}},
   products:{title:"Digital products",fields:[["title","Product title","text",true],["description","Description","textarea",true],["version","Version","text",true],["price_paise","Price (paise)","number",true]],actions:{draft:["publish","archive"],published:["archive"]}},
-  invoices:{title:"Invoices",fields:[["order_id","Order draft ID","text",true],["due_at","Due date (Unix seconds; optional)","number",false],["billing_name","Billing name","text",false],["billing_contact","Billing contact","text",false],["billing_address","Billing address","textarea",false]],actions:{draft:["issue"]}},
+  invoices:{title:"Invoices",fields:[["order_id","Order","select",true],["due_at","Due date (Unix seconds; optional)","number",false],["billing_name","Billing name","text",false],["billing_contact","Billing contact","text",false],["billing_address","Billing address","textarea",false]],actions:{draft:["issue"]}},
   payments:{title:"Payment records",fields:[["amount_paise","Amount (paise)","number",true],["provider","Provider (manual / sandbox)","text",false],["provider_ref","Provider reference","text",false],["invoice_id","Invoice ID (optional)","text",false],["order_id","Order ID (optional)","text",false]],actions:{initiated:["received","failed"],received:["settled","failed"],settled:["refunded"]}},
   expenses:{title:"Expenses",fields:[["amount_paise","Amount (paise)","number",true],["category","Category","text",true],["note","Note","textarea",false]]},
   ledger:{title:"Ledger entries (unverified)",fields:[["kind","Kind: income / expense / refund / fee","text",true],["amount_paise","Amount (paise)","number",true],["note","Note","text",false]]}
@@ -602,8 +610,37 @@ function liveFieldHtml(field){
   const [name,label,type,required]=field;
   const tag=type==="textarea"?"textarea":"input";
   const inputType=type==="number"?"number":type==="url"?"url":"text";
-  return '<label class="live-field">'+escapeHtml(label)+(required?' <span aria-hidden="true">*</span>':'')+
-    (tag==="textarea"?'<textarea name="'+name+'" rows="2" '+(required?'required':'')+'></textarea>':'<input name="'+name+'" type="'+inputType+'" '+(type==="number"?'min="0" step="1"':'')+(required?' required':'')+'>')+'</label>';
+  let control;
+  if(type==="select"){
+    control='<select name="'+name+'" data-live-select="'+name+'" '+(required?'required':'')+' aria-label="'+escapeHtml(label)+'"><option value="">'+escapeHtml(LIVE_SELECTS[name]?.empty||"Select a record")+'</option></select>';
+  }else{
+    control=tag==="textarea"?'<textarea name="'+name+'" rows="2" '+(required?'required':'')+'></textarea>':'<input name="'+name+'" type="'+inputType+'" '+(type==="number"?'min="0" step="1"':'')+(required?' required':'')+'>';
+  }
+  return '<label class="live-field">'+escapeHtml(label)+(required?' <span aria-hidden="true">*</span>':'')+control+'</label>';
+}
+function liveSelectLabel(resource,item){
+  const name=item.title||item.name||item.invoice_number||item.id||"Record";
+  const status=item.status||"";
+  const amount=Number.isSafeInteger(item.price_paise)?rupees(item.price_paise):Number.isSafeInteger(item.proposed_amount_paise)?rupees(item.proposed_amount_paise):"";
+  return [name,status,amount].filter(Boolean).join(" · ");
+}
+function populateLiveSelects(){
+  document.querySelectorAll("[data-live-select]").forEach(select=>{
+    const field=select.getAttribute("data-live-select");
+    const config=LIVE_SELECTS[field];
+    if(!config)return;
+    const rows=liveRecordCache[config.resource];
+    const previous=select.value;
+    const options=Array.isArray(rows)?rows:[];
+    const allowed=field==="proposal_id"?options.filter(item=>item.status==="accepted" && item.customer_id):options;
+    const first='<option value="">'+escapeHtml(config.empty)+'</option>';
+    const rest=allowed.map(item=>'<option value="'+escapeHtml(item.id)+'">'+escapeHtml(liveSelectLabel(config.resource,item))+'</option>').join("");
+    select.innerHTML=first+rest;
+    if(previous && allowed.some(item=>item.id===previous))select.value=previous;
+    if(!allowed.length){
+      select.options[0].textContent=field==="proposal_id"?"No accepted customer-linked proposals available":("No "+config.resource+" available yet");
+    }
+  });
 }
 function liveItemSummary(item){
   const preferred=["title","name","status","contact","source_url","description","amount_paise","budget_paise","price_paise","category","kind"];
@@ -623,6 +660,8 @@ async function loadLiveResource(resource){
   try{
     const result=await apiJson('/api/v1/workspace/'+resource+'?limit=50');
     const rows=result.items||[];
+    liveRecordCache[resource]=rows;
+    populateLiveSelects();
     const list=rows.length?rows.map(item=>'<article class="live-record"><div class="live-record-main"><strong>'+escapeHtml(item.title||item.name||item.invoice_number||item.id)+'</strong><small>'+escapeHtml(item.status||"record")+' · '+escapeHtml(item.id)+'</small><div class="live-record-details">'+liveItemSummary(item)+'</div></div><div class="live-record-actions">'+liveActionButtons(resource,item)+(resource==="services"?'<button type="button" class="button ghost" data-live-edit="'+escapeHtml(item.id)+'" data-live-title="'+escapeHtml(item.title||"")+'">Edit title</button>':'')+'</div></article>').join(""):'<div class="empty">No records yet. Create the first record above.</div>';
     root.querySelector(".live-record-list").innerHTML=list;
     root.querySelector(".live-resource-status").textContent=rows.length+' record(s) loaded from the local database.';
@@ -632,6 +671,8 @@ async function loadLiveResource(resource){
   }
 }
 function clearLiveResources(){
+  Object.keys(liveRecordCache).forEach(key=>delete liveRecordCache[key]);
+  populateLiveSelects();
   document.querySelectorAll("[data-live-resource]").forEach(root=>{
     const status=root.querySelector(".live-resource-status"), list=root.querySelector(".live-record-list");
     if(status) status.textContent="Sign in to load live records.";
@@ -794,7 +835,7 @@ function initLocalApi(){
     try{ await apiJson("/api/v1/auth/logout",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":apiState.csrf},body:"{}"}); }
     catch(_){ showToast("Could not confirm sign out. The local session may still be active.","error"); return; }
     apiState.account=null; apiState.live=false; if(apiState.timer) clearInterval(apiState.timer); apiState.timer=null; clearLiveResources(); clearAiWorkspace();
-    if(form) form.hidden=false; logout.hidden=true; if(user) user.textContent=""; renderEmpty();
+    if(form) form.hidden=false; logout.hidden=true; if(user) user.textContent=""; clearLiveResources(); renderEmpty();
     const status=$("snapshotStatus"); if(status) status.textContent="Signed out. Load an offline snapshot or sign in again.";
   });
 }
