@@ -309,6 +309,7 @@ class WorkspaceAPIBusinessFlowTests(unittest.TestCase):
                 "provider": "sandbox",
                 "provider_ref": "disposable-flow-reference",
                 "invoice_id": invoice_id,
+                "order_id": order_id,
                 "verified": 0,
             },
             key="flow-payment-create",
