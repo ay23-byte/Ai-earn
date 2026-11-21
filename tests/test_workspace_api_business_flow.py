@@ -129,6 +129,48 @@ class WorkspaceAPIBusinessFlowTests(unittest.TestCase):
             expected=201,
         )
         project_id = project["task_id"]
+
+        # Customer context is part of the same authenticated workflow.
+        note_id = self.request(
+            "POST",
+            f"/api/v1/workspace/customers/{customer_id}/notes",
+            payload={"note": "Client prefers email updates."},
+            key="flow-customer-note",
+            expected=201,
+        )["id"]
+        requirement_id = self.request(
+            "POST",
+            f"/api/v1/workspace/customers/{customer_id}/requirements",
+            payload={"requirement": "Website must work on mobile screens."},
+            key="flow-customer-requirement",
+            expected=201,
+        )["id"]
+        notes = self.request("GET", f"/api/v1/workspace/customers/{customer_id}/notes")["items"]
+        requirements = self.request(
+            "GET", f"/api/v1/workspace/customers/{customer_id}/requirements"
+        )["items"]
+        self.assertTrue(any(item["id"] == note_id for item in notes))
+        self.assertTrue(any(item["id"] == requirement_id for item in requirements))
+
+        # Exercise the real project task state machine through the workspace API.
+        task = self.request("GET", f"/api/v1/workspace/tasks/{project_id}")["item"]
+        self.assertEqual(task["status"], "draft")
+        self.request(
+            "POST",
+            f"/api/v1/workspace/projects/{project_id}/actions/start",
+            key="flow-project-start",
+        )
+        task = self.request("GET", f"/api/v1/workspace/tasks/{project_id}")["item"]
+        self.assertEqual(task["status"], "in_progress")
+        self.request(
+            "POST",
+            f"/api/v1/workspace/projects/{project_id}/actions/complete",
+            key="flow-project-complete",
+        )
+        task = self.request("GET", f"/api/v1/workspace/tasks/{project_id}")["item"]
+        self.assertEqual(task["status"], "completed")
+        self.assertGreaterEqual(task["execution_log_count"], 2)
+
         projects = self.request("GET", "/api/v1/workspace/projects")["items"]
         self.assertTrue(
             any(
@@ -252,6 +294,8 @@ class WorkspaceAPIBusinessFlowTests(unittest.TestCase):
         self.assertEqual(payment["status"], "initiated")
         self.assertEqual(payment["verified"], 0)
         self.assertEqual(payment["provider"], "sandbox")
+        self.assertEqual(payment["invoice_id"], invoice_id)
+        self.assertEqual(payment["order_id"], order_id)
 
         # The full workflow remains private to its owner.
         hidden = self.request(
