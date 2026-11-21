@@ -272,7 +272,7 @@ class ProductionHardeningTests(unittest.TestCase):
             auth.register("bob", "StrongPass123!")
             token = auth.login("bob", "StrongPass123!")
         state = StateStorage(state_db, create=True, confirmed=True)
-        for v in range(2, 30):
+        for v in range(2, 31):
             m = getattr(state, f"migrate_to_v{v}", None)
             if m:
                 m(private / f"before-v{v}.sqlite3", confirmed=True)
