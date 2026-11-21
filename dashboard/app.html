@@ -230,7 +230,8 @@
           <label class="live-field">Ollama endpoint<input id="aiProviderBaseUrl" maxlength="512" value="http://127.0.0.1:11434" spellcheck="false"></label>
           <button class="button" type="submit">Save local provider</button>
         </form>
-        <p class="muted" id="aiProviderConfigNote" aria-live="polite">Ollama requests are restricted to a loopback HTTP endpoint. Model output is always an unverified draft.</p>
+        <p class="muted" id="aiProviderConfigNote">Ollama requests are restricted to a loopback HTTP endpoint. Model output is always an unverified draft.</p>
+        <p class="muted" id="aiProviderUsage" aria-live="polite">Sign in to view local token usage.</p>
       </div>
       <div class="panel ai-panel"><h3>Ask the assistant</h3>
         <form id="aiChatForm" class="ai-form">
