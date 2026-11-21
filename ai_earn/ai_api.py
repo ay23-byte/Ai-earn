@@ -3,7 +3,7 @@ from __future__ import annotations
 import secrets
 from urllib.parse import parse_qs
 from .ai_assistant import AIAssistant, AIProviderConfig
-from .ai_provider_config import AIProviderConfigError, AIProviderConfigs
+from .ai_provider_config import AIProviderConfigs
 
 class AIWorkspaceAPI:
     def __init__(self, auth, state, assistant=None):
