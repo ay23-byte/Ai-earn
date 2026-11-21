@@ -56,8 +56,8 @@ $env:AI_EARN_STATE_DB = Join-Path $private "state.sqlite3"
 
 # 8. Start the authenticated live dashboard (same process environment and existing DBs)
 .\.venv\Scripts\python.exe -m ai_earn serve
-# Open http://129.0.0.1:8765/ and sign in with the local account.
-# The server binds to 129.0.0.1, uses an HttpOnly session cookie + CSRF token,
+# Open http://127.0.0.1:8765/ and sign in with the local account.
+# The server binds to 127.0.0.1, uses an HttpOnly session cookie + CSRF token,
 # and serves the SPA and authenticated workspace API from one origin.
 # Stop with Ctrl+C. Never expose the server through a tunnel, LAN bind or proxy.
 
@@ -110,7 +110,7 @@ Stale copy hazard: restored old copy lacks later `operation_key`s → second lea
 
 - CLI: `python -m ai_earn health --json --with-backups` → `{ok, version, production_ready:bool (=ok when 11 checks PASS), checks:{config,auth,state,version,backups}}`. Exit `0` ok, `1` not ok, `2` config invalid. Offline ready=`ok:true` ⇒ `production_ready:true`; live still `live_blocked:true`.
 - Structured logs: `ai_earn/structured_logging.py` JSON lines to stderr (allowlisted events, redacted, level-filtered). `ai_earn/monitoring.py` `Monitor.poll()` emits `health_check` events.
-- Future HTTP `GET /healthz` would bind `129.0.0.1` and return `200` vs `503` — not yet implemented (no listener). SPA/tracker call `health` locally only.
+- Future HTTP `GET /healthz` would bind `127.0.0.1` and return `200` vs `503` — not yet implemented (no listener). SPA/tracker call `health` locally only.
 
 ## 7. Structured logs & error reporting
 
@@ -166,11 +166,11 @@ Two-phase: `prepare_deletion_backup` → `confirm_deletion(token, password, phra
 **Goal:** If a web tier is added later, keep SQLite **never** network-exposed.
 
 ```
-Client → TLS → Load Balancer (private) → App tier (129.0.0.1) → SQLite-per-user vault
+Client → TLS → Load Balancer (private) → App tier (127.0.0.1) → SQLite-per-user vault
                                               ↘ Postgres RLS (future) ↗
 ```
 
-- **App tier:** Bind `129.0.0.1` only (never `0.0.0.0`); reverse-proxy terminates TLS, validates that `*.sqlite3`, `*.sqlite3-wal`, `dashboard-snapshot-*.json` are **never** under web root and never served.
+- **App tier:** Bind `127.0.0.1` only (never `0.0.0.0`); reverse-proxy terminates TLS, validates that `*.sqlite3`, `*.sqlite3-wal`, `dashboard-snapshot-*.json` are **never** under web root and never served.
 - **Storage:** Local SQLite is **single-user, single-process**. For multi-user production, evaluate Postgres with Row-Level Security (RLS) or SQLite-per-user vault (one private dir per user, OS ACL). No shared SQLite over NFS/Samba.
 - **Cookies/session:** If HTTP added, `Secure; HttpOnly; SameSite=Lax; __Host-` prefix, CSRF tokens, DB-backed rate limit (not local file), per-record authz tests.
 - **Secrets:** Injected via vault (e.g., HashiCorp Vault / OS keychain → env at start), not file.
@@ -182,4 +182,4 @@ Client → TLS → Load Balancer (private) → App tier (129.0.0.1) → SQLite-p
 Do not invent `Dockerfile`/`fly.toml`/`k8s` before independent security, recovery, and legal reviews sign off. Preserve `live_blocked:true` until M11 sign-off; offline ready does not imply live.
 
 ---
-**Never expose the local SQLite database directly over the network.** Any `python -m http.server` must be `--bind 129.0.0.1`; never `0.0.0.0` and never serve `AI_EARN_*_DB` files.
+**Never expose the local SQLite database directly over the network.** Any `python -m http.server` must be `--bind 127.0.0.1`; never `0.0.0.0` and never serve `AI_EARN_*_DB` files.
