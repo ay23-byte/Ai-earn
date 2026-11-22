@@ -800,7 +800,7 @@ async function refreshAiWorkspace(showErrors){
       const provider=$("aiProviderSelect"),model=$("aiProviderModel"),endpoint=$("aiProviderBaseUrl");
       if(provider)provider.value=providerConfig.provider==="ollama"?"ollama":"stub";
       if(model)model.value=providerConfig.model||(providerConfig.provider==="stub"?"stub-draft-v1":"");
-      if(endpoint)endpoint.value=providerConfig.base_url||"http://127.0.0.1:11434";
+      if(endpoint)endpoint.value=providerConfig.base_url||endpoint.value;
       providerForm.dataset.loaded="1";
     }
     const usage=status.usage||{};
@@ -830,7 +830,7 @@ function clearAiWorkspace(){
   aiPrint("aiChatOutput","No AI response yet.");aiPrint("aiProposalOutput","No proposal prepared.");
   const providerForm=$("aiProviderForm");if(providerForm)providerForm.dataset.loaded="";
   const provider=$("aiProviderSelect"),model=$("aiProviderModel"),endpoint=$("aiProviderBaseUrl");
-  if(provider)provider.value="stub";if(model)model.value="stub-draft-v1";if(endpoint)endpoint.value="http://127.0.0.1:11434";
+  if(provider)provider.value="stub";if(model)model.value="stub-draft-v1";if(endpoint)endpoint.value="";
   setText("aiProviderUsage","Sign in to view local token usage.");
 }
 function initAiWorkspace(){
