@@ -885,7 +885,7 @@ function initAiWorkspace(){
   });
 }
 
-function initLocalApi(){
+async function initLocalApi(){
   const form=$("loginForm"), logout=$("logoutButton"), user=$("signedInAs");
   try{
     const csrf=await apiJson("/api/v1/csrf"); apiState.csrf=csrf.csrf_token;
