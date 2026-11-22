@@ -795,6 +795,16 @@ async function refreshAiWorkspace(showErrors){
     const p=status.provider||{};
     setText("aiProviderInfo",(p.provider||"unknown")+" · "+(p.mode||"")+" · "+(p.model||""));
     setText("aiProviderStatus",status.provider_available?"Available":"Unavailable");
+    const providerForm=$("aiProviderForm"),providerConfig=status.provider_config||{};
+    if(providerForm&&!providerForm.dataset.loaded){
+      const provider=$("aiProviderSelect"),model=$("aiProviderModel"),endpoint=$("aiProviderBaseUrl");
+      if(provider)provider.value=providerConfig.provider==="ollama"?"ollama":"stub";
+      if(model)model.value=providerConfig.model||(providerConfig.provider==="stub"?"stub-draft-v1":"");
+      if(endpoint)endpoint.value=providerConfig.base_url||endpoint.value;
+      providerForm.dataset.loaded="1";
+    }
+    const usage=status.usage||{};
+    setText("aiProviderUsage",usage.calls===undefined?"Provider usage is not available.":("Recorded local calls: "+usage.calls+" · tokens: "+(usage.total_tokens||0)));
     const pending=(queue.items||[]).filter(x=>x.effective_status==="pending").length;
     setText("aiCount",pending+" pending / "+(queue.count||0)+" total");
     const stopped=!!status.emergency_stopped;
@@ -818,9 +828,30 @@ function clearAiWorkspace(){
   const list=$("aiApprovalList");if(list)list.innerHTML='<div class="empty">Sign in to load your approvals.</div>';
   const tools=$("aiToolName");if(tools)tools.innerHTML='<option value="">Load tools after sign-in</option>';
   aiPrint("aiChatOutput","No AI response yet.");aiPrint("aiProposalOutput","No proposal prepared.");
+  const providerForm=$("aiProviderForm");if(providerForm)providerForm.dataset.loaded="";
+  const provider=$("aiProviderSelect"),model=$("aiProviderModel"),endpoint=$("aiProviderBaseUrl");
+  if(provider)provider.value="stub";if(model)model.value="stub-draft-v1";if(endpoint)endpoint.value="";
+  setText("aiProviderUsage","Sign in to view local token usage.");
 }
 function initAiWorkspace(){
-  const chat=$("aiChatForm"),proposal=$("aiProposalForm"),list=$("aiApprovalList");
+  const providerForm=$("aiProviderForm"),chat=$("aiChatForm"),proposal=$("aiProposalForm"),list=$("aiApprovalList");
+  if(providerForm)providerForm.addEventListener("submit",async e=>{
+    e.preventDefault();if(!apiState.account){showToast("Sign in to configure the AI provider.","error");return;}
+    const provider=$("aiProviderSelect").value,model=$("aiProviderModel").value.trim(),base_url=provider==="ollama"?$("aiProviderBaseUrl").value.trim():"";
+    if(!model){showToast("Enter a model name.","error");return;}
+    try{
+      await aiPost("/api/v1/ai/provider",{provider,model,base_url});
+      providerForm.dataset.loaded="";
+      showToast("Local AI provider settings saved.","success");
+      await refreshAiWorkspace(false);
+    }catch(err){showToast(err.message,"error");}
+  });
+  const providerSelect=$("aiProviderSelect"),providerModel=$("aiProviderModel");
+  if(providerSelect)providerSelect.addEventListener("change",()=>{
+    if(!providerModel)return;
+    if(providerSelect.value==="ollama"&&providerModel.value==="stub-draft-v1")providerModel.value="";
+    if(providerSelect.value==="stub"&&!providerModel.value)providerModel.value="stub-draft-v1";
+  });
   if(chat)chat.addEventListener("submit",async e=>{
     e.preventDefault();if(!apiState.account){showToast("Sign in to use the AI assistant.","error");return;}
     aiPrint("aiChatOutput","Generating draft…");

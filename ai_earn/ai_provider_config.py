@@ -8,8 +8,10 @@ not enable any external call.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import secrets
 import sqlite3
+from urllib.parse import urlsplit
 
 from .auth import AuthService
 from .opportunity_drafts import DraftError, _digest, _key
@@ -55,6 +57,32 @@ class AIProviderConfigs:
             raise AIProviderConfigError("Invalid base URL.")
         if base_url and not base_url.startswith(("https://", "http://127.0.0.1", "http://localhost")):
             raise AIProviderConfigError("Base URL must use HTTPS or loopback HTTP.")
+        if provider == "ollama":
+            endpoint = base_url or "http://127.0.0.1:11434"
+            try:
+                parsed = urlsplit(endpoint)
+                port = parsed.port
+                loopback = (
+                    parsed.hostname is not None
+                    and ipaddress.ip_address(parsed.hostname).is_loopback
+                    and (port is None or 1 <= port <= 65535)
+                )
+            except ValueError:
+                parsed = None
+                loopback = False
+            if (
+                not loopback
+                or parsed is None
+                or parsed.scheme != "http"
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.path not in {"", "/"}
+                or parsed.query
+                or parsed.fragment
+            ):
+                raise AIProviderConfigError("Ollama must use a plain HTTP loopback endpoint.")
+            if api_key is not None:
+                raise AIProviderConfigError("Ollama does not accept an API key.")
         key_hash = None
         if api_key is not None:
             raw = api_key.encode("utf-8") if isinstance(api_key, str) else api_key

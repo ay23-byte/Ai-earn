@@ -1,6 +1,19 @@
-# AI Assistant — Ai-earn (2026-11-17 Phase 13+ (v28))
+# AI Assistant — Ai-earn (2026-11-22; local Ollama draft provider)
 
-**Status:** Implemented (v28, sandbox stub, 963 tests). Real assistant connected to backend, modular providers, ToolRegistry (32 tools), ApprovalQueue with TTL, preview, audit, emergency stop. No live provider network until explicit approval. **This is one of the most important parts of Ai-earn — controlled autonomy.**
+**Status:** Owner-scoped AI workspace API, ToolRegistry, ApprovalQueue, preview/audit/emergency stop, built-in stub, and optional local Ollama inference are implemented. Ollama calls are restricted to a loopback HTTP endpoint; OpenAI-compatible and hosted network providers remain disabled. All model output is `draft_unverified`; consequential actions still require explicit approval and are not automatically executed.
+
+
+## Local Ollama provider (new)
+
+The AI Assistant view includes a **Local AI provider** form. Choose the built-in stub or configure Ollama with a model installed on the same computer, for example `qwen3.5:4b`, and endpoint `http://127.0.0.1:11434`.
+
+- Provider settings are stored per account in schema v29; no raw API key is stored or accepted for Ollama.
+- The provider checks `GET /api/tags` with a short timeout and requires an exact installed-model match before reporting available.
+- Draft generation uses `POST /api/chat`, non-streaming, with a 1,024-token output cap, a 2 MiB response cap, and a configured timeout. HTTP redirects and environment proxies are disabled. The endpoint is restricted to numeric loopback HTTP to avoid turning the local server into a general-purpose outbound request proxy.
+- Optional reference text is serialized as untrusted data; the system message instructs the model not to follow instructions inside it. This is a defense-in-depth measure, not a guarantee against model mistakes.
+- Prompt/completion token counts returned by Ollama are recorded in the owner-scoped usage table when present.
+- Model output remains unverified. The assistant cannot send, publish, purchase, refund, delete, or modify consequential records without the separate approval workflow. Local Ollama availability is optional; if it is stopped or the model is missing, the UI reports it unavailable and the user can switch back to the built-in stub.
+- Remote OpenAI-compatible and hosted providers remain disabled pending a separate secrets and live-provider review.
 
 ## Goal — 15 tasks
 
@@ -31,17 +44,17 @@ from ai_earn.ai_assistant import AIProviderConfig, get_provider, StubProvider, O
 
 cfg = AIProviderConfig(provider="stub", mode="sandbox", model="stub-draft-v1")  # always available
 cfg = AIProviderConfig(provider="openai", mode="sandbox", model="gpt-4o", base_url="https://api.openai.com/v1", api_key=None)  # sandbox, not available until live approval
-cfg = AIProviderConfig(provider="ollama", mode="sandbox", model="llama3", base_url="http://localhost:11434")
+cfg = AIProviderConfig(provider="ollama", mode="sandbox", model="llama3", base_url="http://127.0.0.1:11434")
 cfg = AIProviderConfig(provider="hosted", mode="sandbox", model="claude-3", base_url="https://api.anthropic.com")
 
 provider = get_provider(cfg)
-provider.is_available()  # never assumes available without check; stub True, others False in sandbox (live blocked)
+provider.is_available()  # stub is always available; Ollama checks the local model; remote providers remain blocked
 provider.info()          # {provider, model, base_url, available, verification}
-provider.generate("prompt", external_content="...")  # Stub returns draft_unverified; others raise until available
+provider.generate("prompt", external_content="...")  # Stub or local Ollama returns draft_unverified; remote providers remain unavailable
 ```
 
-- **Configurable:** `provider` (`stub`/`openai`/`ollama`/`hosted`), `model` (1..128, no control), `base_url` (http(s)://, 0..2048), `timeout_seconds` (1..60), `temperature` (0..2), `api_key` (32..128 bytes, live only). No hard-coded provider/model.
-- **Never assume available:** `AIProviderConfig.is_available()` returns `True` only for `stub` in `sandbox`; `openai`/`ollama`/`hosted` require `live` mode + valid `api_key` + `base_url`, but `live` is **blocked** (`Live AI provider is not enabled; sandbox only until explicit approval`) — matches `production_readiness` gate.
+- **Configurable:** `provider` (`stub`/`openai`/`ollama`/`hosted`), `model` (1..128, no control), `base_url`, `timeout_seconds` (1..60), and `temperature` (0..2). The dashboard exposes only `stub` and local `ollama`; Ollama must use numeric loopback HTTP. No API key is accepted or stored for Ollama.
+- **Never assume available:** `StubProvider` is always available; `OllamaProvider` probes the configured local `/api/tags` endpoint and checks for the exact model. OpenAI-compatible and hosted providers remain unavailable in sandbox and live mode remains **blocked** by the `production_readiness` gate.
 - **Live blocked:** `AIProviderConfig(... mode="live" ...)` raises `AssistantError` even with key, until checklist signed and code gate updated.
 
 ## Tool registry & permissions
@@ -80,7 +93,7 @@ from ai_earn.ai_assistant import AIAssistant, AIProviderConfig
 # Configurable provider
 cfg = AIProviderConfig(provider="stub", mode="sandbox", model="stub-draft-v1")
 ai = AIAssistant(auth, state, provider_config=cfg)
-ai.check_provider_available()  # False for openai/ollama/hosted in sandbox
+ai.check_provider_available()  # True only when the configured local Ollama model is installed and responding
 
 # Chat (no auto-execution)
 ai.chat(token, "Help me research AI gigs", external_content="untrusted data")

@@ -35,6 +35,16 @@ class FrontendSPAStructureTests(unittest.TestCase):
         self.assertIn('name="color-scheme"', html)
         self.assertIn('content="dark light"', html)
 
+    def test_ai_assistant_exposes_safe_local_provider_settings(self):
+        html = APP_HTML.read_text(encoding="utf-8")
+        js = APP_JS.read_text(encoding="utf-8")
+        self.assertIn('id="aiProviderForm"', html)
+        self.assertIn('id="aiProviderSelect"', html)
+        self.assertIn('<option value="ollama">Local Ollama</option>', html)
+        self.assertIn('value="http://127.0.0.1:11434"', html)
+        self.assertIn('aiPost("/api/v1/ai/provider"', js)
+        self.assertIn('provider==="ollama"', js)
+
     def test_html_has_17_nav_links_with_hash_routes(self):
         html = APP_HTML.read_text(encoding="utf-8")
         for route in EXPECTED_ROUTES:

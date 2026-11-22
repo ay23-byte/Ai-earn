@@ -125,7 +125,7 @@ class AIProviderConfigTests(unittest.TestCase):
     def test_config_persists_hash_only_and_metering_totals(self):
         auth, state, token = _setup(self)
         configs = AIProviderConfigs(auth, state)
-        result = configs.configure(token, provider="ollama", model="llama3", base_url="http://127.0.0.1:11434", api_key="k" * 40, operation_key="cfg-1")
+        result = configs.configure(token, provider="openai", model="gpt-test", base_url="https://api.openai.com/v1", api_key="k" * 40, operation_key="cfg-1")
         self.assertTrue(result["configured"])
         self.assertTrue(result["has_api_key"])
         self.assertNotIn("k" * 40, json.dumps(result))
