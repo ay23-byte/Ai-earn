@@ -285,7 +285,7 @@ class AIAssistantTests(unittest.TestCase):
             ),
         )
         with patch("ai_earn.ai_assistant.OllamaProvider.is_available", return_value=False):
-            result = assistant.chat(self.token, "Draft a proposal")
+            result = assistant.chat(self.alice_token, "Draft a proposal")
         self.assertIn("select the built-in stub", result["output"])
         self.assertEqual(result["verification"], "draft_unverified")
 
