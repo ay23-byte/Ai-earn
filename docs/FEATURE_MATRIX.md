@@ -1,6 +1,6 @@
 # Feature Matrix — Ai-earn (actual vs planned)
 
-**Updated:** 2026-11-22, audited against main baseline `b4e10769f3b6d7c19eb10ab6f2c32466da0e4c52` (PR #69 merged; PR #71 HTTP workspace E2E merged). Schema v30. Historical test counts below remain dated evidence, not a current test result; current matrix CI is linked from `docs/CURRENT_RELEASE_CHECKPOINT.md`.
+**Updated:** 2026-11-22, audited against main baseline `2d73d1c0e9d975886492fa835d943cd5d1351731` (PR #74 local Ollama draft provider merged; PR #73 release docs and prior workspace/finance work included). Schema v30. Historical test counts below remain dated evidence, not a current test result; current matrix CI is linked from `docs/CURRENT_RELEASE_CHECKPOINT.md`.
 **Legend:** `VERIFIED` = automated tests + evidence on Linux + where noted user-reported Windows gate; `PARTIAL` = code exists but not all acceptance criteria tested; `EXPERIMENTAL` = disposable, not production; `NOT_IMPLEMENTED` = no code; `BLOCKED` = needs external credential/service.
 
 | ID | Feature / Acceptance | Implementation path | Tests | Status | Notes |
