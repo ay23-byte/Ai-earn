@@ -2,7 +2,7 @@
 
 **Purpose:** provide repeatable, human-run acceptance evidence for the supported Windows-local workflow. This is a test procedure, not a production approval. It must use a fresh disposable checkout and synthetic account only.
 
-**Baseline:** PR #67 merge commit `51545b9eae344783559519642b57b4f3fea821f3`, schema v30. Record the exact candidate commit used for the drill.
+**Baseline:** PR #69 merge commit `b4e10769f3b6d7c19eb10ab6f2c32466da0e4c52` (includes merged PRs #68 and #71), schema v30. Record the exact candidate commit used for the drill. This baseline update does not mean the human-run drill has been performed.
 
 ## Safety rules
 

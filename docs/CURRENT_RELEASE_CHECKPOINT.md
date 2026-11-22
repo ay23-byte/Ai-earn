@@ -1,9 +1,9 @@
 # Current Release Checkpoint
 
-**Checkpoint date:** 2026-11-21  
-**Audited code baseline:** `main` at PR #67 merge commit `51545b9eae344783559519642b57b4f3fea821f3`  
-**State schema:** v30 (`LATEST_SCHEMA_VERSION = 30`)  
-**Release candidate:** not approved; post-merge main CI is still running.
+**Checkpoint date:** 2026-11-22
+**Audited code baseline:** `main` at PR #69 merge commit `b4e10769f3b6d7c19eb10ab6f2c32466da0e4c52` (includes PRs #68, #69 and #71)
+**State schema:** v30 (`LATEST_SCHEMA_VERSION = 30`)
+**Release candidate:** not approved; post-merge main CI run #44956929296 completed successfully on all four Python/OS matrix jobs.
 
 ## Product boundary
 
@@ -18,12 +18,16 @@ It is not a hosted SaaS release, autonomous client-acquisition service, or incom
 - **PR #65 — linked-record selectors:** closed without merge because its base became stale after PR #63 merged; superseded by PR #66.
 - **PR #66 — linked-record selectors:** merged at `dab3a49513f03c02a02845f256f29ec4f0463656`. Adds owner-scoped live selectors for project customers, proposal services/customers, accepted customer-linked proposals when creating orders, and draft orders when creating invoices. PR CI passed all four Python/OS jobs in [run #44913475413](https://github.com/ay23-byte/Ai-earn/actions/runs/44913475413).
 - **PR #67 — evidence-based release candidate checkpoint:** merged at `51545b9eae344783559519642b57b4f3fea821f3`. Updates the release checkpoint and records outstanding acceptance and release gates.
+- **PR #68 — release checkpoint correction:** merged before PR #71; refreshed the release checkpoint after the PR #67 baseline.
+- **PR #69 — payment safety and finance workflow E2E:** merged at `b4e10769f3b6d7c19eb10ab6f2c32466da0e4c52`. Adds server-side restrictions against creating pre-verified payments, prevents sandbox/provider records from being locally promoted to verified income, and adds finance workflow coverage.
+- **PR #71 — HTTP workspace E2E and invoice hash persistence:** merged at `c7dec2719d199d87d7717dbe9888192d327407e5`. Adds HTTP-level workspace integration coverage and JSON-safe invoice hash persistence across restart.
 
 ## Current CI evidence
 
 - PR #66 CI [run #44913475413](https://github.com/ay23-byte/Ai-earn/actions/runs/44913475413): passed Python 3.11 and 3.13 on Ubuntu and Windows.
+- PR #69 CI [run #44952173539](https://github.com/ay23-byte/Ai-earn/actions/runs/44952173539): passed all four Python/OS matrix jobs on the PR head. The separate post-merge `main` run remains tracked above.
 - PR #67 CI [run #44929051309](https://github.com/ay23-byte/Ai-earn/actions/runs/44929051309): passed.
-- Main post-merge CI [run #44932504048](https://github.com/ay23-byte/Ai-earn/actions/runs/44932504048) for commit `51545b9eae344783559519642b57b4f3fea821f3`: was still in progress at the time of this checkpoint update. Do not call it green until all four jobs complete successfully.
+- Main post-merge CI [run #44956929296](https://github.com/ay23-byte/Ai-earn/actions/runs/44956929296) for commit `b4e10769f3b6d7c19eb10ab6f2c32466da0e4c52`: all four jobs passed (Python 3.11 and 3.13 on Ubuntu and Windows). This verifies the main baseline, not the open PR #73 documentation head.
 
 Required matrix: Python 3.11 and 3.13 on Ubuntu and Windows, including lint/type/compile/security/health checks and the unit suite. Record exact results, skips and commit SHA after completion.
 
