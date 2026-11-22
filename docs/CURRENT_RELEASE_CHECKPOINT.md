@@ -1,9 +1,9 @@
 # Current Release Checkpoint
 
 **Checkpoint date:** 2026-11-22
-**Audited code baseline:** `main` at PR #69 merge commit `b4e10769f3b6d7c19eb10ab6f2c32466da0e4c52` (includes PRs #68, #69 and #71)
+**Audited code baseline:** `main` at PR #74 merge commit `2d73d1c0e9d975886492fa835d943cd5d1351731` (includes PRs #73 and #74, plus the previously merged workspace, finance and safety work)
 **State schema:** v30 (`LATEST_SCHEMA_VERSION = 30`)
-**Release candidate:** not approved; post-merge main CI run #44956929296 completed successfully on all four Python/OS matrix jobs.
+**Release candidate:** not approved. Post-merge main CI run [#45001045311](https://github.com/ay23-byte/Ai-earn/actions/runs/45001045311) for the PR #74 merge commit was in progress when this checkpoint was prepared; do not treat it as passed until all four Python/OS matrix jobs complete successfully.
 
 ## Product boundary
 
@@ -21,13 +21,17 @@ It is not a hosted SaaS release, autonomous client-acquisition service, or incom
 - **PR #68 — release checkpoint correction:** merged before PR #71; refreshed the release checkpoint after the PR #67 baseline.
 - **PR #69 — payment safety and finance workflow E2E:** merged at `b4e10769f3b6d7c19eb10ab6f2c32466da0e4c52`. Adds server-side restrictions against creating pre-verified payments, prevents sandbox/provider records from being locally promoted to verified income, and adds finance workflow coverage.
 - **PR #71 — HTTP workspace E2E and invoice hash persistence:** merged at `c7dec2719d199d87d7717dbe9888192d327407e5`. Adds HTTP-level workspace integration coverage and JSON-safe invoice hash persistence across restart.
+- **PR #73 — release and architecture documentation refresh:** merged at `a7d178385e93798d5c54d94f5ba7fe5f8df7f9d2`. Updates the schema-v30 release baseline and clarifies that human acceptance and release gates remain open.
+- **PR #74 — local Ollama draft provider:** merged at `2d73d1c0e9d975886492fa835d943cd5d1351731`. Adds authenticated owner-scoped local Ollama model configuration and draft inference, loopback-only HTTP endpoint validation, bounded non-streaming requests/responses, usage accounting, dashboard controls and tests. Model output remains `draft_unverified`; hosted providers and consequential actions remain disabled.
 
 ## Current CI evidence
 
 - PR #66 CI [run #44913475413](https://github.com/ay23-byte/Ai-earn/actions/runs/44913475413): passed Python 3.11 and 3.13 on Ubuntu and Windows.
 - PR #69 CI [run #44952173539](https://github.com/ay23-byte/Ai-earn/actions/runs/44952173539): passed all four Python/OS matrix jobs on the PR head. The separate post-merge `main` run remains tracked above.
 - PR #67 CI [run #44929051309](https://github.com/ay23-byte/Ai-earn/actions/runs/44929051309): passed.
-- Main post-merge CI [run #44956929296](https://github.com/ay23-byte/Ai-earn/actions/runs/44956929296) for commit `b4e10769f3b6d7c19eb10ab6f2c32466da0e4c52`: all four jobs passed (Python 3.11 and 3.13 on Ubuntu and Windows). This verifies the main baseline, not the open PR #73 documentation head.
+- Main post-merge CI [run #44956929296](https://github.com/ay23-byte/Ai-earn/actions/runs/44956929296) for commit `b4e10769f3b6d7c19eb10ab6f2c32466da0e4c52`: all four jobs passed (Python 3.11 and 3.13 on Ubuntu and Windows); this is historical evidence for the pre-Ollama baseline.
+- PR #73 CI [run #44960154577](https://github.com/ay23-byte/Ai-earn/actions/runs/44960154577): passed on the documentation PR head.
+- PR #74 CI [run #44999251252](https://github.com/ay23-byte/Ai-earn/actions/runs/44999251252): completed successfully on the PR head. Post-merge main CI [run #45001045311](https://github.com/ay23-byte/Ai-earn/actions/runs/45001045311) was still in progress at checkpoint time; verify its final result before treating main as green.
 
 Required matrix: Python 3.11 and 3.13 on Ubuntu and Windows, including lint/type/compile/security/health checks and the unit suite. Record exact results, skips and commit SHA after completion.
 
@@ -73,6 +77,6 @@ Do not paste passwords, recovery codes, tokens, private database contents or cus
 
 ## Release decision
 
-**Current decision: NOT APPROVED for public hosted SaaS or live-money use.** A local disposable-data release candidate can be considered only after the current main CI run is green and the Windows operator acceptance and restore drill are completed and recorded. Independent security and accessibility reviews remain separate gates.
+**Current decision: NOT APPROVED for public hosted SaaS or live-money use.** A local disposable-data release candidate can be considered only after the post-PR-74 main CI run is green and the Windows operator acceptance and restore drill are completed and recorded. Independent security and accessibility reviews remain separate gates.
 
 This checkpoint is an evidence log, not a security certification, deployment authorization, payment authorization or income guarantee.
