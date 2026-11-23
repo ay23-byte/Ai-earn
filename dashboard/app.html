@@ -19,8 +19,8 @@
   </div>
   <div class="title-block">
     <div class="eyebrow">LOCAL WORKSPACE</div>
-    <h1>Local backend · Offline snapshot fallback</h1>
-    <div class="muted">Loopback-only · account-scoped · live metrics · <a href="connected.html">legacy dashboard</a></div>
+    <h1>Earn OS — Live local workspace</h1>
+    <div class="muted">Local backend · account-scoped live data · <a href="connected.html">legacy dashboard</a></div>
   </div>
   <div class="header-actions">
     <span id="signedInAs" class="muted" aria-live="polite"></span>
@@ -30,13 +30,13 @@
       <button class="button" type="submit">Sign in</button><span id="loginMessage" class="muted" role="status"></span>
     </form>
     <button class="button ghost" id="logoutButton" type="button" hidden>Sign out</button>
-    <label class="load" for="snapshotFile">Load snapshot<input id="snapshotFile" type="file" accept="application/json,.json" aria-label="Load snapshot file"></label>
+    <label class="load" for="snapshotFile">Import offline snapshot (optional)<input id="snapshotFile" type="file" accept="application/json,.json" aria-label="Import optional offline snapshot"></label>
     <button class="button ghost" id="clearSnapshot" type="button">Clear data</button>
     <button class="button" id="themeToggle" type="button" aria-pressed="false" aria-label="Toggle dark and light theme">Light mode</button>
   </div>
 </header>
 
-<div class="status" id="snapshotStatus" role="status" aria-live="polite" aria-atomic="true">Start the local backend and sign in, or load a JSON snapshot created by <code>python -m ai_earn dashboard snapshot</code>.</div><div class="muted" id="lastUpdated" aria-live="polite"></div>
+<div class="status" id="snapshotStatus" role="status" aria-live="polite" aria-atomic="true">Sign in to load your live workspace from the local backend. Your records are stored in your local database; importing a snapshot is optional.</div><div class="muted" id="lastUpdated" aria-live="polite"></div>
 <div id="toastContainer" class="toast-container" aria-live="polite" aria-atomic="true"></div>
 
 <div class="layout">

@@ -899,7 +899,7 @@ async function initLocalApi(){
   }catch(_){
     if(form) form.hidden=false; if(logout) logout.hidden=true; if(user) user.textContent="";
     const status=$("snapshotStatus");
-    if(status && !currentSnapshot){ status.textContent="Local backend available when started — sign in, or load an offline snapshot."; status.className="status"; }
+    if(status && !currentSnapshot){ status.textContent="Sign in to load live data from your local database. Offline snapshots are optional."; status.className="status"; }
   }
   if(form) form.addEventListener("submit", async e=>{
     e.preventDefault();
@@ -921,7 +921,7 @@ async function initLocalApi(){
     catch(_){ showToast("Could not confirm sign out. The local session may still be active.","error"); return; }
     apiState.account=null; apiState.live=false; if(apiState.timer) clearInterval(apiState.timer); apiState.timer=null; clearLiveResources(); clearAiWorkspace();
     if(form) form.hidden=false; logout.hidden=true; if(user) user.textContent=""; renderEmpty();
-    const status=$("snapshotStatus"); if(status) status.textContent="Signed out. Load an offline snapshot or sign in again.";
+    const status=$("snapshotStatus"); if(status) status.textContent="Signed out. Sign in again to load your live workspace. Offline snapshots are optional.";
   });
 }
 async function refreshLiveDashboard(showErrors){
