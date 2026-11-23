@@ -133,3 +133,43 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
 .customer-detail-list{padding-left:20px;color:var(--text);font-size:13px;line-height:1.6;overflow-wrap:anywhere}
 .customer-detail-form{display:grid;gap:10px;margin-top:12px}
 @media(max-width:700px){.customer-detail-columns{grid-template-columns:1fr}}
+
+
+/* AI workspace — premium depth, restrained motion, no external 3D runtime */
+.ai-workspace{--ai-accent:#55d6ff;--ai-violet:#9b8cff;--ai-mint:#7af0ce}
+.ai-hero{position:relative;isolation:isolate;overflow:hidden;display:grid;grid-template-columns:minmax(0,1.25fr) minmax(260px,.75fr);align-items:center;min-height:300px;padding:clamp(24px,4vw,46px);border:1px solid color-mix(in srgb,var(--ai-accent) 32%,var(--line));border-radius:22px;background:radial-gradient(ellipse at 78% 48%,rgba(74,139,255,.19),transparent 42%),radial-gradient(ellipse at 20% 110%,rgba(139,92,246,.16),transparent 48%),linear-gradient(135deg,#071625 0%,#0b1c32 52%,#10152d 100%);box-shadow:0 24px 70px rgba(0,0,0,.22),inset 0 1px rgba(255,255,255,.08);transform-style:preserve-3d}
+.ai-hero-copy{position:relative;z-index:2;max-width:650px}
+.ai-kicker{display:flex;align-items:center;gap:9px;color:#8be5ff;font-size:11px;font-weight:800;letter-spacing:.19em}
+.ai-live-dot{width:7px;height:7px;border-radius:50%;background:#6cf5c5;box-shadow:0 0 0 5px rgba(108,245,197,.12),0 0 18px #6cf5c5;animation:aiPulse 2s ease-in-out infinite}
+.ai-hero h2{margin:18px 0 12px;color:#f4f8ff;font-size:clamp(30px,4vw,48px);line-height:1.04;letter-spacing:-.045em}
+.ai-hero h2 span{background:linear-gradient(95deg,#65dfff,#a7a0ff 60%,#8ff0d4);-webkit-background-clip:text;background-clip:text;color:transparent}
+.ai-hero-copy p{max-width:540px;color:#a8bdd3;font-size:14px;line-height:1.75}
+.ai-hero-tags{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px}
+.ai-hero-tags span{padding:7px 10px;border:1px solid rgba(137,194,235,.2);border-radius:999px;background:rgba(9,25,44,.58);color:#a9cce4;font-size:9px;font-weight:800;letter-spacing:.12em}
+.ai-orbit-scene{position:relative;z-index:1;justify-self:center;width:min(100%,310px);aspect-ratio:1;perspective:900px;transform-style:preserve-3d}
+.ai-core{position:absolute;inset:34%;display:grid;place-items:center;border:1px solid rgba(149,228,255,.8);border-radius:30%;background:radial-gradient(circle at 35% 25%,#9ef2ff,#328acb 34%,#24346c 72%,#151a3a);box-shadow:0 0 30px rgba(71,203,255,.65),0 0 90px rgba(120,106,255,.34),inset 0 0 25px rgba(255,255,255,.4);transform:rotateX(18deg) rotateY(-24deg);animation:aiFloat 5s ease-in-out infinite}
+.ai-core span{color:#fff;font-size:25px;font-weight:900;letter-spacing:.1em;text-shadow:0 2px 16px #fff}
+.ai-orbit{position:absolute;inset:13%;border:1px solid rgba(107,211,255,.42);border-radius:50%;transform-style:preserve-3d;box-shadow:0 0 22px rgba(80,180,255,.08)}
+.ai-orbit-one{transform:rotateX(68deg) rotateZ(-18deg);animation:aiOrbit 14s linear infinite}
+.ai-orbit-two{inset:7%;transform:rotateY(68deg) rotateZ(24deg);border-color:rgba(172,148,255,.5);animation:aiOrbitReverse 18s linear infinite}
+.ai-orbit-three{inset:22%;transform:rotateX(75deg) rotateY(35deg);border-color:rgba(122,240,206,.42);animation:aiOrbit 11s linear infinite}
+.ai-orbit-node{position:absolute;width:11px;height:11px;border-radius:50%;background:#8ceaff;box-shadow:0 0 17px #65dfff}
+.node-one{top:13%;left:25%}.node-two{right:8%;top:48%;background:#b6a7ff;box-shadow:0 0 17px #a99aff}.node-three{bottom:15%;left:40%;background:#7af0ce;box-shadow:0 0 17px #7af0ce}
+.ai-hero-glow{position:absolute;z-index:-1;right:8%;top:15%;width:230px;height:230px;border-radius:50%;background:#5b70ff;filter:blur(100px);opacity:.2;pointer-events:none}
+.ai-status-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:16px}
+.ai-status-card{display:flex;align-items:center;gap:13px;min-width:0;padding:17px;border:1px solid var(--line);border-radius:15px;background:linear-gradient(145deg,var(--surface),color-mix(in srgb,var(--surface) 78%,var(--ai-accent)));box-shadow:0 10px 28px rgba(0,0,0,.08);transition:transform .25s ease,border-color .25s ease,box-shadow .25s ease}
+.ai-status-card:hover{transform:translateY(-4px) perspective(700px) rotateX(2deg);border-color:color-mix(in srgb,var(--ai-accent) 50%,var(--line));box-shadow:0 16px 35px rgba(30,130,200,.12)}
+.ai-status-icon{display:grid;place-items:center;flex:0 0 42px;width:42px;height:42px;border:1px solid color-mix(in srgb,var(--ai-accent) 35%,var(--line));border-radius:13px;background:rgba(72,177,230,.1);color:var(--ai-accent);font-size:21px}
+.ai-status-card div{display:grid;gap:4px;min-width:0}
+.ai-status-card small{color:var(--muted);font-size:9px;font-weight:800;letter-spacing:.13em}
+.ai-status-card strong{font-size:18px;overflow-wrap:anywhere}
+.ai-status-card span:last-child{color:var(--muted);font-size:11px;overflow-wrap:anywhere}
+.ai-workspace .ai-panel{padding:20px;border-radius:16px;transition:transform .22s ease,border-color .22s ease,box-shadow .22s ease}
+.ai-workspace .ai-panel:hover{transform:translateY(-2px);border-color:color-mix(in srgb,var(--ai-accent) 35%,var(--line));box-shadow:0 14px 34px rgba(0,0,0,.1)}
+.ai-workspace .ai-output{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;line-height:1.7}
+@keyframes aiPulse{50%{opacity:.45;box-shadow:0 0 0 9px rgba(108,245,197,.04),0 0 25px #6cf5c5}}
+@keyframes aiFloat{0%,100%{transform:translateY(0) rotateX(18deg) rotateY(-24deg)}50%{transform:translateY(-12px) rotateX(25deg) rotateY(18deg)}}
+@keyframes aiOrbit{to{transform:rotateX(68deg) rotateZ(342deg)}}
+@keyframes aiOrbitReverse{to{transform:rotateY(68deg) rotateZ(-336deg)}}
+@media(max-width:760px){.ai-hero{grid-template-columns:1fr;min-height:0}.ai-orbit-scene{width:210px;margin:12px auto -10px}.ai-status-grid{grid-template-columns:1fr}.ai-status-card:hover,.ai-workspace .ai-panel:hover{transform:none}}
+@media(prefers-reduced-motion:reduce){.ai-workspace *, .ai-workspace *::before,.ai-workspace *::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
