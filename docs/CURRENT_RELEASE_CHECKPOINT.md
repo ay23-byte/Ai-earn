@@ -1,9 +1,9 @@
 # Current Release Checkpoint
 
 **Checkpoint date:** 2026-11-24
-**Audited code baseline:** `main` at PR #82 merge commit `c6608e5f7743d10ce5a4d6020126ae7e1eec0c16` (includes PRs #80, #81 and #82, plus all previously merged workspace, finance, safety and AI-provider work)
+**Audited code baseline:** `main` at PR #83 merge commit `4e94d330775658f8cbd6fdd9981933fae9d94746` (includes PRs #80–#83 and all previously merged workspace, finance, safety and AI-provider work)
 **State schema:** v30 (`LATEST_SCHEMA_VERSION = 30`)
-**Release candidate:** not approved. Post-merge main CI run [#45001045311](https://github.com/ay23-byte/Ai-earn/actions/runs/45001045311) for the PR #74 merge commit was in progress when this checkpoint was prepared; do not treat it as passed until all four Python/OS matrix jobs complete successfully.
+**Release candidate:** not approved. Post-merge main CI run [#45431715913](https://github.com/ay23-byte/Ai-earn/actions/runs/45431715913) for commit `4e94d330775658f8cbd6fdd9981933fae9d94746` is in progress; do not treat it as passed until all four Python/OS matrix jobs complete successfully.
 
 ## Product boundary
 
@@ -32,6 +32,9 @@ It is not a hosted SaaS release, autonomous client-acquisition service, or incom
 
 ## Current CI evidence
 
+- PR #83 CI [run #45386467517](https://github.com/ay23-byte/Ai-earn/actions/runs/45386467517): all four Python 3.11/3.13 Ubuntu/Windows jobs passed. PR #83 merged at `4e94d330775658f8cbd6fdd9981933fae9d94746`.
+- Post-merge main CI [run #45431715913](https://github.com/ay23-byte/Ai-earn/actions/runs/45431715913) for PR #83 merge commit: all four jobs were still in progress when this checkpoint was updated. Recheck before release decisions.
+
 - PR #66 CI [run #44913475413](https://github.com/ay23-byte/Ai-earn/actions/runs/44913475413): passed Python 3.11 and 3.13 on Ubuntu and Windows.
 - PR #69 CI [run #44952173539](https://github.com/ay23-byte/Ai-earn/actions/runs/44952173539): passed all four Python/OS matrix jobs on the PR head. The separate post-merge `main` run remains tracked above.
 - PR #67 CI [run #44929051309](https://github.com/ay23-byte/Ai-earn/actions/runs/44929051309): passed.
@@ -41,7 +44,7 @@ It is not a hosted SaaS release, autonomous client-acquisition service, or incom
 
 - PR #80 CI [run #45365872926](https://github.com/ay23-byte/Ai-earn/actions/runs/45365872926): all four Python/OS jobs passed.
 - PR #81 CI [run #45367558167](https://github.com/ay23-byte/Ai-earn/actions/runs/45367558167): passed on the final PR head; post-merge main run [#45373077647](https://github.com/ay23-byte/Ai-earn/actions/runs/45373077647) passed all four jobs.
-- PR #82 CI [run #45373359302](https://github.com/ay23-byte/Ai-earn/actions/runs/45373359302): passed all four Python/OS jobs. Post-merge main run [#45385488604](https://github.com/ay23-byte/Ai-earn/actions/runs/45385488604) is the current check for commit `c6608e5f7743d10ce5a4d6020126ae7e1eec0c16`; its Ubuntu jobs passed and Windows jobs were still running when this checkpoint update was prepared. Recheck before release decisions.
+- PR #82 CI [run #45373359302](https://github.com/ay23-byte/Ai-earn/actions/runs/45373359302): passed all four Python/OS jobs. Post-merge main run [#45385488604](https://github.com/ay23-byte/Ai-earn/actions/runs/45385488604) for commit `c6608e5f7743d10ce5a4d6020126ae7e1eec0c16` subsequently passed all four Python/OS jobs.
 
 Required matrix: Python 3.11 and 3.13 on Ubuntu and Windows, including lint/type/compile/security/health checks and the unit suite. Record exact results, skips and commit SHA after completion.
 
@@ -87,6 +90,6 @@ Do not paste passwords, recovery codes, tokens, private database contents or cus
 
 ## Release decision
 
-**Current decision: NOT APPROVED for public hosted SaaS or live-money use.** A local disposable-data release candidate can be considered only after the post-PR-82 main CI run is green and the Windows operator acceptance and restore drill are completed and recorded. Independent security and accessibility reviews remain separate gates.
+**Current decision: NOT APPROVED for public hosted SaaS or live-money use.** A local disposable-data release candidate can be considered only after the post-PR-83 main CI run is green and the Windows operator acceptance and restore drill are completed and recorded. Independent security and accessibility reviews remain separate gates.
 
 This checkpoint is an evidence log, not a security certification, deployment authorization, payment authorization or income guarantee.
