@@ -1,7 +1,7 @@
 # Current Release Checkpoint
 
-**Checkpoint date:** 2026-11-24
-**Audited code baseline:** `main` at PR #83 merge commit `4e94d330775658f8cbd6fdd9981933fae9d94746` (includes PRs #80–#83 and all previously merged workspace, finance, safety and AI-provider work)
+**Checkpoint date:** 2026-11-25
+**Audited code baseline:** `main` at PR #86 merge commit `425a1350131e898a5dfba8eb4c07f43db7f90401` (includes PRs #80–#86 and all previously merged workspace, finance, safety and AI-provider work)
 **State schema:** v30 (`LATEST_SCHEMA_VERSION = 30`)
 **Release candidate:** not approved. Post-merge main CI run [#45431715913](https://github.com/ay23-byte/Ai-earn/actions/runs/45431715913) for commit `4e94d330775658f8cbd6fdd9981933fae9d94746` is in progress; do not treat it as passed until all four Python/OS matrix jobs complete successfully.
 
@@ -30,10 +30,18 @@ It is not a hosted SaaS release, autonomous client-acquisition service, or incom
 - **PR #81 — premium AI workspace integration:** merged at `a08fddcd0e72827e505906cc3e9df32b99fc15c0`. Brings the AI workspace into the unified design, with local-provider and approval/safety status surfaces and reduced-motion support.
 - **PR #82 — unique customer activity dashboard targets:** merged at `c6608e5f7743d10ce5a4d6020126ae7e1eec0c16`. Separates the Customers and Analytics activity detail DOM targets and adds a regression test enforcing unique HTML IDs.
 
+- **PR #86 — direct Windows Phase 3 gate invocation fix:** merged at `425a1350131e898a5dfba8eb4c07f43db7f90401`. Adds repository-root import setup so both direct-script and module invocation work. PR CI passed.
+
+## Windows automated acceptance evidence (local, user-run)
+
+- On the pre-PR-86 baseline `b68da9f1fe2633811701a23138ccca09b77efb55`, the user ran `python -m tools.windows_phase3_gate` on Windows with Python 3.11.9: focused suite **809 passed, 4 allowed skips**; full discovery **1,076 passed, 49 skipped**; no failures/errors. Gate output: `WINDOWS PHASE 3 TESTS PASSED for this checkout; not Phase 3 completion or production approval.`
+- PR #86 fixes direct-script import resolution. The above local totals are not a rerun on the post-PR-86 merge commit. Re-run the gate on `425a1350131e898a5dfba8eb4c07f43db7f90401` to establish the exact current-main evidence.
+- This automated gate does not complete browser workflows, NVDA/manual accessibility, or backup/restore acceptance.
+
 ## Current CI evidence
 
 - PR #83 CI [run #45386467517](https://github.com/ay23-byte/Ai-earn/actions/runs/45386467517): all four Python 3.11/3.13 Ubuntu/Windows jobs passed. PR #83 merged at `4e94d330775658f8cbd6fdd9981933fae9d94746`.
-- Post-merge main CI [run #45431715913](https://github.com/ay23-byte/Ai-earn/actions/runs/45431715913) for PR #83 merge commit: all four jobs were still in progress when this checkpoint was updated. Recheck before release decisions.
+- PR #86 CI [run #45463535991](https://github.com/ay23-byte/Ai-earn/actions/runs/45463535991) passed. The PR #86 merge commit is `425a1350131e898a5dfba8eb4c07f43db7f90401`; recheck the post-merge `main` workflow run before release decisions.
 
 - PR #66 CI [run #44913475413](https://github.com/ay23-byte/Ai-earn/actions/runs/44913475413): passed Python 3.11 and 3.13 on Ubuntu and Windows.
 - PR #69 CI [run #44952173539](https://github.com/ay23-byte/Ai-earn/actions/runs/44952173539): passed all four Python/OS matrix jobs on the PR head. The separate post-merge `main` run remains tracked above.
