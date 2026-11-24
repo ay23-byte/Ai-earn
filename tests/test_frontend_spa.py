@@ -35,6 +35,38 @@ class FrontendSPAStructureTests(unittest.TestCase):
         self.assertIn('name="color-scheme"', html)
         self.assertIn('content="dark light"', html)
 
+    def test_ai_workspace_premium_hero_and_status_ids_are_unique(self):
+        html = APP_HTML.read_text(encoding="utf-8")
+        css = APP_CSS.read_text(encoding="utf-8")
+
+        self.assertIn("Your AI workspace.", html)
+        self.assertIn("Ideas into action.", html)
+        self.assertIn('class="ai-orbit-scene"', html)
+        self.assertIn('class="ai-status-grid"', html)
+        self.assertIn("Consequential actions require a separate approval decision.", html)
+
+        # These IDs are updated by app.js; duplicate IDs can silently target
+        # the wrong status card after the legacy rows are removed.
+        for element_id in (
+            "aiProviderStatus",
+            "aiProviderInfo",
+            "aiCount",
+            "aiStatus",
+            "emergencyState",
+            "emergencyStatus",
+        ):
+            with self.subTest(element_id=element_id):
+                self.assertEqual(
+                    len(re.findall(rf'id="{re.escape(element_id)}"', html)),
+                    1,
+                    f"{element_id} must appear exactly once",
+                )
+
+        self.assertIn(".ai-hero", css)
+        self.assertIn(".ai-orbit-scene", css)
+        self.assertIn(".ai-status-grid", css)
+        self.assertIn("@media (prefers-reduced-motion: reduce)", css)
+
     def test_ai_assistant_exposes_safe_local_provider_settings(self):
         html = APP_HTML.read_text(encoding="utf-8")
         js = APP_JS.read_text(encoding="utf-8")
