@@ -65,7 +65,7 @@ class FrontendSPAStructureTests(unittest.TestCase):
         self.assertIn(".ai-hero", css)
         self.assertIn(".ai-orbit-scene", css)
         self.assertIn(".ai-status-grid", css)
-        self.assertIn("@media (prefers-reduced-motion: reduce)", css)
+        self.assertRegex(css, r"@media\\s*\\(prefers-reduced-motion:\\s*reduce\\)")
 
     def test_ai_assistant_exposes_safe_local_provider_settings(self):
         html = APP_HTML.read_text(encoding="utf-8")
