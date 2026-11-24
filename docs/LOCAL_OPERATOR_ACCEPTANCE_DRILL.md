@@ -2,7 +2,7 @@
 
 **Purpose:** provide repeatable, human-run acceptance evidence for the supported Windows-local workflow. This is a test procedure, not a production approval. It must use a fresh disposable checkout and synthetic account only.
 
-**Baseline:** PR #83 merge commit `4e94d330775658f8cbd6fdd9981933fae9d94746` (includes PRs #80–#83: the unified premium workspace, integrated AI workspace, unique customer-activity dashboard targets, and refreshed release documentation), schema v30. Record the exact candidate commit used for the drill. This baseline update does not mean the human-run drill has been performed. The optional local Ollama provider is not required for core acceptance; if exercised, use a local model and synthetic prompt data only.
+**Baseline:** PR #86 merge commit `425a1350131e898a5dfba8eb4c07f43db7f90401` (includes PRs #80–#86: the unified premium workspace, integrated AI workspace, unique customer-activity dashboard targets, and refreshed release documentation), schema v30. Record the exact candidate commit used for the drill. This baseline update does not mean the human-run drill has been performed. The Windows Phase 3 automated gate was run by the user on pre-PR-86 commit `b68da9f1fe2633811701a23138ccca09b77efb55`: 809 focused tests passed with 4 allowed skips, and 1,076 full-suite tests passed with 49 skips. PR #86 subsequently fixed direct-script import setup; rerun the gate on the current baseline to record current-main evidence. The optional local Ollama provider is not required for core acceptance; if exercised, use a local model and synthetic prompt data only.
 
 ## Safety rules
 
