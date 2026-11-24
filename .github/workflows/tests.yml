@@ -67,6 +67,20 @@ jobs:
           fi
           git diff --check
 
+      - name: Automated accessibility audit (axe-core + jsdom)
+        if: runner.os == 'Linux' && matrix.python-version == '3.13'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run axe-core WCAG structure audit
+        if: runner.os == 'Linux' && matrix.python-version == '3.13'
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/axe-audit"
+          npm install --prefix "$RUNNER_TEMP/axe-audit" --no-audit --no-fund axe-core jsdom
+          AXE_HOME="$RUNNER_TEMP/axe-audit" node --experimental-vm-modules tools/accessibility_audit.mjs dashboard/index.html dashboard/app.html dashboard/connected.html
+
       - name: Dependency security check (truthful audit, stdlib only)
         shell: bash
         run: |
@@ -82,6 +96,7 @@ jobs:
           python -c "from ai_earn.production_config import production_summary; import json, os; print(json.dumps(production_summary(), indent=2))" || true
 
       - name: Run unit tests
+        if: runner.os != 'Windows' || matrix.python-version != '3.13'
         shell: bash
         run: |
           set -o pipefail
@@ -93,6 +108,11 @@ jobs:
             echo "===== END TAIL ====="
           fi
           exit $status
+
+      - name: Strict Windows Phase 3 acceptance gate
+        if: runner.os == 'Windows' && matrix.python-version == '3.13'
+        shell: pwsh
+        run: python -m tools.windows_phase3_gate
 
       - name: Upload test log on failure
         if: failure() && hashFiles('unittest.log') != ''
