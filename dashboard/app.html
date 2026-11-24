@@ -212,15 +212,26 @@
 
     <!-- AI Assistant -->
     <section class="view" id="view-ai-assistant" data-view="ai-assistant" aria-labelledby="h-ai-assistant" hidden>
-      <div class="panel">
-        <h2 id="h-ai-assistant">AI Assistant — controlled autonomy</h2>
-        <div class="rows">
-          <div class="row"><div><b>Provider</b><small id="aiProviderInfo">Sign in to inspect local provider</small></div><strong id="aiProviderStatus">—</strong></div>
-          <div class="row"><div><b>Pending approvals</b><small id="aiStatus">Owner-scoped approval queue</small></div><strong id="aiCount">—</strong></div>
-          <div class="row"><div><b>Emergency stop</b><small id="emergencyStatus">Safety control</small></div><strong id="emergencyState">—</strong></div>
+      <div class="ai-hero">
+        <div class="ai-hero-copy">
+          <div class="ai-kicker"><span class="ai-live-dot"></span> EARN OS INTELLIGENCE</div>
+          <h2 id="h-ai-assistant">Your AI workspace.<br><span>Ideas into action.</span></h2>
+          <p>Draft, analyze and prepare work with your local AI. You stay in control of every consequential action.</p>
+          <div class="ai-hero-tags"><span>PRIVATE BY DEFAULT</span><span>HUMAN APPROVAL</span><span>LOCAL INFERENCE</span></div>
         </div>
-        <div class="ai-safety-note">AI output is draft-only and unverified. Consequential actions require a separate approval decision. Approving an item records consent; it does not send, publish, purchase, refund, delete, or modify external systems.</div>
+        <div class="ai-orbit-scene" aria-hidden="true">
+          <div class="ai-orbit ai-orbit-one"></div><div class="ai-orbit ai-orbit-two"></div>
+          <div class="ai-orbit ai-orbit-three"></div><div class="ai-core"><span>AI</span></div>
+          <i class="ai-orbit-node node-one"></i><i class="ai-orbit-node node-two"></i><i class="ai-orbit-node node-three"></i>
+        </div>
+        <div class="ai-hero-glow"></div>
       </div>
+      <div class="ai-status-grid">
+        <article class="ai-status-card"><span class="ai-status-icon">◈</span><div><small>ACTIVE PROVIDER</small><strong id="aiProviderStatus">—</strong><span id="aiProviderInfo">Sign in to inspect local provider</span></div></article>
+        <article class="ai-status-card"><span class="ai-status-icon">⌁</span><div><small>APPROVAL QUEUE</small><strong id="aiCount">—</strong><span id="aiStatus">Owner-scoped approval queue</span></div></article>
+        <article class="ai-status-card ai-safety-card"><span class="ai-status-icon">⛨</span><div><small>SAFETY SYSTEM</small><strong id="emergencyState">—</strong><span id="emergencyStatus">Safety control</span></div></article>
+      </div>
+      <div class="ai-safety-note">AI output is draft-only and unverified. Consequential actions require a separate approval decision. Approving an item records consent; it does not send, publish, purchase, refund, delete, or modify external systems.</div>
       <div class="panel ai-panel">
         <h3>Local AI provider</h3>
         <p class="muted">Use the built-in stub or a model served by Ollama on this computer. Remote AI providers remain disabled.</p>
