@@ -3,7 +3,7 @@
 **Checkpoint date:** 2026-11-25
 **Audited code baseline:** `main` at PR #86 merge commit `425a1350131e898a5dfba8eb4c07f43db7f90401` (includes PRs #80–#86 and all previously merged workspace, finance, safety and AI-provider work)
 **State schema:** v30 (`LATEST_SCHEMA_VERSION = 30`)
-**Release candidate:** not approved. Post-merge main CI run [#45431715913](https://github.com/ay23-byte/Ai-earn/actions/runs/45431715913) for commit `4e94d330775658f8cbd6fdd9981933fae9d94746` is in progress; do not treat it as passed until all four Python/OS matrix jobs complete successfully.
+**Release candidate:** not approved. PR #86 CI run [#45463535991](https://github.com/ay23-byte/Ai-earn/actions/runs/45463535991) passed. The post-merge `main` workflow result for `425a1350131e898a5dfba8eb4c07f43db7f90401` has not been verified in this checkpoint; confirm all four Python/OS matrix jobs before release decisions.
 
 ## Product boundary
 
