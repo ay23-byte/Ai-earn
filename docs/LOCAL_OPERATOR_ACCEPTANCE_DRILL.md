@@ -2,7 +2,7 @@
 
 **Purpose:** provide repeatable, human-run acceptance evidence for the supported Windows-local workflow. This is a test procedure, not a production approval. It must use a fresh disposable checkout and synthetic account only.
 
-**Baseline:** PR #74 merge commit `2d73d1c0e9d975886492fa835d943cd5d1351731` (includes PR #73 and the previously merged workspace, finance and safety increments), schema v30. Record the exact candidate commit used for the drill. This baseline update does not mean the human-run drill has been performed. The optional local Ollama provider is not required for core acceptance; if exercised, use a local model and synthetic prompt data only.
+**Baseline:** PR #83 merge commit `4e94d330775658f8cbd6fdd9981933fae9d94746` (includes PRs #80–#83: the unified premium workspace, integrated AI workspace, unique customer-activity dashboard targets, and refreshed release documentation), schema v30. Record the exact candidate commit used for the drill. This baseline update does not mean the human-run drill has been performed. The optional local Ollama provider is not required for core acceptance; if exercised, use a local model and synthetic prompt data only.
 
 ## Safety rules
 
