@@ -31,7 +31,7 @@ class FrontendSPAStructureTests(unittest.TestCase):
 
     def test_html_element_ids_are_unique_and_customer_activity_targets_are_separate(self):
         html = APP_HTML.read_text(encoding="utf-8")
-        ids = re.findall(r'\\bid="([^"]+)"', html)
+        ids = re.findall(r'id="([^"]+)"', html)
         duplicates = sorted({element_id for element_id in ids if ids.count(element_id) > 1})
         self.assertEqual(duplicates, [], f"duplicate HTML element IDs: {duplicates}")
         self.assertIn('id="customerActivityDetail"', html)
