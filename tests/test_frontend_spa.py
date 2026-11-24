@@ -29,6 +29,16 @@ class FrontendSPAStructureTests(unittest.TestCase):
         for p in (APP_HTML, APP_JS, APP_CSS, INDEX_HTML):
             self.assertTrue(p.exists(), f"missing {p.name}")
 
+    def test_html_element_ids_are_unique_and_customer_activity_targets_are_separate(self):
+        html = APP_HTML.read_text(encoding="utf-8")
+        ids = re.findall(r'id="([^"]+)"', html)
+        duplicates = sorted({element_id for element_id in ids if ids.count(element_id) > 1})
+        self.assertEqual(duplicates, [], f"duplicate HTML element IDs: {duplicates}")
+        self.assertIn('id="customerActivityDetail"', html)
+        self.assertIn('id="analyticsCustomerActivityDetail"', html)
+        js = APP_JS.read_text(encoding="utf-8")
+        self.assertIn('const caEl2=$("analyticsCustomerActivityDetail")', js)
+
     def test_html_has_viewport_and_color_scheme(self):
         html = APP_HTML.read_text(encoding="utf-8")
         self.assertIn('name="viewport"', html)

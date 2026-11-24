@@ -371,7 +371,7 @@ function render(snapshot, source){
       if(oppF.empty_state) oppEl2.innerHTML='<div class="empty">Empty — no opportunities.</div>';
       else oppEl2.innerHTML = Object.entries(oppF.by_status||{}).map(([k,v])=>'<div class="row"><div><b>'+escapeHtml(k)+'</b></div><strong>'+count(v)+'</strong></div>').join("");
     }
-    const caEl2=$("customerActivityDetail");
+    const caEl2=$("analyticsCustomerActivityDetail");
     if(caEl2){
       const ca=rev.customer_activity;
       if(ca.empty_state) caEl2.innerHTML='<div class="empty">Empty — no customers.</div>';
