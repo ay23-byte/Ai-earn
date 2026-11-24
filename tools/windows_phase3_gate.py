@@ -12,6 +12,10 @@ import unittest
 
 
 _ROOT = Path(__file__).resolve().parent.parent
+# Direct execution sets sys.path[0] to tools/, so add the repository root.
+# This supports both `python tools/windows_phase3_gate.py` and `python -m tools.windows_phase3_gate`.
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 _FOCUS = (
     "tests.test_windows_security",
     "tests.test_windows_auth",
