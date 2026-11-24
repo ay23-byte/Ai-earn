@@ -1,7 +1,7 @@
 # Current Release Checkpoint
 
-**Checkpoint date:** 2026-11-22
-**Audited code baseline:** `main` at PR #74 merge commit `2d73d1c0e9d975886492fa835d943cd5d1351731` (includes PRs #73 and #74, plus the previously merged workspace, finance and safety work)
+**Checkpoint date:** 2026-11-24
+**Audited code baseline:** `main` at PR #82 merge commit `c6608e5f7743d10ce5a4d6020126ae7e1eec0c16` (includes PRs #80, #81 and #82, plus all previously merged workspace, finance, safety and AI-provider work)
 **State schema:** v30 (`LATEST_SCHEMA_VERSION = 30`)
 **Release candidate:** not approved. Post-merge main CI run [#45001045311](https://github.com/ay23-byte/Ai-earn/actions/runs/45001045311) for the PR #74 merge commit was in progress when this checkpoint was prepared; do not treat it as passed until all four Python/OS matrix jobs complete successfully.
 
@@ -24,6 +24,12 @@ It is not a hosted SaaS release, autonomous client-acquisition service, or incom
 - **PR #73 — release and architecture documentation refresh:** merged at `a7d178385e93798d5c54d94f5ba7fe5f8df7f9d2`. Updates the schema-v30 release baseline and clarifies that human acceptance and release gates remain open.
 - **PR #74 — local Ollama draft provider:** merged at `2d73d1c0e9d975886492fa835d943cd5d1351731`. Adds authenticated owner-scoped local Ollama model configuration and draft inference, loopback-only HTTP endpoint validation, bounded non-streaming requests/responses, usage accounting, dashboard controls and tests. Model output remains `draft_unverified`; hosted providers and consequential actions remain disabled.
 
+## Recent merged increments (continued)
+
+- **PR #80 — unified premium workspace design system:** merged at `c975f0d190ff60050746342960a7ac656237e264`. Establishes the shared responsive Earn OS visual system and removes the legacy dashboard entry point.
+- **PR #81 — premium AI workspace integration:** merged at `a08fddcd0e72827e505906cc3e9df32b99fc15c0`. Brings the AI workspace into the unified design, with local-provider and approval/safety status surfaces and reduced-motion support.
+- **PR #82 — unique customer activity dashboard targets:** merged at `c6608e5f7743d10ce5a4d6020126ae7e1eec0c16`. Separates the Customers and Analytics activity detail DOM targets and adds a regression test enforcing unique HTML IDs.
+
 ## Current CI evidence
 
 - PR #66 CI [run #44913475413](https://github.com/ay23-byte/Ai-earn/actions/runs/44913475413): passed Python 3.11 and 3.13 on Ubuntu and Windows.
@@ -32,6 +38,10 @@ It is not a hosted SaaS release, autonomous client-acquisition service, or incom
 - Main post-merge CI [run #44956929296](https://github.com/ay23-byte/Ai-earn/actions/runs/44956929296) for commit `b4e10769f3b6d7c19eb10ab6f2c32466da0e4c52`: all four jobs passed (Python 3.11 and 3.13 on Ubuntu and Windows); this is historical evidence for the pre-Ollama baseline.
 - PR #73 CI [run #44960154577](https://github.com/ay23-byte/Ai-earn/actions/runs/44960154577): passed on the documentation PR head.
 - PR #74 CI [run #44999251252](https://github.com/ay23-byte/Ai-earn/actions/runs/44999251252): completed successfully on the PR head. Post-merge main CI [run #45001045311](https://github.com/ay23-byte/Ai-earn/actions/runs/45001045311) was still in progress at checkpoint time; verify its final result before treating main as green.
+
+- PR #80 CI [run #45365872926](https://github.com/ay23-byte/Ai-earn/actions/runs/45365872926): all four Python/OS jobs passed.
+- PR #81 CI [run #45367558167](https://github.com/ay23-byte/Ai-earn/actions/runs/45367558167): passed on the final PR head; post-merge main run [#45373077647](https://github.com/ay23-byte/Ai-earn/actions/runs/45373077647) passed all four jobs.
+- PR #82 CI [run #45373359302](https://github.com/ay23-byte/Ai-earn/actions/runs/45373359302): passed all four Python/OS jobs. Post-merge main run [#45385488604](https://github.com/ay23-byte/Ai-earn/actions/runs/45385488604) is the current check for commit `c6608e5f7743d10ce5a4d6020126ae7e1eec0c16`; its Ubuntu jobs passed and Windows jobs were still running when this checkpoint update was prepared. Recheck before release decisions.
 
 Required matrix: Python 3.11 and 3.13 on Ubuntu and Windows, including lint/type/compile/security/health checks and the unit suite. Record exact results, skips and commit SHA after completion.
 
@@ -77,6 +87,6 @@ Do not paste passwords, recovery codes, tokens, private database contents or cus
 
 ## Release decision
 
-**Current decision: NOT APPROVED for public hosted SaaS or live-money use.** A local disposable-data release candidate can be considered only after the post-PR-74 main CI run is green and the Windows operator acceptance and restore drill are completed and recorded. Independent security and accessibility reviews remain separate gates.
+**Current decision: NOT APPROVED for public hosted SaaS or live-money use.** A local disposable-data release candidate can be considered only after the post-PR-82 main CI run is green and the Windows operator acceptance and restore drill are completed and recorded. Independent security and accessibility reviews remain separate gates.
 
 This checkpoint is an evidence log, not a security certification, deployment authorization, payment authorization or income guarantee.
