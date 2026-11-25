@@ -41,7 +41,7 @@ class FrontendSPAStructureTests(unittest.TestCase):
 
     def test_login_form_fails_closed_without_javascript_and_never_uses_get(self):
         html = APP_HTML.read_text(encoding="utf-8")
-        form = re.search(r'<form\\b[^>]*id="loginForm"[^>]*>', html)
+        form = re.search(r'<form\b[^>]*id="loginForm"[^>]*>', html)
         self.assertIsNotNone(form, "login form must exist")
         markup = form.group(0)
         self.assertIn('method="post"', markup)
