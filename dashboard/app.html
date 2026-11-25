@@ -24,7 +24,7 @@
   </div>
   <div class="header-actions">
     <span id="signedInAs" class="muted" aria-live="polite"></span>
-    <form id="loginForm" class="auth-form" method="post" action="/api/v1/auth/login" autocomplete="on" onsubmit="return false;">
+    <form id="loginForm" class="auth-form" method="post" action="/api/v1/auth/login" autocomplete="on">
       <label class="sr-only" for="loginUsername">Username</label><input id="loginUsername" name="username" autocomplete="username" maxlength="32" placeholder="Username" required>
       <label class="sr-only" for="loginPassword">Password</label><input id="loginPassword" name="password" type="password" autocomplete="current-password" placeholder="Password" required>
       <button class="button" type="submit">Sign in</button><span id="loginMessage" class="muted" role="status"></span>
