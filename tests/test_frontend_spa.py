@@ -39,6 +39,17 @@ class FrontendSPAStructureTests(unittest.TestCase):
         js = APP_JS.read_text(encoding="utf-8")
         self.assertIn('const caEl2=$("analyticsCustomerActivityDetail")', js)
 
+    def test_sign_in_handler_is_bound_before_startup_api_probes(self):
+        js = APP_JS.read_text(encoding="utf-8")
+        init_start = js.index("async function initLocalApi(){")
+        handler = js.index('if(form) form.addEventListener("submit", async e=>{', init_start)
+        startup_probe = js.index('const csrf=await apiJson("/api/v1/csrf")', init_start)
+        self.assertLess(
+            handler,
+            startup_probe,
+            "Sign-in must be clickable even if startup CSRF/session requests stall.",
+        )
+
     def test_html_has_viewport_and_color_scheme(self):
         html = APP_HTML.read_text(encoding="utf-8")
         self.assertIn('name="viewport"', html)

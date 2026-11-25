@@ -887,20 +887,8 @@ function initAiWorkspace(){
 
 async function initLocalApi(){
   const form=$("loginForm"), logout=$("logoutButton"), user=$("signedInAs");
-  try{
-    const csrf=await apiJson("/api/v1/csrf"); apiState.csrf=csrf.csrf_token;
-    const me=await apiJson("/api/v1/me"); apiState.account=me.account;
-    if(form) form.hidden=true; if(logout) logout.hidden=false;
-    if(user) user.textContent="Signed in: "+(me.account.display_name||me.account.username);
-    await refreshLiveDashboard();
-    await refreshLiveResources();
-    await refreshAiWorkspace(false);
-    apiState.timer=window.setInterval(()=>{ if(document.visibilityState==="visible" && apiState.account){ refreshLiveDashboard(false); refreshAiWorkspace(false); } },30000);
-  }catch(_){
-    if(form) form.hidden=false; if(logout) logout.hidden=true; if(user) user.textContent="";
-    const status=$("snapshotStatus");
-    if(status && !currentSnapshot){ status.textContent="Sign in to load live data from your local database. Offline snapshots are optional."; status.className="status"; }
-  }
+  // Bind the sign-in handler synchronously. Do not wait for startup CSRF/session
+  // probes: a slow or stalled backend must not leave the visible button inert.
   if(form) form.addEventListener("submit", async e=>{
     e.preventDefault();
     const username=$("loginUsername"), password=$("loginPassword"), message=$("loginMessage");
@@ -916,6 +904,20 @@ async function initLocalApi(){
       apiState.timer=window.setInterval(()=>{ if(document.visibilityState==="visible" && apiState.account){ refreshLiveDashboard(false); refreshAiWorkspace(false); } },30000);
     }catch(err){ if(message) message.textContent=err.message; }
   });
+  try{
+    const csrf=await apiJson("/api/v1/csrf"); apiState.csrf=csrf.csrf_token;
+    const me=await apiJson("/api/v1/me"); apiState.account=me.account;
+    if(form) form.hidden=true; if(logout) logout.hidden=false;
+    if(user) user.textContent="Signed in: "+(me.account.display_name||me.account.username);
+    await refreshLiveDashboard();
+    await refreshLiveResources();
+    await refreshAiWorkspace(false);
+    apiState.timer=window.setInterval(()=>{ if(document.visibilityState==="visible" && apiState.account){ refreshLiveDashboard(false); refreshAiWorkspace(false); } },30000);
+  }catch(_){
+    if(form) form.hidden=false; if(logout) logout.hidden=true; if(user) user.textContent="";
+    const status=$("snapshotStatus");
+    if(status && !currentSnapshot){ status.textContent="Sign in to load live data from your local database. Offline snapshots are optional."; status.className="status"; }
+  }
   if(logout) logout.addEventListener("click",async()=>{
     try{ await apiJson("/api/v1/auth/logout",{method:"POST",headers:{"Content-Type":"application/json","X-CSRF-Token":apiState.csrf},body:"{}"}); }
     catch(_){ showToast("Could not confirm sign out. The local session may still be active.","error"); return; }
