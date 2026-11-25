@@ -39,6 +39,17 @@ class FrontendSPAStructureTests(unittest.TestCase):
         js = APP_JS.read_text(encoding="utf-8")
         self.assertIn('const caEl2=$("analyticsCustomerActivityDetail")', js)
 
+    def test_login_form_fails_closed_without_javascript_and_never_uses_get(self):
+        html = APP_HTML.read_text(encoding="utf-8")
+        form = re.search(r'<form\b[^>]*id="loginForm"[^>]*>', html)
+        self.assertIsNotNone(form, "login form must exist")
+        markup = form.group(0)
+        self.assertIn('method="post"', markup)
+        self.assertIn('action="/api/v1/auth/login"', markup)
+        # The inline cancellation is a fail-closed guard if app.js fails to load:
+        # browser-native form submission must never serialize credentials into the URL.
+        self.assertIn('onsubmit="return false;"', markup)
+
     def test_sign_in_handler_is_bound_before_startup_api_probes(self):
         js = APP_JS.read_text(encoding="utf-8")
         init_start = js.index("async function initLocalApi(){")
@@ -49,6 +60,11 @@ class FrontendSPAStructureTests(unittest.TestCase):
             startup_probe,
             "Sign-in must be clickable even if startup CSRF/session requests stall.",
         )
+        handler_body = js[handler:startup_probe]
+        self.assertIn("e.preventDefault()", handler_body)
+        self.assertIn('"/api/v1/auth/login"', handler_body)
+        self.assertIn('method:"POST"', handler_body)
+        self.assertIn("JSON.stringify({username:", handler_body)
 
     def test_html_has_viewport_and_color_scheme(self):
         html = APP_HTML.read_text(encoding="utf-8")
