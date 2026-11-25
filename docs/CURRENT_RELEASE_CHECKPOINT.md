@@ -1,9 +1,9 @@
 # Current Release Checkpoint
 
 **Checkpoint date:** 2026-11-25
-**Audited code baseline:** `main` at PR #86 merge commit `425a1350131e898a5dfba8eb4c07f43db7f90401` (includes PRs #80–#86 and all previously merged workspace, finance, safety and AI-provider work)
+**Audited code baseline:** `main` at PR #87 merge commit `fff4a6a13a07eddd52190ce9959748ce429c39ef` (includes PRs #80–#87 and all previously merged workspace, finance, safety and AI-provider work)
 **State schema:** v30 (`LATEST_SCHEMA_VERSION = 30`)
-**Release candidate:** not approved. PR #86 CI run [#45463535991](https://github.com/ay23-byte/Ai-earn/actions/runs/45463535991) passed. The post-merge `main` workflow result for `425a1350131e898a5dfba8eb4c07f43db7f90401` has not been verified in this checkpoint; confirm all four Python/OS matrix jobs before release decisions.
+**Release candidate:** not approved. PR #87 is merged at `fff4a6a13a07eddd52190ce9959748ce429c39ef`. The user-run Windows Phase 3 gate passed on this exact commit: 809 focused tests passed (4 allowed skips) and 1,076 full-suite tests passed (49 skips), with no failures. This is local test evidence, not human dashboard acceptance or production approval.
 
 ## Product boundary
 
@@ -34,12 +34,15 @@ It is not a hosted SaaS release, autonomous client-acquisition service, or incom
 
 ## Windows automated acceptance evidence (local, user-run)
 
-- On the pre-PR-86 baseline `b68da9f1fe2633811701a23138ccca09b77efb55`, the user ran `python -m tools.windows_phase3_gate` on Windows with Python 3.11.9: focused suite **809 passed, 4 allowed skips**; full discovery **1,076 passed, 49 skipped**; no failures/errors. Gate output: `WINDOWS PHASE 3 TESTS PASSED for this checkout; not Phase 3 completion or production approval.`
-- PR #86 fixes direct-script import resolution. The above local totals are not a rerun on the post-PR-86 merge commit. Re-run the gate on `425a1350131e898a5dfba8eb4c07f43db7f90401` to establish the exact current-main evidence.
+- On `main` commit `fff4a6a13a07eddd52190ce9959748ce429c39ef` (after PRs #86 and #87), the user ran `python tools/windows_phase3_gate.py` on Windows with Python 3.11.9.
+- Focused Windows and Phase 3 suite: **809 passed, 4 allowed skips**, 0 failures/errors (1,006.815 seconds). The four skips are POSIX-only symlink/hardlink tests.
+- Full discovery: **1,076 passed, 49 skipped**, 0 failures/errors (1,767.938 seconds). The skipped tests include platform-specific auth/permission/terminal cases and optional PostgreSQL integration tests; they are not failures.
+- Final gate output: `WINDOWS PHASE 3 TESTS PASSED for this checkout; not Phase 3 completion or production approval.`
 - This automated gate does not complete browser workflows, NVDA/manual accessibility, or backup/restore acceptance.
 
 ## Current CI evidence
 
+- PR #87 is merged at `fff4a6a13a07eddd52190ce9959748ce429c39ef`; its local Windows Phase 3 gate passed as recorded above. PR CI and local acceptance are distinct evidence.
 - PR #83 CI [run #45386467517](https://github.com/ay23-byte/Ai-earn/actions/runs/45386467517): all four Python 3.11/3.13 Ubuntu/Windows jobs passed. PR #83 merged at `4e94d330775658f8cbd6fdd9981933fae9d94746`.
 - PR #86 CI [run #45463535991](https://github.com/ay23-byte/Ai-earn/actions/runs/45463535991) passed. The PR #86 merge commit is `425a1350131e898a5dfba8eb4c07f43db7f90401`; recheck the post-merge `main` workflow run before release decisions.
 
