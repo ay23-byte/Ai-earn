@@ -60,6 +60,11 @@ class FrontendSPAStructureTests(unittest.TestCase):
             startup_probe,
             "Sign-in must be clickable even if startup CSRF/session requests stall.",
         )
+        handler_body = js[handler:startup_probe]
+        self.assertIn("e.preventDefault()", handler_body)
+        self.assertIn('"/api/v1/auth/login"', handler_body)
+        self.assertIn('method:"POST"', handler_body)
+        self.assertIn("JSON.stringify({username:", handler_body)
 
     def test_html_has_viewport_and_color_scheme(self):
         html = APP_HTML.read_text(encoding="utf-8")
